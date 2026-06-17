@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "env": {
+    "SUPABASE_URL": "@supabase_url",
+    "SUPABASE_ANON_KEY": "@supabase_anon_key",
+    "ANTHROPIC_API_KEY": "@anthropic_api_key",
+    "META_ACCESS_TOKEN": "@meta_access_token",
+    "META_PHONE_NUMBER_ID": "@meta_phone_number_id",
+    "WHATSAPP_BUSINESS_ACCOUNT_ID": "@whatsapp_business_account_id",
+    "WEBHOOK_VERIFY_TOKEN": "@webhook_verify_token",
+    "BIGIN_REFRESH_TOKEN": "@bigin_refresh_token",
+    "BIGIN_CLIENT_ID": "@bigin_client_id",
+    "BIGIN_CLIENT_SECRET": "@bigin_client_secret"
+  }
+}
