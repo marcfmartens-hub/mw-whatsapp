@@ -1,6 +1,6 @@
 import type { Conversation } from "./supabase";
 
-const BIGIN_CONTACTS_URL = "https://www.biginapp.com/bigin/v1/Contacts";
+const BIGIN_CONTACTS_URL = "https://www.zohoapis.com/bigin/v1/Contacts";
 const ZOHO_TOKEN_URL = "https://accounts.zoho.com/oauth/v2/token";
 
 async function getAccessToken(): Promise<string> {
