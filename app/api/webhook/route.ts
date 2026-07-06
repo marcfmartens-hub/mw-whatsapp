@@ -102,8 +102,7 @@ export async function POST(req: NextRequest) {
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
-      const freshConversation = await getOrCreateConversation(phone);
-      const resetReply = await getKayaReply(0, [], "");
+      const resetReply = await getKayaReply(0, [], "hi", {});
       await sendWhatsAppMessage(phone, resetReply);
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
@@ -125,17 +124,25 @@ export async function POST(req: NextRequest) {
       (updates as any)[fieldToSave] = messageText;
     }
 
-    // Extract structured fields from free-text answers
+    // Extract structured fields — stored separately; skip silently if DB columns missing
     if (fieldToSave === "car" && messageText) {
-      const { make, model, year } = await extractCarFields(messageText);
-      updates.make = make || null;
-      updates.model = model || null;
-      updates.year = year || null;
+      try {
+        const { make, model, year } = await extractCarFields(messageText);
+        updates.make = make || null;
+        updates.model = model || null;
+        updates.year = year || null;
+      } catch (e) {
+        console.error("extractCarFields error:", e);
+      }
     }
     if (fieldToSave === "mileage" && messageText) {
-      const { mileage, specs } = await extractMileageSpec(messageText);
-      updates.mileage = mileage || null;
-      updates.specs = specs || null;
+      try {
+        const { mileage, specs } = await extractMileageSpec(messageText);
+        updates.mileage = mileage || null;
+        updates.specs = specs || null;
+      } catch (e) {
+        console.error("extractMileageSpec error:", e);
+      }
     }
 
     // Merge pending updates into conversation so Kaya sees the latest data
