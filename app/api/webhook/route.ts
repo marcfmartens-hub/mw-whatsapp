@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateConversation, updateConversation, Conversation } from "@/lib/supabase";
+import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
 import { getKayaReply } from "@/lib/claude";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 
 export const dynamic = "force-dynamic";
+
+const RESET_KEYWORD = "reset chat 007";
 
 // ---- GET: Meta webhook verification ----
 export async function GET(req: NextRequest) {
@@ -30,14 +32,13 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   1: "name",
   2: "phone_number",
   3: "car",
-  4: "mileage",
-  5: "gcc_spec",
-  6: "loan",
-  7: "appointment",
+  4: "mileage_and_spec",
+  5: "loan",
+  6: "appointment",
 };
 
-const FINAL_STEP = 7;
-const CLOSING_STEP = 8;
+const FINAL_STEP = 6;
+const CLOSING_STEP = 7;
 
 interface IncomingMessage {
   from: string;
@@ -98,6 +99,16 @@ export async function POST(req: NextRequest) {
     const phone = message.from;
     const messageText = message.text?.body?.trim() ?? "";
 
+    // ── Reset trigger ──────────────────────────────────────────────
+    if (messageText.toLowerCase() === RESET_KEYWORD) {
+      await resetConversation(phone);
+      const freshConversation = await getOrCreateConversation(phone);
+      const resetReply = await getKayaReply(0, [], "");
+      await sendWhatsAppMessage(phone, resetReply);
+      return NextResponse.json({ status: "reset" }, { status: 200 });
+    }
+    // ──────────────────────────────────────────────────────────────
+
     const conversation = await getOrCreateConversation(phone);
 
     // Deduplicate retried/duplicate webhook deliveries.
@@ -114,7 +125,7 @@ export async function POST(req: NextRequest) {
       (updates as any)[fieldToSave] = messageText;
     }
 
-    const reply = await getKayaReply(currentStep, messageText);
+    const reply = await getKayaReply(currentStep, [], messageText);
 
     await sendWhatsAppMessage(phone, reply);
 
@@ -130,7 +141,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (error) {
     console.error("Webhook POST error:", error);
-    // Always 200 so Meta doesn't retry-storm us; the error is logged for investigation.
     return NextResponse.json({ status: "error" }, { status: 200 });
   }
 }
