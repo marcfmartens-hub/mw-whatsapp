@@ -14,14 +14,16 @@ export interface Conversation {
   step: number;
   name: string | null;
   phone_number: string | null;
-  car: string | null;       // raw answer from customer
+  car: string | null;
   make: string | null;
   model: string | null;
   year: string | null;
-  mileage: string | null;   // number only, e.g. "50000"
-  specs: string | null;     // "GCC", "Non-GCC", or "Unknown"
+  mileage: string | null;
+  specs: string | null;
   loan: string | null;
   appointment: string | null;
+  appointment_date: string | null;
+  appointment_time: string | null;
   last_msg_id: string | null;
 }
 
@@ -107,6 +109,6 @@ export async function resetConversation(phone: string): Promise<void> {
   // DB migration hasn't been run; fail silently so reset still works.
   await supabase
     .from(TABLE)
-    .update({ make: null, model: null, year: null, specs: null })
+    .update({ make: null, model: null, year: null, specs: null, appointment_date: null, appointment_time: null })
     .eq("phone", phone);
 }

@@ -50,6 +50,7 @@ export async function createBiginContact(conversation: Conversation): Promise<vo
           First_Name: firstName,
           Last_Name: lastName,
           Phone: conversation.phone_number || conversation.phone,
+          Lead_Source: "Whatsapp Bot",
           Description: [
             `Make: ${conversation.make || "N/A"}`,
             `Model: ${conversation.model || "N/A"}`,
@@ -57,7 +58,8 @@ export async function createBiginContact(conversation: Conversation): Promise<vo
             `Mileage: ${conversation.mileage ? `${conversation.mileage} km` : "N/A"}`,
             `Specs: ${conversation.specs || "N/A"}`,
             `Loan on car: ${conversation.loan || "N/A"}`,
-            `Appointment: ${conversation.appointment || "N/A"}`,
+            `Appointment Date: ${conversation.appointment_date || "N/A"}`,
+            `Appointment Time: ${conversation.appointment_time || "N/A"}`,
           ].join("\n"),
         },
       ],

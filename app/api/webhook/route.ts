@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
-import { getKayaReply, extractVehicleInfo, VehicleFields } from "@/lib/claude";
+import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields } from "@/lib/claude";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 
@@ -141,8 +141,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Appointment date/time extraction (step 5 = appointment answer) ──
+    if (fieldToSave === "appointment" && messageText) {
+      try {
+        const appt = await extractAppointment(messageText);
+        const apptUpdates: Partial<Conversation> = {};
+        if (appt.appointment_date) apptUpdates.appointment_date = appt.appointment_date;
+        if (appt.appointment_time) apptUpdates.appointment_time = appt.appointment_time;
+        if (Object.keys(apptUpdates).length > 0) {
+          await updateConversation(phone, apptUpdates);
+        }
+      } catch (e) {
+        console.error("appointmentUpdates save error (non-fatal):", e);
+      }
+    }
+
     if (currentStep === FINAL_STEP) {
-      await createBiginContact({ ...updatedConversation, ...vehicleUpdates } as Conversation);
+      // Re-fetch latest state so Bigin gets all extracted fields (make/model/year/specs/appointment_date/appointment_time)
+      const { getConversation } = await import("@/lib/supabase");
+      const latestConv = await getConversation(phone);
+      await createBiginContact((latestConv ?? updatedConversation) as Conversation);
     }
 
     return NextResponse.json({ status: "ok" }, { status: 200 });

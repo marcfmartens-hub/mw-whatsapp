@@ -140,6 +140,42 @@ export async function getKayaReply(
   }
 }
 
+// ─── Appointment extractor ────────────────────────────────────────────────────
+
+/**
+ * Parses a free-text appointment message into a separate date and time string.
+ * Returns empty strings if not found.
+ */
+export async function extractAppointment(
+  text: string
+): Promise<{ appointment_date: string; appointment_time: string }> {
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 60,
+      system: `Extract an appointment date and time from a WhatsApp message.
+Return ONLY a JSON object with keys "appointment_date" and "appointment_time".
+- "appointment_date": day/date as written (e.g. "Monday", "Tomorrow", "July 10", "Sunday"). Use "" if not found.
+- "appointment_time": time as written (e.g. "3pm", "11:00 AM", "morning", "afternoon"). Use "" if not found.
+Examples:
+"Tomorrow at 3pm"       → {"appointment_date":"Tomorrow","appointment_time":"3pm"}
+"Monday morning"        → {"appointment_date":"Monday","appointment_time":"morning"}
+"Sunday 2pm"            → {"appointment_date":"Sunday","appointment_time":"2pm"}
+"Friday at 11am"        → {"appointment_date":"Friday","appointment_time":"11am"}
+"anytime this week"     → {"appointment_date":"This week","appointment_time":""}`,
+      messages: [{ role: "user", content: text }],
+    });
+    const block = response.content.find((b) => b.type === "text");
+    if (block?.type === "text") {
+      const match = block.text.match(/\{[^}]*\}/);
+      if (match) return JSON.parse(match[0]);
+    }
+  } catch (e) {
+    console.error("[extractAppointment] error:", e);
+  }
+  return { appointment_date: "", appointment_time: "" };
+}
+
 // ─── Vehicle info extractor ───────────────────────────────────────────────────
 
 /**
@@ -188,10 +224,9 @@ Examples:
 
     const block = response.content.find((b) => b.type === "text");
     if (block?.type === "text") {
-      const raw = block.text.trim()
-        .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
-        .replace(/\n/g, " "); // collapse any stray newlines inside the JSON
-      const parsed = JSON.parse(raw);
+      const match = block.text.match(/\{[^}]*\}/);
+      if (!match) return {};
+      const parsed = JSON.parse(match[0]);
       return Object.fromEntries(
         Object.entries(parsed).filter(([, v]) => typeof v === "string" && (v as string).trim() !== "")
       ) as VehicleFields;
