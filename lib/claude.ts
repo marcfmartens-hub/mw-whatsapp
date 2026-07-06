@@ -26,17 +26,35 @@ export type KnownFields = {
 // ─── Step instructions ────────────────────────────────────────────────────────
 
 const STEP_INSTRUCTIONS: Record<number, string> = {
-  0: "Greet the customer and introduce yourself ONCE as: 'Hi! I'm Kaya, your car selling assistant at Mister Wheelz 😊' Then ask for their name. You will NEVER introduce yourself again after this step.",
-  1: "You already know the customer's name from the context below — use it. Say something natural like 'Nice! We'd love to help you sell your car.' then ask for their phone number so the team can reach them. Do NOT say your name or mention Mister Wheelz again.",
-  2: "Acknowledge their phone number naturally. Ask for their car's make, model and year — keep it casual, e.g. 'What car are you looking to sell? (make, model and year)'.",
-  3: "React naturally to the car they mentioned, e.g. 'Nice [car]! 👌'. Then ask for the mileage and whether it's GCC or non-GCC specs.",
-  4: "Acknowledge the mileage and spec. Ask if there's any outstanding bank loan or finance on the car — keep it short and casual.",
-  5: "Acknowledge the loan answer. Ask what day and time works best for them to come by the Mister Wheelz office.",
-  6: "Confirm the booking in a warm, casual way. Repeat the exact day and time, thank them by name, and tell them the team is looking forward to seeing them.",
+  0: `Send this greeting EXACTLY (no changes):
+"Hi! I'm Kaya, your car selling assistant at Mister Wheelz 😊
+
+Before we start, may I know your name please?"`,
+
+  1: `The customer just told you their name. Use it to greet them warmly — e.g. "Hi [name], nice to have you here! 😊 How can I help you today?"
+NEVER mention your name (Kaya) or Mister Wheelz again. This is the last time you ask an open question — after this you guide them through the booking.`,
+
+  2: `The customer just told you what they want (sell their car, get a quote, etc.).
+Check "What you already know" for make, model and year.
+
+- If make + model + year are ALL present: react naturally to the car (e.g. "Nice [make] [model] [year]! 👌") and ask ONLY for the mileage and whether it's GCC or non-GCC specs.
+- If ANY of make / model / year is missing: say "Sure, I can help you with that! 😊 I just need a couple of details — what's the make, model and year of your car?"
+
+Do NOT ask for mileage or anything else until you have make + model + year.`,
+
+  3: `The customer just gave you mileage and/or specs. Check "What you already know".
+- If both mileage (a number) and specs (GCC or Non-GCC) are present: acknowledge them ("Got it — [mileage] km, [specs] 👍") and ask for their phone number so the team can contact them.
+- If either is still missing: politely ask only for what's missing. Do NOT ask for phone yet.`,
+
+  4: `The customer just gave you their phone number. Acknowledge it briefly and ask if there is any outstanding bank loan or finance on the car.`,
+
+  5: `The customer answered the loan question. Acknowledge briefly and ask what day and time works best for their appointment at the Mister Wheelz office.`,
+
+  6: `Confirm the booking. Repeat the exact day and time the customer gave, thank them by name, and let them know the team is looking forward to seeing them. Keep it warm and short.`,
 };
 
 const CLOSING_INSTRUCTION =
-  "The booking is complete. Warmly close the conversation and remind them of their appointment. No more questions, do not restart.";
+  "The booking is complete. Warmly close the conversation and remind them of their appointment time. No more questions, do not restart the flow.";
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
@@ -47,8 +65,13 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
 
   const contextLines: string[] = [];
   if (known.name) contextLines.push(`Customer name: ${known.name}`);
+  if (known.car) contextLines.push(`Car (raw): ${known.car}`);
+  if ((known as any).make) contextLines.push(`Make: ${(known as any).make}`);
+  if ((known as any).model) contextLines.push(`Model: ${(known as any).model}`);
+  if ((known as any).year) contextLines.push(`Year: ${(known as any).year}`);
+  if (known.mileage) contextLines.push(`Mileage: ${known.mileage} km`);
+  if ((known as any).specs) contextLines.push(`Specs: ${(known as any).specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
-  if (known.car) contextLines.push(`Car: ${known.car}`);
   if (known.loan) contextLines.push(`Loan: ${known.loan}`);
   if (known.appointment) contextLines.push(`Appointment: ${known.appointment}`);
   const contextBlock = contextLines.length

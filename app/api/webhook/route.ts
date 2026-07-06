@@ -27,12 +27,20 @@ export async function GET(req: NextRequest) {
 // Maps the conversation's CURRENT step to which field the incoming
 // message should be saved into. Step 0 has no field to save — the
 // first inbound message is just the customer initiating contact.
+// Step = what the customer is CURRENTLY sending back.
+// 0 → first contact (nothing to save)
+// 1 → customer gives name
+// 2 → customer states intent / shares car info
+// 3 → customer gives mileage + specs
+// 4 → customer gives phone number
+// 5 → customer gives loan status
+// 6 → customer gives appointment time
 const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   0: undefined,
   1: "name",
-  2: "phone_number",
-  3: "car",
-  4: "mileage",
+  2: "car",
+  3: "mileage",
+  4: "phone_number",
   5: "loan",
   6: "appointment",
 };
