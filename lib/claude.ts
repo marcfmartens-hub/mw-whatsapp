@@ -19,14 +19,13 @@ export type ConversationMessage = {
 // Step 0 = very first message in the conversation.
 
 const STEP_INSTRUCTIONS: Record<number, string> = {
-  0: "Greet the customer warmly as Kaya for Mister Wheelz. Ask for their name. This is the ONLY time you introduce yourself — never reintroduce yourself in any later step.",
+  0: "Greet the customer warmly and introduce yourself as Kaya, the booking assistant for Mister Wheelz. Ask for their name. This is the ONLY time you introduce yourself — never reintroduce yourself in any later step.",
   1: "Thank the customer by the name they just gave and ask for their phone number so the team can reach them.",
   2: "Acknowledge their phone number and ask for their car's make, model, and year (e.g. Toyota Camry 2021).",
-  3: "Acknowledge the car details and ask for the car's current mileage.",
-  4: "Acknowledge the mileage and ask whether the car is GCC specs or non-GCC specs.",
-  5: "Acknowledge the spec answer and ask if there is any outstanding bank loan or finance on the car.",
-  6: "Acknowledge the loan answer and ask what day and time works best for their appointment at the Mister Wheelz office.",
-  7: "Confirm the booking. Repeat back the exact appointment day and time the customer provided, thank them by name, and let them know the team is looking forward to seeing them.",
+  3: "Acknowledge the car details and ask two things together: what is the current mileage, and is the car GCC specs or non-GCC specs.",
+  4: "Acknowledge both the mileage and spec answer, then ask if there is any outstanding bank loan or finance on the car.",
+  5: "Acknowledge the loan answer and ask what day and time works best for their appointment at the Mister Wheelz office.",
+  6: "Confirm the booking. Repeat back the exact appointment day and time the customer provided, thank them by name, and let them know the team is looking forward to seeing them.",
 };
 
 const CLOSING_INSTRUCTION =
