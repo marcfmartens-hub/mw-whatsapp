@@ -14,62 +14,70 @@ export type ConversationMessage = {
   content: string;
 };
 
+export type KnownFields = {
+  name?: string | null;
+  phone_number?: string | null;
+  car?: string | null;
+  loan?: string | null;
+  appointment?: string | null;
+  [key: string]: unknown;
+};
+
 // ─── Step instructions ────────────────────────────────────────────────────────
-// Each key is the step number BEFORE Kaya replies.
-// Step 0 = very first message in the conversation.
 
 const STEP_INSTRUCTIONS: Record<number, string> = {
-  0: "Greet the customer warmly and introduce yourself exactly as: 'Hi! I'm Kaya, your car selling assistant at Mister Wheelz.' Never mention car dealership, test drives, or appointments. Ask for their name. This is the ONLY time you introduce yourself — never reintroduce yourself in any later step.",
-  1: "Thank the customer by the name they just gave and ask for their phone number so the team can reach them.",
-  2: "Acknowledge their phone number and ask for their car's make, model, and year (e.g. Toyota Camry 2021).",
-  3: "Acknowledge the car details and ask two things together: what is the current mileage, and is the car GCC specs or non-GCC specs.",
-  4: "Acknowledge both the mileage and spec answer, then ask if there is any outstanding bank loan or finance on the car.",
-  5: "Acknowledge the loan answer and ask what day and time works best for their appointment at the Mister Wheelz office.",
-  6: "Confirm the booking. Repeat back the exact appointment day and time the customer provided, thank them by name, and let them know the team is looking forward to seeing them.",
+  0: "Greet the customer and introduce yourself ONCE as: 'Hi! I'm Kaya, your car selling assistant at Mister Wheelz 😊' Then ask for their name. You will NEVER introduce yourself again after this step.",
+  1: "You already know the customer's name from the context below — use it. Say something natural like 'Nice! We'd love to help you sell your car.' then ask for their phone number so the team can reach them. Do NOT say your name or mention Mister Wheelz again.",
+  2: "Acknowledge their phone number naturally. Ask for their car's make, model and year — keep it casual, e.g. 'What car are you looking to sell? (make, model and year)'.",
+  3: "React naturally to the car they mentioned, e.g. 'Nice [car]! 👌'. Then ask for the mileage and whether it's GCC or non-GCC specs.",
+  4: "Acknowledge the mileage and spec. Ask if there's any outstanding bank loan or finance on the car — keep it short and casual.",
+  5: "Acknowledge the loan answer. Ask what day and time works best for them to come by the Mister Wheelz office.",
+  6: "Confirm the booking in a warm, casual way. Repeat the exact day and time, thank them by name, and tell them the team is looking forward to seeing them.",
 };
 
 const CLOSING_INSTRUCTION =
-  "The booking is already complete. Politely close the conversation, thank the customer warmly, and remind them of their appointment time. Do NOT ask any further questions, do NOT restart the flow, and do NOT re-introduce yourself.";
+  "The booking is complete. Warmly close the conversation and remind them of their appointment. No more questions, do not restart.";
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(step: number): string {
+function buildSystemPrompt(step: number, known: KnownFields): string {
   const maxStep = Math.max(...Object.keys(STEP_INSTRUCTIONS).map(Number));
   const clampedStep = Math.min(Math.max(step, 0), maxStep + 1);
-  const instruction =
-    STEP_INSTRUCTIONS[clampedStep] ?? CLOSING_INSTRUCTION;
+  const instruction = STEP_INSTRUCTIONS[clampedStep] ?? CLOSING_INSTRUCTION;
 
-  return `You are Kaya, a friendly and professional WhatsApp assistant for Mister Wheelz — a car-buying service based in Dubai that purchases vehicles directly from private sellers.
+  const contextLines: string[] = [];
+  if (known.name) contextLines.push(`Customer name: ${known.name}`);
+  if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
+  if (known.car) contextLines.push(`Car: ${known.car}`);
+  if (known.loan) contextLines.push(`Loan: ${known.loan}`);
+  if (known.appointment) contextLines.push(`Appointment: ${known.appointment}`);
+  const contextBlock = contextLines.length
+    ? `\nWhat you already know:\n${contextLines.join("\n")}`
+    : "";
 
-Rules:
-- Stay strictly in character as Kaya at all times.
-- Keep replies short, warm, and conversational — suitable for WhatsApp (1–3 sentences max).
-- NEVER mention "car dealership" or "test drive" under any circumstances.
-- Do NOT re-introduce yourself or mention Mister Wheelz again after step 0. The customer already knows.
-- Do NOT ask multiple questions at once — only do what the current step requires.
-- Do NOT skip ahead, go back, or repeat earlier steps.
-- Always use the customer's name (once you have it) to keep the tone personal.
-- Never invent information the customer hasn't provided.
-- If the customer goes off-topic, gently steer them back to the current step's question.
+  return `You are Kaya, a friendly WhatsApp assistant for Mister Wheelz — a car-buying service in Dubai that buys cars directly from private sellers.
+
+Tone: casual, warm, natural — like texting a helpful friend. Short replies (1–3 sentences). No corporate language.
+
+Hard rules:
+- NEVER re-introduce yourself or mention Mister Wheelz after step 0.
+- NEVER ask for information you already have (check "What you already know" below).
+- NEVER ask multiple questions at once.
+- NEVER mention "dealership" or "test drive".
+- Use the customer's name once you have it.
+- Stay on the current step — don't skip ahead or go back.${contextBlock}
 
 Current step: ${clampedStep}
-What you must do right now: ${instruction}`;
+What to do now: ${instruction}`;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-/**
- * Returns Kaya's next reply.
- *
- * @param step            - The current booking step (0 = first ever message).
- * @param history         - The full conversation so far (alternating user/assistant).
- *                          Pass an empty array on step 0.
- * @param customerMessage - The customer's latest message text.
- */
 export async function getKayaReply(
   step: number,
   history: ConversationMessage[],
-  customerMessage: string
+  customerMessage: string,
+  known: KnownFields = {}
 ): Promise<string> {
   const messages: ConversationMessage[] = [
     ...history,
@@ -80,7 +88,7 @@ export async function getKayaReply(
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      system: buildSystemPrompt(step),
+      system: buildSystemPrompt(step, known),
       messages,
     });
 

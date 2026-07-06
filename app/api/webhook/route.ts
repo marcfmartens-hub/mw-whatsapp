@@ -138,7 +138,9 @@ export async function POST(req: NextRequest) {
       updates.specs = specs || null;
     }
 
-    const reply = await getKayaReply(currentStep, [], messageText);
+    // Merge pending updates into conversation so Kaya sees the latest data
+    const knownFields = { ...conversation, ...updates };
+    const reply = await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
 
