@@ -111,6 +111,8 @@ export async function POST(req: NextRequest) {
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
+      // Advance to step 1 so the next customer message is treated as their name
+      await updateConversation(phone, { step: 1 });
       const resetReply = await getKayaReply(0, [], "hi", {});
       await sendWhatsAppMessage(phone, resetReply);
       return NextResponse.json({ status: "reset" }, { status: 200 });
@@ -128,18 +130,22 @@ export async function POST(req: NextRequest) {
 
     // Persist the field collected at this step (if any) before replying.
     const fieldToSave = FIELD_BY_STEP[currentStep];
-    const updates: Partial<Conversation> = { last_msg_id: message.id };
+
+    // Core update — only guaranteed-existing columns. Always succeeds.
+    const coreUpdates: Partial<Conversation> = { last_msg_id: message.id };
     if (fieldToSave && messageText) {
-      (updates as any)[fieldToSave] = messageText;
+      (coreUpdates as any)[fieldToSave] = messageText;
     }
 
-    // Extract structured fields — stored separately; skip silently if DB columns missing
+    // Extracted structured fields — saved separately so a missing DB column
+    // never blocks the main flow or step advancement.
+    const extractedUpdates: Record<string, string | null> = {};
     if (fieldToSave === "car" && messageText) {
       try {
         const { make, model, year } = await extractCarFields(messageText);
-        updates.make = make || null;
-        updates.model = model || null;
-        updates.year = year || null;
+        if (make) extractedUpdates.make = make;
+        if (model) extractedUpdates.model = model;
+        if (year) extractedUpdates.year = year;
       } catch (e) {
         console.error("extractCarFields error:", e);
       }
@@ -147,23 +153,33 @@ export async function POST(req: NextRequest) {
     if (fieldToSave === "mileage" && messageText) {
       try {
         const { mileage, specs } = await extractMileageSpec(messageText);
-        updates.mileage = mileage || null;
-        updates.specs = specs || null;
+        if (mileage) extractedUpdates.mileage = mileage;
+        if (specs) extractedUpdates.specs = specs;
       } catch (e) {
         console.error("extractMileageSpec error:", e);
       }
     }
 
-    // Merge pending updates into conversation so Kaya sees the latest data
-    const knownFields = { ...conversation, ...updates };
+    // Merge everything so Kaya sees the latest data in her system prompt
+    const knownFields = { ...conversation, ...coreUpdates, ...extractedUpdates };
     const reply = await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
 
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : currentStep + 1;
-    updates.step = nextStep;
+    coreUpdates.step = nextStep;
 
-    const updatedConversation = await updateConversation(phone, updates);
+    // Save core fields (always) — this advances the step
+    const updatedConversation = await updateConversation(phone, coreUpdates);
+
+    // Save extracted fields (best-effort) — won't break flow if columns missing
+    if (Object.keys(extractedUpdates).length > 0) {
+      try {
+        await updateConversation(phone, extractedUpdates as Partial<Conversation>);
+      } catch (e) {
+        console.error("extractedUpdates save error (non-fatal):", e);
+      }
+    }
 
     if (currentStep === FINAL_STEP) {
       await createBiginContact(updatedConversation);
