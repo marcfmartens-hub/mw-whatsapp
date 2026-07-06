@@ -7,64 +7,110 @@ const anthropic = new Anthropic({
 const MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 150;
 
-// Step instructions: what Kaya must accomplish at each step.
-// The step number reflects the conversation's CURRENT step (before this reply),
-// i.e. the step whose question/action Kaya is now performing.
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+// ─── Step instructions ────────────────────────────────────────────────────────
+// Each key is the step number BEFORE Kaya replies.
+// Step 0 = very first message in the conversation.
+
 const STEP_INSTRUCTIONS: Record<number, string> = {
-  0: "Greet the customer warmly as Kaya for the first time and ask for their name. This is the only time you introduce yourself.",
-  1: "Thank the customer for their name and ask for their phone number for the booking.",
-  2: "Acknowledge their phone number and ask for their car's make, model, and year.",
+  0: "Greet the customer warmly as Kaya for Mister Wheelz. Ask for their name. This is the ONLY time you introduce yourself — never reintroduce yourself in any later step.",
+  1: "Thank the customer by the name they just gave and ask for their phone number so the team can reach them.",
+  2: "Acknowledge their phone number and ask for their car's make, model, and year (e.g. Toyota Camry 2021).",
   3: "Acknowledge the car details and ask for the car's current mileage.",
   4: "Acknowledge the mileage and ask whether the car is GCC specs or non-GCC specs.",
-  5: "Acknowledge the spec answer and ask if there is any outstanding loan on the car.",
-  6: "Acknowledge the loan answer and ask what day and time works for their appointment.",
-  7: "Confirm the booking by repeating back the exact appointment day and time the customer provided, and let them know everything is set.",
+  5: "Acknowledge the spec answer and ask if there is any outstanding bank loan or finance on the car.",
+  6: "Acknowledge the loan answer and ask what day and time works best for their appointment at the Mister Wheelz office.",
+  7: "Confirm the booking. Repeat back the exact appointment day and time the customer provided, thank them by name, and let them know the team is looking forward to seeing them.",
 };
 
 const CLOSING_INSTRUCTION =
-  "The booking is already complete. Politely close the conversation, thank the customer, and let them know the team will see them at their scheduled appointment. Do not ask any further questions or restart the flow.";
+  "The booking is already complete. Politely close the conversation, thank the customer warmly, and remind them of their appointment time. Do NOT ask any further questions, do NOT restart the flow, and do NOT re-introduce yourself.";
+
+// ─── System prompt ────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(step: number): string {
-  const instruction = STEP_INSTRUCTIONS[step] ?? CLOSING_INSTRUCTION;
+  const maxStep = Math.max(...Object.keys(STEP_INSTRUCTIONS).map(Number));
+  const clampedStep = Math.min(Math.max(step, 0), maxStep + 1);
+  const instruction =
+    STEP_INSTRUCTIONS[clampedStep] ?? CLOSING_INSTRUCTION;
 
-  return `You are Kaya, a friendly and professional WhatsApp booking assistant for a car dealership.
+  return `You are Kaya, a friendly and professional WhatsApp assistant for Mister Wheelz — a car-buying service based in Dubai that purchases vehicles directly from private sellers.
 
 Rules:
 - Stay strictly in character as Kaya at all times.
-- Keep replies short, warm, and conversational — suitable for WhatsApp (1-3 sentences).
-- Do NOT re-introduce yourself unless this is step 0.
-- Do NOT ask multiple questions at once — only do what this step requires.
-- Do NOT skip ahead or repeat earlier steps.
-- Never invent information the customer hasn't given you.
+- Keep replies short, warm, and conversational — suitable for WhatsApp (1–3 sentences max).
+- Do NOT re-introduce yourself or mention Mister Wheelz again after step 0. The customer already knows.
+- Do NOT ask multiple questions at once — only do what the current step requires.
+- Do NOT skip ahead, go back, or repeat earlier steps.
+- Always use the customer's name (once you have it) to keep the tone personal.
+- Never invent information the customer hasn't provided.
+- If the customer goes off-topic, gently steer them back to the current step's question.
 
-Current step: ${step}
+Current step: ${clampedStep}
 What you must do right now: ${instruction}`;
 }
 
-export async function getKayaReply(step: number, customerMessage: string): Promise<string> {
-  try {
-    const system = buildSystemPrompt(step);
+// ─── Main export ──────────────────────────────────────────────────────────────
 
+/**
+ * Returns Kaya's next reply.
+ *
+ * @param step            - The current booking step (0 = first ever message).
+ * @param history         - The full conversation so far (alternating user/assistant).
+ *                          Pass an empty array on step 0.
+ * @param customerMessage - The customer's latest message text.
+ */
+export async function getKayaReply(
+  step: number,
+  history: ConversationMessage[],
+  customerMessage: string
+): Promise<string> {
+  // Build the full message array: history + the new customer message.
+  const messages: ConversationMessage[] = [
+    ...history,
+    { role: "user", content: customerMessage.trim() || "(no message)" },
+  ];
+
+  try {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      system,
-      messages: [
-        {
-          role: "user",
-          content: customerMessage || "(no message text)",
-        },
-      ],
+      system: buildSystemPrompt(step),
+      messages,
     });
 
     const textBlock = response.content.find((block) => block.type === "text");
-    if (textBlock && textBlock.type === "text") {
+    if (textBlock?.type === "text") {
       return textBlock.text.trim();
     }
 
     return "Sorry, could you say that again?";
-  } catch (error) {
-    console.error("Claude API error:", error);
-    return "Sorry, I'm having a little trouble right now — could you try again in a moment?";
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "Unknown error";
+    console.error("[Kaya] Claude API error:", message);
+    return "Sorry, I'm having a little trouble right now — could you try again in a moment? 🙏";
   }
 }
+
+// ─── Usage example (remove in production) ────────────────────────────────────
+//
+// Maintain `history` and `step` in your session store (e.g. Redis, DB row).
+// After each exchange:
+//   1. Push { role: "user",      content: customerMessage } to history.
+//   2. Push { role: "assistant", content: kayaReply }       to history.
+//   3. Increment step by 1.
+//
+// const history: ConversationMessage[] = [];
+// let step = 0;
+//
+// const reply = await getKayaReply(step, history, "Hey");
+// history.push({ role: "user", content: "Hey" });
+// history.push({ role: "assistant", content: reply });
+// step++;
