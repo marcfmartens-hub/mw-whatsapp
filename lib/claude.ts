@@ -19,7 +19,7 @@ export type ConversationMessage = {
 // Step 0 = very first message in the conversation.
 
 const STEP_INSTRUCTIONS: Record<number, string> = {
-  0: "Greet the customer warmly and introduce yourself as Kaya, the booking assistant for Mister Wheelz. Ask for their name. This is the ONLY time you introduce yourself — never reintroduce yourself in any later step.",
+  0: "Greet the customer warmly and introduce yourself exactly as: 'Hi! I'm Kaya, your car selling assistant at Mister Wheelz.' Never mention car dealership, test drives, or appointments. Ask for their name. This is the ONLY time you introduce yourself — never reintroduce yourself in any later step.",
   1: "Thank the customer by the name they just gave and ask for their phone number so the team can reach them.",
   2: "Acknowledge their phone number and ask for their car's make, model, and year (e.g. Toyota Camry 2021).",
   3: "Acknowledge the car details and ask two things together: what is the current mileage, and is the car GCC specs or non-GCC specs.",
@@ -44,6 +44,7 @@ function buildSystemPrompt(step: number): string {
 Rules:
 - Stay strictly in character as Kaya at all times.
 - Keep replies short, warm, and conversational — suitable for WhatsApp (1–3 sentences max).
+- NEVER mention "car dealership" or "test drive" under any circumstances.
 - Do NOT re-introduce yourself or mention Mister Wheelz again after step 0. The customer already knows.
 - Do NOT ask multiple questions at once — only do what the current step requires.
 - Do NOT skip ahead, go back, or repeat earlier steps.
@@ -70,7 +71,6 @@ export async function getKayaReply(
   history: ConversationMessage[],
   customerMessage: string
 ): Promise<string> {
-  // Build the full message array: history + the new customer message.
   const messages: ConversationMessage[] = [
     ...history,
     { role: "user", content: customerMessage.trim() || "(no message)" },
