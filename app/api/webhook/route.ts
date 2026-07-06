@@ -32,7 +32,7 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   1: "name",
   2: "phone_number",
   3: "car",
-  4: "mileage_and_spec",
+  4: "mileage",
   5: "loan",
   6: "appointment",
 };

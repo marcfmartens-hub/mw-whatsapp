@@ -78,3 +78,25 @@ export async function updateConversation(
 
   return data as Conversation;
 }
+
+export async function resetConversation(phone: string): Promise<void> {
+  const { error } = await supabase
+    .from(TABLE)
+    .update({
+      step: 0,
+      name: null,
+      phone_number: null,
+      car: null,
+      mileage: null,
+      gcc_spec: null,
+      loan: null,
+      appointment: null,
+      last_msg_id: null,
+    })
+    .eq("phone", phone);
+
+  if (error) {
+    console.error("resetConversation error:", error);
+    throw error;
+  }
+}
