@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
-import { getKayaReply, extractCarFields, extractMileageSpec } from "@/lib/claude";
+import { getKayaReply, extractVehicleInfo, VehicleFields } from "@/lib/claude";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 
@@ -24,26 +24,17 @@ export async function GET(req: NextRequest) {
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-// Maps the conversation's CURRENT step to which field the incoming
-// message should be saved into. Step 0 has no field to save — the
-// first inbound message is just the customer initiating contact.
-// Step = what the customer is CURRENTLY sending back.
-// 0 → first contact (nothing to save)
-// 1 → customer gives name
-// 2 → customer states intent / shares car info
-// 3 → customer gives mileage + specs
-// 4 → customer gives loan status
-// 5 → customer gives appointment time
-// 6 → customer gives phone number
-// 7 → confirm (nothing to save)
+// Which raw field to save at each step (the customer's plain text answer).
+// Vehicle details (make/model/year/mileage/specs) are extracted separately
+// from every message and saved on top of this.
 const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
-  0: undefined,
-  1: "name",
-  2: "car",
-  3: "mileage",
-  4: "loan",
-  5: "appointment",
-  6: "phone_number",
+  0: undefined,       // first contact — nothing to save
+  1: "name",          // customer gives name
+  2: "car",           // customer states intent / car info
+  3: "mileage",       // customer gives mileage + specs (raw)
+  4: "loan",          // loan status
+  5: "appointment",   // appointment day/time
+  6: "phone_number",  // phone number
 };
 
 const FINAL_STEP = 7;
@@ -61,19 +52,9 @@ function extractMessage(body: any): IncomingMessage | null {
     const entry = body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
-
-    // Status updates (delivered/read/sent) carry `statuses`, not `messages`.
-    if (!value?.messages || value.messages.length === 0) {
-      return null;
-    }
-
+    if (!value?.messages || value.messages.length === 0) return null;
     const message = value.messages[0];
-    return {
-      from: message.from,
-      id: message.id,
-      text: message.text,
-      type: message.type,
-    };
+    return { from: message.from, id: message.id, text: message.text, type: message.type };
   } catch (error) {
     console.error("extractMessage parse error:", error);
     return null;
@@ -93,15 +74,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const message = extractMessage(body);
-
-    if (!message) {
-      // Status update or unrecognized payload — acknowledge and skip.
-      return NextResponse.json({ status: "ignored" }, { status: 200 });
-    }
+    if (!message) return NextResponse.json({ status: "ignored" }, { status: 200 });
 
     const ownPhoneNumberId = process.env.META_PHONE_NUMBER_ID;
     if (ownPhoneNumberId && message.from === ownPhoneNumberId) {
-      // Echo of our own outbound message — skip.
       return NextResponse.json({ status: "ignored" }, { status: 200 });
     }
 
@@ -111,8 +87,7 @@ export async function POST(req: NextRequest) {
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
-      // Advance to step 1 so the next customer message is treated as their name
-      await updateConversation(phone, { step: 1 });
+      await updateConversation(phone, { step: 1 }); // next message = name
       const resetReply = await getKayaReply(0, [], "hi", {});
       await sendWhatsAppMessage(phone, resetReply);
       return NextResponse.json({ status: "reset" }, { status: 200 });
@@ -121,68 +96,53 @@ export async function POST(req: NextRequest) {
 
     const conversation = await getOrCreateConversation(phone);
 
-    // Deduplicate retried/duplicate webhook deliveries.
     if (conversation.last_msg_id && conversation.last_msg_id === message.id) {
       return NextResponse.json({ status: "duplicate" }, { status: 200 });
     }
 
     const currentStep = conversation.step ?? 0;
-
-    // Persist the field collected at this step (if any) before replying.
     const fieldToSave = FIELD_BY_STEP[currentStep];
 
-    // Core update — only guaranteed-existing columns. Always succeeds.
+    // ── Core update (guaranteed columns only) ──────────────────────
     const coreUpdates: Partial<Conversation> = { last_msg_id: message.id };
     if (fieldToSave && messageText) {
       (coreUpdates as any)[fieldToSave] = messageText;
     }
 
-    // Extracted structured fields — saved separately so a missing DB column
-    // never blocks the main flow or step advancement.
-    const extractedUpdates: Record<string, string | null> = {};
-    if (fieldToSave === "car" && messageText) {
-      try {
-        const { make, model, year } = await extractCarFields(messageText);
-        if (make) extractedUpdates.make = make;
-        if (model) extractedUpdates.model = model;
-        if (year) extractedUpdates.year = year;
-      } catch (e) {
-        console.error("extractCarFields error:", e);
-      }
-    }
-    if (fieldToSave === "mileage" && messageText) {
-      try {
-        const { mileage, specs } = await extractMileageSpec(messageText);
-        if (mileage) extractedUpdates.mileage = mileage;
-        if (specs) extractedUpdates.specs = specs;
-      } catch (e) {
-        console.error("extractMileageSpec error:", e);
-      }
-    }
+    // ── Vehicle extraction — runs on EVERY message ─────────────────
+    // Scans for make/model/year/mileage/specs regardless of step,
+    // so it doesn't matter how the customer spreads the info.
+    const alreadyKnown: VehicleFields = {
+      make:    conversation.make    ?? undefined,
+      model:   conversation.model   ?? undefined,
+      year:    conversation.year    ?? undefined,
+      mileage: conversation.mileage ?? undefined,
+      specs:   conversation.specs   ?? undefined,
+    };
+    const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
 
-    // Merge everything so Kaya sees the latest data in her system prompt
-    const knownFields = { ...conversation, ...coreUpdates, ...extractedUpdates };
+    // ── Build knownFields for Kaya's system prompt ─────────────────
+    const knownFields = { ...conversation, ...coreUpdates, ...vehicleUpdates };
     const reply = await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
 
+    // ── Persist core update + advance step ─────────────────────────
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : currentStep + 1;
     coreUpdates.step = nextStep;
-
-    // Save core fields (always) — this advances the step
     const updatedConversation = await updateConversation(phone, coreUpdates);
 
-    // Save extracted fields (best-effort) — won't break flow if columns missing
-    if (Object.keys(extractedUpdates).length > 0) {
+    // ── Persist vehicle fields (best-effort — columns may not exist yet) ──
+    if (Object.keys(vehicleUpdates).length > 0) {
       try {
-        await updateConversation(phone, extractedUpdates as Partial<Conversation>);
+        await updateConversation(phone, vehicleUpdates as Partial<Conversation>);
       } catch (e) {
-        console.error("extractedUpdates save error (non-fatal):", e);
+        console.error("vehicleUpdates save error (non-fatal):", e);
       }
     }
 
     if (currentStep === FINAL_STEP) {
-      await createBiginContact(updatedConversation);
+      await createBiginContact({ ...updatedConversation, ...vehicleUpdates } as Conversation);
     }
 
     return NextResponse.json({ status: "ok" }, { status: 200 });
