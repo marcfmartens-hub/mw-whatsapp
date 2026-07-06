@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
-import { getKayaReply } from "@/lib/claude";
+import { getKayaReply, extractCarFields, extractMileageSpec } from "@/lib/claude";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 
@@ -123,6 +123,19 @@ export async function POST(req: NextRequest) {
     const updates: Partial<Conversation> = { last_msg_id: message.id };
     if (fieldToSave && messageText) {
       (updates as any)[fieldToSave] = messageText;
+    }
+
+    // Extract structured fields from free-text answers
+    if (fieldToSave === "car" && messageText) {
+      const { make, model, year } = await extractCarFields(messageText);
+      updates.make = make || null;
+      updates.model = model || null;
+      updates.year = year || null;
+    }
+    if (fieldToSave === "mileage" && messageText) {
+      const { mileage, specs } = await extractMileageSpec(messageText);
+      updates.mileage = mileage || null;
+      updates.specs = specs || null;
     }
 
     const reply = await getKayaReply(currentStep, [], messageText);

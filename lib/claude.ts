@@ -98,6 +98,53 @@ export async function getKayaReply(
   }
 }
 
+// ─── Field extractors ─────────────────────────────────────────────────────────
+
+export async function extractCarFields(
+  carText: string
+): Promise<{ make: string; model: string; year: string }> {
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 60,
+      system: `Extract car details from the customer's message. Reply with ONLY a valid JSON object with keys "make", "model", "year". Use proper title case. If a value is unclear use "".
+Examples:
+"Toyota Camry 2021" → {"make":"Toyota","model":"Camry","year":"2021"}
+"bmw 3 series 2019" → {"make":"BMW","model":"3 Series","year":"2019"}
+"its a 2015 nissan patrol" → {"make":"Nissan","model":"Patrol","year":"2015"}`,
+      messages: [{ role: "user", content: carText }],
+    });
+    const block = response.content.find((b) => b.type === "text");
+    if (block?.type === "text") {
+      return JSON.parse(block.text.trim());
+    }
+  } catch {}
+  return { make: "", model: "", year: "" };
+}
+
+export async function extractMileageSpec(
+  text: string
+): Promise<{ mileage: string; specs: string }> {
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 60,
+      system: `Extract mileage and spec from the customer's message. Reply with ONLY a valid JSON object with keys "mileage" (digits only, no units or commas) and "specs" (exactly one of: "GCC", "Non-GCC", "Unknown").
+Examples:
+"50000 km gcc" → {"mileage":"50000","specs":"GCC"}
+"120,000 non gcc" → {"mileage":"120000","specs":"Non-GCC"}
+"about 80k not sure" → {"mileage":"80000","specs":"Unknown"}
+"i don't know" → {"mileage":"","specs":"Unknown"}`,
+      messages: [{ role: "user", content: text }],
+    });
+    const block = response.content.find((b) => b.type === "text");
+    if (block?.type === "text") {
+      return JSON.parse(block.text.trim());
+    }
+  } catch {}
+  return { mileage: "", specs: "Unknown" };
+}
+
 // ─── Usage example (remove in production) ────────────────────────────────────
 //
 // Maintain `history` and `step` in your session store (e.g. Redis, DB row).

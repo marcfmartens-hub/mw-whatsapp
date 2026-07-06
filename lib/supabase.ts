@@ -14,9 +14,12 @@ export interface Conversation {
   step: number;
   name: string | null;
   phone_number: string | null;
-  car: string | null;
-  mileage: string | null;
-  gcc_spec: string | null;
+  car: string | null;       // raw answer from customer
+  make: string | null;
+  model: string | null;
+  year: string | null;
+  mileage: string | null;   // number only, e.g. "50000"
+  specs: string | null;     // "GCC", "Non-GCC", or "Unknown"
   loan: string | null;
   appointment: string | null;
   last_msg_id: string | null;
@@ -87,8 +90,11 @@ export async function resetConversation(phone: string): Promise<void> {
       name: null,
       phone_number: null,
       car: null,
+      make: null,
+      model: null,
+      year: null,
       mileage: null,
-      gcc_spec: null,
+      specs: null,
       loan: null,
       appointment: null,
       last_msg_id: null,
