@@ -50,7 +50,7 @@ export async function createBiginContact(conversation: Conversation): Promise<vo
           First_Name: firstName,
           Last_Name: lastName,
           Phone: conversation.phone_number || conversation.phone,
-          Lead_Source: "Whatsapp Bot",
+          Lead_Source: "WhatsApp Bot",
           Description: [
             `Make: ${conversation.make || "N/A"}`,
             `Model: ${conversation.model || "N/A"}`,
