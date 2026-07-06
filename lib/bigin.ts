@@ -63,6 +63,8 @@ export async function createBiginContact(conversation: Conversation): Promise<vo
       ],
     };
 
+    console.log("[Bigin] sending payload:", JSON.stringify(payload));
+
     const res = await fetch(BIGIN_CONTACTS_URL, {
       method: "POST",
       headers: {

@@ -37,8 +37,8 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   6: "phone_number",  // phone number
 };
 
-const FINAL_STEP = 7;
-const CLOSING_STEP = 8;
+const FINAL_STEP = 6;   // phone number collected — booking complete, push to Bigin
+const CLOSING_STEP = 7;
 
 interface IncomingMessage {
   from: string;
