@@ -32,21 +32,22 @@ export async function GET(req: NextRequest) {
 // 1 → customer gives name
 // 2 → customer states intent / shares car info
 // 3 → customer gives mileage + specs
-// 4 → customer gives phone number
-// 5 → customer gives loan status
-// 6 → customer gives appointment time
+// 4 → customer gives loan status
+// 5 → customer gives appointment time
+// 6 → customer gives phone number
+// 7 → confirm (nothing to save)
 const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   0: undefined,
   1: "name",
   2: "car",
   3: "mileage",
-  4: "phone_number",
-  5: "loan",
-  6: "appointment",
+  4: "loan",
+  5: "appointment",
+  6: "phone_number",
 };
 
-const FINAL_STEP = 6;
-const CLOSING_STEP = 7;
+const FINAL_STEP = 7;
+const CLOSING_STEP = 8;
 
 interface IncomingMessage {
   from: string;

@@ -43,18 +43,18 @@ Check "What you already know" for make, model and year.
 Do NOT ask for mileage or anything else until you have make + model + year.`,
 
   3: `The customer just gave you mileage and/or specs. Check "What you already know".
-- If both mileage (a number) and specs (GCC or Non-GCC) are present: acknowledge them ("Got it — [mileage] km, [specs] 👍") and ask for their phone number so the team can contact them.
-- If either is still missing: politely ask only for what's missing. Do NOT ask for phone yet.`,
+- If both mileage (a number) and specs (GCC or Non-GCC) are present: acknowledge them ("Got it — [mileage] km, [specs] 👍") and ask if there is any outstanding bank loan or finance on the car.
+- If either is still missing: politely ask only for what's missing. Do NOT ask about loan yet.`,
 
-  4: `The customer just gave you their phone number. Acknowledge it briefly and ask if there is any outstanding bank loan or finance on the car.`,
+  4: `The customer answered the loan question. Acknowledge briefly and ask what day and time works best for their appointment at the Mister Wheelz office.`,
 
-  5: `The customer answered the loan question. Acknowledge briefly and ask what day and time works best for their appointment at the Mister Wheelz office.`,
+  5: `The customer just gave you an appointment day and time. Acknowledge it, then ask for their phone number so the team can confirm the appointment with them.`,
 
-  6: `Confirm the booking. Repeat the exact day and time the customer gave, thank them by name, and let them know the team is looking forward to seeing them. Keep it warm and short.`,
+  6: `The customer just gave you their phone number. Now confirm the full booking in one warm message: repeat their name, the appointment day and time, and let them know the team will be in touch on that number. Keep it short and friendly.`,
 };
 
 const CLOSING_INSTRUCTION =
-  "The booking is complete. Warmly close the conversation and remind them of their appointment time. No more questions, do not restart the flow.";
+  "The booking is complete. If the customer messages again, warmly let them know everything is set and the team will reach out. No more questions, do not restart the flow.";
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
