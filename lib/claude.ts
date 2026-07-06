@@ -188,7 +188,10 @@ Examples:
 
     const block = response.content.find((b) => b.type === "text");
     if (block?.type === "text") {
-      const parsed = JSON.parse(block.text.trim());
+      const raw = block.text.trim()
+        .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
+        .replace(/\n/g, " "); // collapse any stray newlines inside the JSON
+      const parsed = JSON.parse(raw);
       return Object.fromEntries(
         Object.entries(parsed).filter(([, v]) => typeof v === "string" && (v as string).trim() !== "")
       ) as VehicleFields;
