@@ -29,8 +29,11 @@ export type KnownFields = {
   sell_urgent?: boolean | null;
   dubai_hour?: number | null;
   appointment?: string | null;
+  typo_check?: TypoCheck[] | null;
   [key: string]: unknown;
 };
+
+export type TypoCheck = { field: string; input: string; suggestion: string };
 
 export type VehicleFields = {
   make?: string;
@@ -38,6 +41,7 @@ export type VehicleFields = {
   year?: string;
   mileage?: string;
   specs?: string;
+  typo_check?: TypoCheck[];
 };
 
 // ─── Step instructions ────────────────────────────────────────────────────────
@@ -58,7 +62,12 @@ Check "What you already know" for make, model and year.
 Do NOT ask for mileage or specs until make + model + year are all known.`,
 
   3: `The customer just gave you vehicle details.
-Check "What you already know":
+
+FIRST — check "What you already know" for "Typo check". If there is a typo_check entry:
+- Ask for confirmation BEFORE anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊"
+- Wait for their answer. Do not advance until confirmed.
+
+If no typo issues, check "What you already know":
 - If make + model + year are still missing or incomplete: ask for them first.
 - If make + model + year are all present but mileage or specs are missing: ask only for what's missing.
 - If make + model + year + mileage + specs are ALL present:
@@ -112,6 +121,10 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.specs)        contextLines.push(`Specs: ${known.specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
   if (known.loan)          contextLines.push(`Loan: ${known.loan}`);
+  if (known.typo_check && Array.isArray(known.typo_check) && (known.typo_check as TypoCheck[]).length > 0) {
+    const checks = (known.typo_check as TypoCheck[]).map(t => `${t.field} "${t.input}" → did you mean "${t.suggestion}"?`).join("; ");
+    contextLines.push(`Typo check (needs confirmation): ${checks}`);
+  }
   if (known.sell_timeline) contextLines.push(`Sell timeline: ${known.sell_timeline}`);
   if (known.sell_urgent != null) contextLines.push(`Sell urgency: ${known.sell_urgent ? "YES" : "NO"}`);
   if (known.dubai_hour != null)  contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
@@ -247,12 +260,12 @@ Model reference (make: models):
 ${Object.entries(CAR_MODELS).map(([m, ms]) => `${m}: ${ms.join(", ")}`).join("\n")}
 
 Strict rules:
-- If the make is not in the valid makes list, return "Unknown" for make.
-- If the model is not listed for that make, return "Unknown" for model.
-- Never put model name in "make" or make name in "model".
-- Never put year in "model".
+- If the make is not in the valid makes list but looks like a typo, set make to "Unknown" and add a typo_check entry.
+- If the model is not listed for that make but looks like a typo, set model to "Unknown" and add a typo_check entry.
+- Never put model name in "make" or vice versa. Never put year in "model".
 - Do NOT overwrite already known fields: ${knownSummary || "nothing yet"}.
 - If nothing vehicle-related is in the message, return {}.
+- For each suspected typo add an entry to "typo_check": [{"field":"make"|"model"|"year", "input":"what they typed", "suggestion":"what you think they meant"}]
 
 Examples:
 "BMW X5 2019"             → {"make":"BMW","model":"X5","year":"2019"}
@@ -260,7 +273,9 @@ Examples:
 "it's a Patrol"           → {"make":"Nissan","model":"Patrol"}
 "125k km gcc"             → {"mileage":"125000","specs":"GCC"}
 "Mercedes C200 2022 GCC"  → {"make":"Mercedes-Benz","model":"C-Class","year":"2022","specs":"GCC"}
-"Land Rover Discovery"    → {"make":"Land Rover","model":"Discovery"}
+"BMW X9 2020"             → {"make":"BMW","model":"Unknown","year":"2020","typo_check":[{"field":"model","input":"X9","suggestion":"X5 or X7?"}]}
+"Toyata Camry"            → {"make":"Toyota","model":"Camry","typo_check":[{"field":"make","input":"Toyata","suggestion":"Toyota"}]}
+"Mercedez GLC"            → {"make":"Mercedes-Benz","model":"GLC","typo_check":[{"field":"make","input":"Mercedez","suggestion":"Mercedes-Benz"}]}
 "I want to sell my car"   → {}
 "yes" / "ok"              → {}`,
       messages: [{ role: "user", content: messageText }],
@@ -268,12 +283,17 @@ Examples:
 
     const block = response.content.find((b) => b.type === "text");
     if (block?.type === "text") {
-      const match = block.text.match(/\{[^}]*\}/);
+      const match = block.text.match(/\{[\s\S]*\}/);
       if (!match) return {};
       const parsed = JSON.parse(match[0]);
-      return Object.fromEntries(
-        Object.entries(parsed).filter(([, v]) => typeof v === "string" && (v as string).trim() !== "")
-      ) as VehicleFields;
+      const result: VehicleFields = {};
+      for (const key of ["make","model","year","mileage","specs"] as const) {
+        if (typeof parsed[key] === "string" && parsed[key].trim()) result[key] = parsed[key].trim();
+      }
+      if (Array.isArray(parsed.typo_check) && parsed.typo_check.length > 0) {
+        result.typo_check = parsed.typo_check;
+      }
+      return result;
     }
   } catch (e) {
     console.error("[extractVehicleInfo] error:", e);
