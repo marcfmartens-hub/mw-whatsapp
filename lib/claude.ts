@@ -7,7 +7,10 @@ const anthropic = new Anthropic({
 
 const KAYA_MODEL      = "claude-sonnet-5";      // chat responses — needs reliable instruction-following
 const EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"; // structured JSON extraction — simple, cheap
-const MAX_TOKENS = 250;
+const KAYA_MAX_TOKENS      = 1024; // bumped: Sonnet 5 uses thinking tokens before text
+const EXTRACTOR_MAX_TOKENS =   80;
+/** @deprecated use KAYA_MAX_TOKENS / EXTRACTOR_MAX_TOKENS */
+const MAX_TOKENS = KAYA_MAX_TOKENS;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +34,7 @@ export type KnownFields = {
   sell_urgent?: boolean | null;
   dubai_hour?: number | null;
   dubai_datetime?: string | null;
+  dubai_tomorrow?: string | null;
   appointment?: string | null;
   typo_check?: TypoCheck[] | null;
   skip_mortgage?: boolean | null;
@@ -131,7 +135,8 @@ Rules:
 - NEVER book in the past. Check "Current Dubai date/time" in What you already know. If the requested date is before today, or the requested date is today but the requested time has already passed, tell the customer and ask them to pick a future date/time.
 - NEVER book on a Sunday or outside opening hours.
 - If the customer picks an invalid date/time (past, Sunday, or outside hours): explain why and ask for a valid alternative.
-- If the date and time are valid (future, working day, within opening hours): confirm the full booking warmly — use their name, repeat the EXACT date (e.g. "Tuesday July 8") never "tomorrow" or other relative terms, repeat the time, say the Mister Wheelz team will be in touch on WhatsApp.
+- If the date and time are valid (future, working day, within opening hours): confirm the full booking warmly — use their name, repeat the EXACT date (e.g. "Tuesday 8th of July") never "tomorrow" or "this Saturday" or other relative terms — always the actual day name and date. Repeat the time. Say the Mister Wheelz team will be in touch on WhatsApp.
+- IMPORTANT: "tomorrow" means the date shown in "Tomorrow in Dubai" from What you already know. Always convert to that actual date.
 - If they said they can't make it today / pushed back: say "No worries! 😊" and ask what day and time works best.
 - NEVER repeat any question already answered in this conversation.`,
 };
@@ -173,6 +178,7 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
   if (known.sell_urgent != null) contextLines.push(`Sell urgency: ${known.sell_urgent ? "YES" : "NO"}`);
   if (known.dubai_hour != null)     contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
   if (known.dubai_datetime)         contextLines.push(`Current Dubai date/time: ${known.dubai_datetime}`);
+  if (known.dubai_tomorrow)         contextLines.push(`Tomorrow in Dubai: ${known.dubai_tomorrow}`);
   if (known.appointment)   contextLines.push(`Appointment: ${known.appointment}`);
 
   // next_action — single directive computed by the webhook; model just executes it
@@ -235,7 +241,7 @@ export async function getKayaReply(
   try {
     const response = await anthropic.messages.create({
       model: KAYA_MODEL,
-      max_tokens: MAX_TOKENS,
+      max_tokens: KAYA_MAX_TOKENS,
       system: buildSystemPrompt(step, known),
       messages,
     });
@@ -243,6 +249,9 @@ export async function getKayaReply(
     const textBlock = response.content.find((block) => block.type === "text");
     if (textBlock?.type === "text") return textBlock.text.trim();
 
+    // Extended thinking models (Sonnet 5) can emit only thinking blocks when max_tokens is tight.
+    // If we land here, log what arrived so we can debug in Vercel logs.
+    console.error("[Kaya] No text block. Content types:", response.content.map((b) => b.type).join(", "));
     return "Sorry, could you say that again?";
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Unknown error";
@@ -306,7 +315,7 @@ export async function extractVehicleInfo(
   try {
     const response = await anthropic.messages.create({
       model: EXTRACTOR_MODEL,
-      max_tokens: 80,
+      max_tokens: EXTRACTOR_MAX_TOKENS,
       system: `You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data. If you are not 100% sure, return "Unknown" or omit the field.
 
 Return ONLY a JSON object with the fields you are certain about:
@@ -338,6 +347,9 @@ Examples:
 "BMW X9 2020"             → {"make":"BMW","model":"Unknown","year":"2020","typo_check":[{"field":"model","input":"X9","suggestion":"X5 or X7?"}]}
 "Toyata Camry"            → {"make":"Toyota","model":"Camry","typo_check":[{"field":"make","input":"Toyata","suggestion":"Toyota"}]}
 "Mercedez GLC"            → {"make":"Mercedes-Benz","model":"GLC","typo_check":[{"field":"make","input":"Mercedez","suggestion":"Mercedes-Benz"}]}
+"x5" (BMW already known)  → {"model":"X5"}
+"camry" (Toyota known)    → {"model":"Camry"}
+"patrol" (Nissan known)   → {"model":"Patrol"}
 "I want to sell my car"   → {}
 "yes" / "ok"              → {}`,
       messages: [{ role: "user", content: messageText }],

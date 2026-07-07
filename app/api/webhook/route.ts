@@ -48,6 +48,40 @@ function getDubaiHour(): number {
   return new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
 }
 
+function getDubaiTomorrow(): string {
+  // Dubai = UTC+4; tomorrow = today+24h from that offset
+  const d = new Date(Date.now() + 28 * 60 * 60 * 1000);
+  const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const date   = d.getUTCDate();
+  const sfx    = [11,12,13].includes(date) ? "th"
+                 : date % 10 === 1 ? "st"
+                 : date % 10 === 2 ? "nd"
+                 : date % 10 === 3 ? "rd" : "th";
+  return `${DAYS[d.getUTCDay()]} ${date}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
+}
+
+// Extract just the real name from messages like "im Marc", "I'm Marc", "my name is Marc".
+function extractNameFromMessage(text: string): string {
+  const m = text.match(
+    /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|it'?s\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)?)/i
+  );
+  if (m) return m[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
+  // Whole message is already a name (1–2 words, letters only)
+  if (/^[A-Za-z]+(?:\s+[A-Za-z]+)?$/.test(text.trim()))
+    return text.trim().replace(/\b\w/g, (c) => c.toUpperCase());
+  // Fallback: first word capitalised
+  const first = text.trim().split(/\s+/)[0];
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
+function formatMileage(raw: string | null | undefined): string {
+  if (!raw) return "Unknown";
+  const n = parseInt(raw, 10);
+  if (isNaN(n)) return `${raw} km`;
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " km";
+}
+
 // Typed action tokens — set by webhook logic, consumed by buildDirectResponse.
 // Using a discriminated union avoids fragile substring matching.
 type NextAction =
@@ -59,6 +93,7 @@ type NextAction =
   | { type: "ASK_AMOUNT" }
   | { type: "CLARIFY_MODEL" }
   | { type: "SHOW_SUMMARY" }
+  | { type: "SHOW_FULL_SUMMARY" }
   | { type: "CONFIRM_TYPO"; suggestion: string };
 
 // Human-readable version sent to the LLM (for nuanced fallback cases)
@@ -71,8 +106,9 @@ function describeAction(a: NextAction): string {
     case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
     case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
     case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
-    case "SHOW_SUMMARY":     return `Show the car summary (plain, no emojis) and ask "Does that look correct?"`;
-    case "CONFIRM_TYPO":     return `Confirm typo — ask: "Just to confirm — did you mean ${a.suggestion}? 😊" Do not ask for mileage yet.`;
+    case "SHOW_SUMMARY":      return `Show the car summary (plain, no emojis) and ask "Does that look correct?"`;
+    case "SHOW_FULL_SUMMARY": return `Show the car summary including mortgage (plain, no emojis) and ask "Does that look correct?"`;
+    case "CONFIRM_TYPO":      return `Confirm typo — ask: "Just to confirm — did you mean ${a.suggestion}? 😊" Do not ask for mileage yet.`;
   }
 }
 
@@ -81,7 +117,8 @@ function buildDirectResponse(
   action: NextAction,
   name: string | null | undefined,
   known: { make?: string | null; model?: string | null; year?: string | null;
-           mileage?: string | null; specs?: string | null }
+           mileage?: string | null; specs?: string | null;
+           loan?: string | null; mortgage_amount?: string | null }
 ): string {
   const n = name ? `, ${name}` : "";
   switch (action.type) {
@@ -102,12 +139,26 @@ function buildDirectResponse(
     case "CONFIRM_TYPO":
       return `Just to confirm${n} — did you mean ${action.suggestion}? 😊`;
     case "SHOW_SUMMARY": {
+      // Old cars (5+ years) — mortgage step was skipped, so mortgage = AED 0
       const make    = known.make    || "Unknown";
       const model   = known.model   || "Unknown";
       const year    = known.year    || "Unknown";
-      const mileage = known.mileage ? `${known.mileage} km` : "Unknown";
+      const mileage = formatMileage(known.mileage);
       const specs   = known.specs   || "Unknown";
-      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\n\nDoes that look correct?`;
+      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: AED 0\n\nDoes that look correct?`;
+    }
+    case "SHOW_FULL_SUMMARY": {
+      // After mortgage step — include mortgage line with amount or AED 0
+      const make    = known.make    || "Unknown";
+      const model   = known.model   || "Unknown";
+      const year    = known.year    || "Unknown";
+      const mileage = formatMileage(known.mileage);
+      const specs   = known.specs   || "Unknown";
+      const hasLoan = known.loan && /\byes\b/i.test(known.loan);
+      const rawAmt  = known.mortgage_amount ? parseInt(known.mortgage_amount, 10) : NaN;
+      const fmtAmt  = isNaN(rawAmt) ? "TBC" : rawAmt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      const mortgage = hasLoan ? `Yes — AED ${fmtAmt}` : "AED 0";
+      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: ${mortgage}\n\nDoes that look correct?`;
     }
   }
 }
@@ -193,8 +244,14 @@ export async function POST(req: NextRequest) {
     if (fieldToSave && messageText) {
       // Don't overwrite an already-saved loan answer with a mortgage amount follow-up
       const isLoanAmountFollowUp = fieldToSave === "loan" && !!conversation.loan;
-      if (!isLoanAmountFollowUp) {
-        (coreUpdates as any)[fieldToSave] = messageText;
+      // Don't save a greeting ("hi", "hello") as the customer's name
+      const isGreetingOnly = fieldToSave === "name" && GREETING_ONLY.test(messageText);
+      if (!isLoanAmountFollowUp && !isGreetingOnly) {
+        // For name field: extract the real name from "im Marc", "I'm Marc", etc.
+        const valueToSave = fieldToSave === "name"
+          ? extractNameFromMessage(messageText)
+          : messageText;
+        (coreUpdates as any)[fieldToSave] = valueToSave;
       }
     }
 
@@ -290,6 +347,9 @@ export async function POST(req: NextRequest) {
       }
     } else if (currentStep === 4 && loanIsYes && !mortgageAmount && !conversation.mortgage_amount) {
       action = { type: "ASK_AMOUNT" };
+    } else if (currentStep === 4) {
+      // Mortgage step is complete (loan=No, or loan=Yes+amount collected) — show full summary directly
+      action = { type: "SHOW_FULL_SUMMARY" };
     }
 
     const knownFields = {
@@ -300,6 +360,7 @@ export async function POST(req: NextRequest) {
       sell_urgent:     sellUrgent,
       dubai_hour:      getDubaiHour(),
       dubai_datetime:  getDubaiDateTime(),
+      dubai_tomorrow:  getDubaiTomorrow(),
       mortgage_amount: mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:   hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
       next_action:     action ? describeAction(action) : undefined,
