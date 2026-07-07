@@ -33,6 +33,7 @@ export type KnownFields = {
   appointment?: string | null;
   typo_check?: TypoCheck[] | null;
   skip_mortgage?: boolean | null;
+  next_action?: string | null;
   [key: string]: unknown;
 };
 
@@ -74,38 +75,24 @@ Then check for make, model and year:
 - If ANY of make / model / year is missing: say "Sure, I can help! 😊 Could you share the make, model and year of your car?"
 Do NOT ask for mileage or specs until make + model + year are all known.`,
 
-  3: `The customer just gave you vehicle details.
+  3: `Look at "Next action" in "What you already know" and do EXACTLY that — warm and natural, 1–2 sentences max.
 
-STEP 1 — Typo check first.
-If "Typo check (needs confirmation)" is in "What you already know": ask for confirmation before doing anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊"
+Rules:
+- Do NOT ask more than one thing at a time.
+- Do NOT skip to appointment booking or sell timeline.
+- Do NOT confirm a booking.
+- If "Next action" says to show a summary, use this format (plain text, no emojis):
+  Make: [Make]
+  Model: [Model]
+  Year: [Year]
+  Mileage: [Mileage] km
+  Specs: [GCC / Non-GCC / Unknown]
+  Then ask "Does that look correct?"`,
 
-STEP 2 — Check "Still needed".
-"Still needed" in "What you already know" tells you exactly what to collect next. Act on the FIRST item only:
+  4: `If "Next action" is set in "What you already know": do exactly that (1 sentence).
 
-• make / model / year listed → Ask for the missing item(s). If "Car as typed by customer" is shown, use it to ask specifically — e.g. "Just to confirm, you mentioned [X] as the model — did you mean [known model for that make]?"
-• mileage listed → Ask for BOTH mileage AND specs (GCC or non-GCC) in one question.
-• specs (GCC / non-GCC) listed only → Ask for specs only. If customer says they don't know, reply "No problem, I'll note it as Unknown!" and stop — do not continue to mortgage.
-
-STEP 3 — "Still needed" is gone (all vehicle fields collected).
-Check "Skip mortgage":
-• YES → show the car summary (plain text, no emojis) and ask "Does that look correct?"
-• NO → ask "Is there any outstanding mortgage on the car?"
-
-NEVER ask about mortgage or finance while "Still needed" is still shown.
-
-Summary format (no emojis, no icons):
-Make: [Make]
-Model: [Model]
-Year: [Year]
-Mileage: [Mileage] km
-Specs: [GCC / Non-GCC / Unknown]`,
-
-  4: `The customer answered the mortgage question.
-- If they said NO mortgage: acknowledge briefly (e.g. "Got it!"). Then show the summary (below) and ask "Does that look correct?"
-- If they said YES mortgage: ALWAYS ask for the outstanding balance — "How much is the outstanding balance?" — before showing the summary. Do not show the summary until you have the amount.
-- If the amount is now known: acknowledge it, then show the summary and ask "Does that look correct?"
-
-Summary and ask "Does that look correct?":
+Otherwise the mortgage info is complete — show the summary and ask "Does that look correct?":
+Summary:
 
 Make: [Make]
 Model: [Model]
@@ -178,6 +165,9 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.dubai_hour != null)     contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
   if (known.dubai_datetime)         contextLines.push(`Current Dubai date/time: ${known.dubai_datetime}`);
   if (known.appointment)   contextLines.push(`Appointment: ${known.appointment}`);
+
+  // next_action — single directive computed by the webhook; model just executes it
+  if (known.next_action) contextLines.push(`Next action: ${known.next_action}`);
 
   // "Still needed" — computed list so the model never has to guess what's missing
   const missingVehicle: string[] = [];
