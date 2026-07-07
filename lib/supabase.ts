@@ -28,6 +28,7 @@ export interface Conversation {
   appointment_time: string | null;
   last_msg_id: string | null;
   nudged_at: string | null;
+  messages?: Array<{ role: "user" | "assistant"; content: string }> | null;
 }
 
 const TABLE = "mw_whatsapp";
@@ -119,5 +120,6 @@ export async function resetConversation(phone: string): Promise<void> {
     appointment_date: null,
     appointment_time: null,
     nudged_at: null,
+    messages: [],
   }).eq("phone", phone);
 }

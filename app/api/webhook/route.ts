@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
-import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields } from "@/lib/claude";
+import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 import { CAR_MODELS } from "@/lib/carData";
@@ -439,12 +439,28 @@ export async function POST(req: NextRequest) {
     console.log(`[kaya] step=${currentStep} action=${action?.type ?? "none"}`);
 
     // Steps with a typed action always get a direct template response — zero LLM hallucination risk.
-    // Steps without an action (5, 6, 7, 8) go to the LLM for nuanced handling.
+    // Steps without an action (6, 7, 8) go to the LLM — pass the full conversation history
+    // so the model remembers what was already said (prevents "which day?" after "tomorrow" etc.)
+    const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
     const reply = action
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
-      : await getKayaReply(currentStep, [], messageText, knownFields);
+      : await getKayaReply(currentStep, history, messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
+
+    // ── Persist conversation history ───────────────────────────────
+    // Keep the last 40 messages (~20 exchanges) so context stays fresh
+    // without growing unbounded. Fails silently if column not yet migrated.
+    try {
+      const updatedHistory: ConversationMessage[] = [
+        ...history,
+        { role: "user"      as const, content: messageText },
+        { role: "assistant" as const, content: reply },
+      ].slice(-40);
+      await updateConversation(phone, { messages: updatedHistory } as any);
+    } catch (e) {
+      console.error("history save error (non-fatal):", e);
+    }
 
     // ── Detect booking confirmation in the reply ───────────────────
     // Step 8 (appointment) stays open until the LLM sends the standard
