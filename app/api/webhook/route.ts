@@ -142,6 +142,14 @@ export async function POST(req: NextRequest) {
     };
     const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
 
+    // ── Explicit "I don't know specs" detection ────────────────────
+    // If at step 3, specs not yet known, and customer expresses uncertainty → record Unknown
+    const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
+    const hasKnownSpecs = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
+                          || (conversation.specs && conversation.specs !== "Unknown");
+    const specsExplicitlyUnknown = currentStep === 3 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
+    if (specsExplicitlyUnknown) vehicleUpdates.specs = "Unknown";
+
     // ── Build knownFields for Kaya's system prompt ─────────────────
     // At step 5 (sell timeline answer), detect urgency and pass Dubai hour
     const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
@@ -167,8 +175,10 @@ export async function POST(req: NextRequest) {
                          ? vehicleUpdates.specs
                          : (conversation.specs && conversation.specs !== "Unknown" ? conversation.specs : null);
     const currentYear = new Date().getFullYear();
-    // All vehicle fields must be present before leaving step 3
-    const hasAllVehicleFields = !!carMileage && !!carSpecs;
+    // All vehicle fields must be present before leaving step 3.
+    // specsExplicitlyUnknown counts as "answered" so the flow continues.
+    const hasAllVehicleFields = !!carMileage && (!!carSpecs || specsExplicitlyUnknown
+                                  || conversation.specs === "Unknown");
     // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
     const skipLoan = currentStep === 3 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
 

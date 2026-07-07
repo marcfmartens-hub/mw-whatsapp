@@ -77,20 +77,22 @@ STRICT ORDER — follow these checks top to bottom and stop at the first one tha
 
 3. Mileage missing? → Ask for BOTH mileage and specs (GCC or non-GCC) in ONE question. NEVER skip this step.
 
-4. Specs missing? → Ask for specs only.
+4. Specs missing? → Ask for specs only (GCC or non-GCC). If the customer says they don't know or are not sure, accept it — reply "No problem, I'll note it as Unknown!" and continue.
 
-5. Make + model + year + mileage + specs ALL present?
+5. Specs is "Unknown (customer not sure)"? → Treat as answered and proceed.
+
+6. Make + model + year + mileage + specs ALL present (or Unknown)?
    - Skip mortgage YES → show the car summary (plain text, no emojis) and ask "Does that look correct?"
    - Skip mortgage NO → ask "Is there any outstanding mortgage on the car?"
 
 NEVER ask about mortgage or finance before mileage and specs are both collected.
 
-Summary format (no emojis, no icons):
+Summary format (no emojis, no icons — include Unknown fields as-is):
 Make: [Make]
 Model: [Model]
 Year: [Year]
 Mileage: [Mileage] km
-Specs: [Specs]`,
+Specs: [Specs or Unknown]`,
 
   4: `The customer answered the mortgage question.
 - If they said NO mortgage: acknowledge briefly (e.g. "Got it!"). Then show the summary (below) and ask "Does that look correct?"
@@ -156,7 +158,7 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.model  && known.model  !== "Unknown") contextLines.push(`Model: ${known.model}`);
   if (known.year)                                 contextLines.push(`Year: ${known.year}`);
   if (known.mileage)                              contextLines.push(`Mileage: ${known.mileage} km`);
-  if (known.specs  && known.specs  !== "Unknown") contextLines.push(`Specs: ${known.specs}`);
+  if (known.specs) contextLines.push(`Specs: ${known.specs === "Unknown" ? "Unknown (customer not sure)" : known.specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
   if (known.loan)           contextLines.push(`Mortgage: ${known.loan}`);
   if (known.mortgage_amount) contextLines.push(`Mortgage amount: AED ${known.mortgage_amount}`);
