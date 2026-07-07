@@ -137,13 +137,29 @@ export async function POST(req: NextRequest) {
     // At step 5 (sell timeline answer), detect urgency and pass Dubai hour
     const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
     const sellUrgent   = sellTimeline ? URGENT_KEYWORDS.test(sellTimeline) : undefined;
+    // ── Mortgage amount extraction (step 4 = mortgage answer) ────────
+    let mortgageAmount: string | undefined;
+    if (fieldToSave === "loan" && messageText) {
+      const isYes = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(messageText);
+      if (isYes) {
+        const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
+        if (amountMatch) {
+          const raw = amountMatch[0].replace(/,/g, "").trim();
+          mortgageAmount = /k$/i.test(raw)
+            ? String(parseFloat(raw) * 1000)
+            : raw;
+        }
+      }
+    }
+
     const knownFields  = {
       ...conversation,
       ...coreUpdates,
       ...vehicleUpdates,
-      sell_timeline: sellTimeline,
-      sell_urgent:   sellUrgent,
-      dubai_hour:    getDubaiHour(),
+      sell_timeline:   sellTimeline,
+      sell_urgent:     sellUrgent,
+      dubai_hour:      getDubaiHour(),
+      mortgage_amount: mortgageAmount ?? conversation.mortgage_amount,
     };
     const reply = await getKayaReply(currentStep, [], messageText, knownFields);
 
@@ -170,7 +186,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Appointment date/time extraction (step 5 = appointment answer) ──
+    // ── Save mortgage amount if extracted ─────────────────────────────
+    if (mortgageAmount) {
+      try {
+        await updateConversation(phone, { mortgage_amount: mortgageAmount });
+      } catch (e) {
+        console.error("mortgageAmount save error (non-fatal):", e);
+      }
+    }
+
+    // ── Appointment date/time extraction (step 7 = appointment answer) ──
     if (fieldToSave === "appointment" && messageText) {
       try {
         const appt = await extractAppointment(messageText);

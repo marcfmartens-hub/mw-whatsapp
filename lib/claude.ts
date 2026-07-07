@@ -25,6 +25,7 @@ export type KnownFields = {
   mileage?: string | null;
   specs?: string | null;
   loan?: string | null;
+  mortgage_amount?: string | null;
   sell_timeline?: string | null;
   sell_urgent?: boolean | null;
   dubai_hour?: number | null;
@@ -71,26 +72,35 @@ If no typo issues, check "What you already know":
 - If make + model + year are still missing or incomplete: ask for them first.
 - If make + model + year are all present but mileage or specs are missing: ask only for what's missing.
 - If make + model + year + mileage + specs are ALL present:
-  - If the car year is less than 5 years old (from today 2026): acknowledge and ask if there is any outstanding bank loan or finance on the car.
-  - If the car is 5 years old or older: skip the loan question and go straight to the summary — show the collected details and ask if everything is correct.`,
+  - If the car year is less than 5 years old (from today 2026): acknowledge and ask if there is any outstanding mortgage on the car. If yes, also ask for the outstanding amount.
+  - If the car is 5 years old or older: skip the mortgage question and go straight to the summary — show the collected details and ask if everything is correct.`,
 
-  4: `The customer answered the loan question. Acknowledge briefly, then summarize all collected car details in a short list and ask them to confirm it's correct. Format like:
+  4: `The customer answered the mortgage question.
+- If they said NO mortgage: acknowledge briefly, then go to the summary.
+- If they said YES mortgage: check "What you already know" for "Mortgage amount". If the amount is not yet known, ask: "How much is the outstanding amount?" and wait for the answer before showing the summary.
+- Once you have mortgage status AND amount (if applicable), summarize all collected car details and ask to confirm:
+
 "Here's what I've got so far:
-🚗 [Make] [Model] [Year]
-📍 [Mileage] km | [Specs]
-💳 Loan: [Loan status]
 
-Does that look correct? 😊"
-If any field is Unknown, skip it from the summary and do not mention it.`,
+Make: [Make]
+Model: [Model]
+Year: [Year]
+Mileage: [Mileage] km
+Specs: [Specs]
+Mortgage: [No / Yes - AED [amount]]
+
+Does that look correct?"
+
+Skip any field that is Unknown. Do not use emojis or icons in the summary.`,
 
   5: `The customer just confirmed (or corrected) their car details.
 - If they confirmed (yes / correct / looks good): acknowledge and ask: "When are you planning to sell the car?"
-- If they corrected something: acknowledge the correction warmly, update your understanding, then show the corrected summary and ask again if everything is correct now.
+- If they corrected something: acknowledge the correction warmly, update your understanding, then show the corrected summary (same plain format, no icons) and ask again if everything is correct now.
 Do NOT move on to the sell question until they have confirmed.`,
 
   6: `The customer just told you when they want to sell. Check "What you already know" for "Sell urgency" and "Dubai time".
 - If sell urgency is YES (they want to sell today / now / anytime / asap / when the price is right):
-  - Reply: "Alright, sounds good! 😊"
+  - Reply: "Alright, sounds good!"
   - If Dubai time is before 15:00: ask "What time can you bring the car to our branch today for inspection?" (last slot is 18:30)
   - If Dubai time is 15:00 or later: ask "Can you bring the car in today, or would tomorrow work better for you?"
 - If sell urgency is NO (they gave a future date or vague timeframe):
@@ -132,7 +142,8 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.mileage)      contextLines.push(`Mileage: ${known.mileage} km`);
   if (known.specs)        contextLines.push(`Specs: ${known.specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
-  if (known.loan)          contextLines.push(`Loan: ${known.loan}`);
+  if (known.loan)           contextLines.push(`Mortgage: ${known.loan}`);
+  if (known.mortgage_amount) contextLines.push(`Mortgage amount: AED ${known.mortgage_amount}`);
   if (known.typo_check && Array.isArray(known.typo_check) && (known.typo_check as TypoCheck[]).length > 0) {
     const checks = (known.typo_check as TypoCheck[]).map(t => `${t.field} "${t.input}" → did you mean "${t.suggestion}"?`).join("; ");
     contextLines.push(`Typo check (needs confirmation): ${checks}`);
