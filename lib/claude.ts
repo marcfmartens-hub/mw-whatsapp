@@ -5,7 +5,8 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY as string,
 });
 
-const MODEL = "claude-haiku-4-5-20251001";
+const KAYA_MODEL      = "claude-sonnet-5";      // chat responses — needs reliable instruction-following
+const EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"; // structured JSON extraction — simple, cheap
 const MAX_TOKENS = 250;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -233,7 +234,7 @@ export async function getKayaReply(
 
   try {
     const response = await anthropic.messages.create({
-      model: MODEL,
+      model: KAYA_MODEL,
       max_tokens: MAX_TOKENS,
       system: buildSystemPrompt(step, known),
       messages,
@@ -261,7 +262,7 @@ export async function extractAppointment(
 ): Promise<{ appointment_date: string; appointment_time: string }> {
   try {
     const response = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTOR_MODEL,
       max_tokens: 60,
       system: `Extract an appointment date and time from a WhatsApp message.
 Return ONLY a JSON object with keys "appointment_date" and "appointment_time".
@@ -304,7 +305,7 @@ export async function extractVehicleInfo(
 
   try {
     const response = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTOR_MODEL,
       max_tokens: 80,
       system: `You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data. If you are not 100% sure, return "Unknown" or omit the field.
 
@@ -350,6 +351,11 @@ Examples:
       const result: VehicleFields = {};
       for (const key of ["make","model","year","mileage","specs"] as const) {
         if (typeof parsed[key] === "string" && parsed[key].trim()) result[key] = parsed[key].trim();
+      }
+      // Guard: if extracted mileage looks like a year (1990–2030), it's a year, not mileage
+      if (result.mileage) {
+        const km = parseInt(result.mileage, 10);
+        if (km >= 1990 && km <= 2030) delete result.mileage;
       }
       if (Array.isArray(parsed.typo_check) && parsed.typo_check.length > 0) {
         result.typo_check = parsed.typo_check;

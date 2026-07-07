@@ -48,6 +48,53 @@ function getDubaiHour(): number {
   return new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
 }
 
+// For data-collection steps (2, 3, 4) build the response directly — no LLM.
+// Returns null when the case is too nuanced for a template (fall through to LLM).
+function buildDirectResponse(
+  nextAction: string,
+  name: string | null | undefined,
+  known: { make?: string | null; model?: string | null; year?: string | null;
+           mileage?: string | null; specs?: string | null }
+): string | null {
+  const n = name ? `, ${name}` : "";
+
+  if (nextAction.startsWith('Reply with exactly:')) {
+    const m = nextAction.match(/:\s*"(.+)"$/);
+    return m ? m[1] : null;
+  }
+  if (nextAction.includes("make, model and year")) {
+    return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
+  }
+  if (nextAction.includes("mileage AND whether")) {
+    return `Got it${n}! 👌 Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
+  }
+  if (nextAction.includes("Is it GCC or non-GCC specs?")) {
+    return `Got it${n}! Is it GCC or non-GCC specs?`;
+  }
+  if (nextAction.includes("outstanding mortgage")) {
+    return `Is there any outstanding mortgage on the car?`;
+  }
+  if (nextAction.includes("outstanding balance")) {
+    return `How much is the outstanding balance?`;
+  }
+  if (nextAction.includes("confirm or clarify the car model")) {
+    return `Could you confirm the car model and year${n}?`;
+  }
+  if (nextAction.includes("Show the car summary")) {
+    const make    = known.make    || "Unknown";
+    const model   = known.model   || "Unknown";
+    const year    = known.year    || "Unknown";
+    const mileage = known.mileage ? `${known.mileage} km` : "Unknown";
+    const specs   = known.specs   || "Unknown";
+    return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\n\nDoes that look correct?`;
+  }
+  if (nextAction.startsWith("Confirm typo")) {
+    const m = nextAction.match(/did you mean ([^"]+)\?/);
+    if (m) return `Just to confirm${n} — did you mean ${m[1].trim()}? 😊`;
+  }
+  return null;
+}
+
 function getDubaiDateTime(): string {
   const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
   const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -200,7 +247,9 @@ export async function POST(req: NextRequest) {
 
     let nextAction: string | undefined;
 
-    if (currentStep === 2) {
+    if (currentStep === 1 && GREETING_ONLY.test(messageText)) {
+      nextAction = `Reply with exactly: "And what's your name? 😊"`;
+    } else if (currentStep === 2) {
       if (hasTypo) {
         const t = vehicleUpdates.typo_check![0];
         nextAction = `Confirm typo — ask: "Just to confirm — did you mean ${t.suggestion}? 😊" Do not ask for mileage yet.`;
@@ -241,7 +290,10 @@ export async function POST(req: NextRequest) {
       skip_mortgage:   hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
       next_action:     nextAction,
     };
-    const reply = await getKayaReply(currentStep, [], messageText, knownFields);
+    // For data-collection steps, generate the reply directly — zero hallucination risk.
+    // Fall through to LLM only for nuanced cases (typo confirmation, summary correction, booking).
+    const directReply = nextAction ? buildDirectResponse(nextAction, conversation.name, knownFields) : null;
+    const reply = directReply ?? await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
 

@@ -88,7 +88,6 @@ export async function updateConversation(
 }
 
 export async function resetConversation(phone: string): Promise<void> {
-  // Reset core fields first — these always exist in the DB
   const { error } = await supabase
     .from(TABLE)
     .update({
@@ -96,11 +95,17 @@ export async function resetConversation(phone: string): Promise<void> {
       name: null,
       phone_number: null,
       car: null,
+      make: null,
+      model: null,
+      year: null,
       mileage: null,
+      specs: null,
       loan: null,
       mortgage_amount: null,
       sell_timeline: null,
       appointment: null,
+      appointment_date: null,
+      appointment_time: null,
       last_msg_id: null,
       nudged_at: null,
     })
@@ -110,11 +115,4 @@ export async function resetConversation(phone: string): Promise<void> {
     console.error("resetConversation error:", error);
     throw error;
   }
-
-  // Reset extracted fields separately — these columns may not exist yet if the
-  // DB migration hasn't been run; fail silently so reset still works.
-  await supabase
-    .from(TABLE)
-    .update({ make: null, model: null, year: null, specs: null, appointment_date: null, appointment_time: null })
-    .eq("phone", phone);
 }
