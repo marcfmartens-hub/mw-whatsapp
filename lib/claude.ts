@@ -143,7 +143,15 @@ const CLOSING_INSTRUCTION =
 function buildSystemPrompt(step: number, known: KnownFields): string {
   const maxStep = Math.max(...Object.keys(STEP_INSTRUCTIONS).map(Number));
   const clampedStep = Math.min(Math.max(step, 0), maxStep + 1);
-  const instruction = STEP_INSTRUCTIONS[clampedStep] ?? CLOSING_INSTRUCTION;
+  let instruction = STEP_INSTRUCTIONS[clampedStep] ?? CLOSING_INSTRUCTION;
+
+  // When next_action is set, override the instruction entirely — inject it directly
+  // so the model doesn't have to cross-reference context sections
+  if (known.next_action) {
+    instruction = `Your ONLY task right now: ${known.next_action}
+
+Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, or day/time. Do NOT ask anything else.`;
+  }
 
   const contextLines: string[] = [];
   if (known.name)         contextLines.push(`Customer name: ${known.name}`);

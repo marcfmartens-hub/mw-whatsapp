@@ -188,26 +188,38 @@ export async function POST(req: NextRequest) {
     // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
     const skipLoan = currentStep === 3 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
 
-    // ── Compute next_action for step 3 and 4 so the model executes one clear directive ──
-    let nextAction: string | undefined;
-    if (currentStep === 3) {
-      const hasTypo  = Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0;
-      const hasModel = !!(vehicleUpdates.make ?? conversation.make) && !!(
-        (vehicleUpdates.model && vehicleUpdates.model !== "Unknown") ||
-        (conversation.model && conversation.model !== "Unknown")
-      );
-      const hasYear  = !!(vehicleUpdates.year ?? conversation.year);
-      const hasSpecs = !!carSpecs || specsExplicitlyUnknown || conversation.specs === "Unknown";
+    // ── Compute next_action for steps 2–4 so the model executes one clear directive ──
+    // The webhook evaluates all conditions; the model just phrases the result naturally.
+    const hasTypo  = Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0;
+    const hasModel = !!(vehicleUpdates.make ?? conversation.make) && !!(
+      (vehicleUpdates.model && vehicleUpdates.model !== "Unknown") ||
+      (conversation.model   && conversation.model   !== "Unknown")
+    );
+    const hasYear  = !!(vehicleUpdates.year ?? conversation.year);
+    const hasSpecs = !!carSpecs || specsExplicitlyUnknown || conversation.specs === "Unknown";
 
+    let nextAction: string | undefined;
+
+    if (currentStep === 2) {
       if (hasTypo) {
         const t = vehicleUpdates.typo_check![0];
-        nextAction = `Ask the customer to confirm the ${t.field}: "Just to confirm — did you mean ${t.suggestion}? 😊" Wait for the answer.`;
+        nextAction = `Confirm typo — ask: "Just to confirm — did you mean ${t.suggestion}? 😊" Do not ask for mileage yet.`;
       } else if (!hasModel || !hasYear) {
-        nextAction = `Ask the customer to confirm or clarify the car model and year. Reference what they typed if available.`;
+        nextAction = `Ask for the car make, model and year.`;
+      } else {
+        // make/model/year all confirmed — ask for mileage + specs
+        nextAction = `Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.`;
+      }
+    } else if (currentStep === 3) {
+      if (hasTypo) {
+        const t = vehicleUpdates.typo_check![0];
+        nextAction = `Confirm typo — ask: "Just to confirm — did you mean ${t.suggestion}? 😊" Do not ask for mileage yet.`;
+      } else if (!hasModel || !hasYear) {
+        nextAction = `Ask the customer to confirm or clarify the car model and year.`;
       } else if (!carMileage) {
-        nextAction = `Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in ONE question.`;
+        nextAction = `Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.`;
       } else if (!hasSpecs) {
-        nextAction = `Ask ONLY: "Is it GCC or non-GCC specs?" — nothing else.`;
+        nextAction = `Ask ONLY: "Is it GCC or non-GCC specs?"`;
       } else if (skipLoan) {
         nextAction = `Show the car summary (plain, no emojis) and ask "Does that look correct?"`;
       } else {
