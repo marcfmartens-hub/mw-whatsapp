@@ -30,16 +30,17 @@ export async function GET(req: NextRequest) {
 const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   0: undefined,          // first contact — nothing to save
   1: "name",             // customer gives name
-  2: "car",              // customer states intent / car info
-  3: undefined,          // mileage+specs collected via vehicle extraction only
-  4: "loan",             // loan status (skipped for cars 5+ years old)
-  5: undefined,          // summary confirmation — no field to save
-  6: "sell_timeline",    // when do they want to sell?
-  7: "appointment",      // appointment day/time — Bigin fires after this
+  2: "phone_number",     // UAE contact number (only asked when sender is non-UAE)
+  3: "car",              // customer states intent / car info
+  4: undefined,          // mileage+specs collected via vehicle extraction only
+  5: "loan",             // loan status (skipped for cars 5+ years old)
+  6: undefined,          // summary confirmation — no field to save
+  7: "sell_timeline",    // when do they want to sell?
+  8: "appointment",      // appointment day/time — Bigin fires after this
 };
 
-const FINAL_STEP  = 7;
-const CLOSING_STEP = 8;
+const FINAL_STEP  = 8;
+const CLOSING_STEP = 9;
 
 const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
@@ -86,6 +87,7 @@ function formatMileage(raw: string | null | undefined): string {
 // Using a discriminated union avoids fragile substring matching.
 type NextAction =
   | { type: "ASK_NAME" }
+  | { type: "ASK_UAE_PHONE" }
   | { type: "ASK_CAR_DETAILS" }
   | { type: "ASK_MILEAGE_SPECS" }
   | { type: "ASK_SPECS" }
@@ -100,6 +102,7 @@ type NextAction =
 function describeAction(a: NextAction): string {
   switch (a.type) {
     case "ASK_NAME":         return `Reply with exactly: "And what's your name? 😊"`;
+    case "ASK_UAE_PHONE":    return "Ask: \"On which UAE number can we reach you on?\"";
     case "ASK_CAR_DETAILS":  return "Ask for the car make, model and year.";
     case "ASK_MILEAGE_SPECS":return "Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.";
     case "ASK_SPECS":        return `Ask ONLY: "Is it GCC or non-GCC specs?"`;
@@ -124,6 +127,8 @@ function buildDirectResponse(
   switch (action.type) {
     case "ASK_NAME":
       return "And what's your name? 😊";
+    case "ASK_UAE_PHONE":
+      return `Hi${n}! 😊 On which UAE number can we reach you on?`;
     case "ASK_CAR_DETAILS":
       return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
     case "ASK_MILEAGE_SPECS":
@@ -213,7 +218,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "ignored" }, { status: 200 });
     }
 
-    const phone = message.from;
+    const phone   = message.from;
+    const isUAE   = phone.startsWith("971");
     const messageText = message.text?.body?.trim() ?? "";
 
     // ── Reset trigger ──────────────────────────────────────────────
@@ -269,11 +275,11 @@ export async function POST(req: NextRequest) {
     const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
 
     // ── Explicit "I don't know specs" detection ────────────────────
-    // If at step 3, specs not yet known, and customer expresses uncertainty → record Unknown
+    // If at step 4, specs not yet known, and customer expresses uncertainty → record Unknown
     const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
     const hasKnownSpecs = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
                           || (conversation.specs && conversation.specs !== "Unknown");
-    const specsExplicitlyUnknown = currentStep === 3 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
+    const specsExplicitlyUnknown = currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
     if (specsExplicitlyUnknown) vehicleUpdates.specs = "Unknown";
 
     // ── Build knownFields for Kaya's system prompt ─────────────────
@@ -286,7 +292,7 @@ export async function POST(req: NextRequest) {
     let mortgageAmount: string | undefined;
     const loanAnswer = fieldToSave === "loan" ? messageText : (conversation.loan ?? "");
     const loanIsYes  = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(loanAnswer);
-    if (currentStep === 4 && loanIsYes && messageText) {
+    if (currentStep === 5 && loanIsYes && messageText) {
       const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
       if (amountMatch) {
         const raw = amountMatch[0].replace(/,/g, "").trim();
@@ -302,12 +308,12 @@ export async function POST(req: NextRequest) {
                          ? vehicleUpdates.specs
                          : (conversation.specs && conversation.specs !== "Unknown" ? conversation.specs : null);
     const currentYear = new Date().getFullYear();
-    // All vehicle fields must be present before leaving step 3.
+    // All vehicle fields must be present before leaving step 4.
     // specsExplicitlyUnknown counts as "answered" so the flow continues.
     const hasAllVehicleFields = !!carMileage && (!!carSpecs || specsExplicitlyUnknown
                                   || conversation.specs === "Unknown");
     // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
-    const skipLoan = currentStep === 3 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
+    const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
 
     // ── Compute next_action for steps 2–4 so the model executes one clear directive ──
     // The webhook evaluates all conditions; the model just phrases the result naturally.
@@ -323,7 +329,13 @@ export async function POST(req: NextRequest) {
 
     if (currentStep === 1 && GREETING_ONLY.test(messageText)) {
       action = { type: "ASK_NAME" };
+    } else if (currentStep === 1 && !isUAE) {
+      // Non-UAE sender: after collecting name, ask for their UAE contact number
+      action = { type: "ASK_UAE_PHONE" };
     } else if (currentStep === 2) {
+      // UAE phone just provided — move straight to asking about the car
+      action = { type: "ASK_CAR_DETAILS" };
+    } else if (currentStep === 3) {
       if (hasTypo) {
         action = { type: "CONFIRM_TYPO", suggestion: vehicleUpdates.typo_check![0].suggestion };
       } else if (!hasModel || !hasYear) {
@@ -331,7 +343,7 @@ export async function POST(req: NextRequest) {
       } else {
         action = { type: "ASK_MILEAGE_SPECS" };
       }
-    } else if (currentStep === 3) {
+    } else if (currentStep === 4) {
       if (hasTypo) {
         action = { type: "CONFIRM_TYPO", suggestion: vehicleUpdates.typo_check![0].suggestion };
       } else if (!hasModel || !hasYear) {
@@ -345,9 +357,9 @@ export async function POST(req: NextRequest) {
       } else {
         action = { type: "ASK_MORTGAGE" };
       }
-    } else if (currentStep === 4 && loanIsYes && !mortgageAmount && !conversation.mortgage_amount) {
+    } else if (currentStep === 5 && loanIsYes && !mortgageAmount && !conversation.mortgage_amount) {
       action = { type: "ASK_AMOUNT" };
-    } else if (currentStep === 4) {
+    } else if (currentStep === 5) {
       // Mortgage step is complete (loan=No, or loan=Yes+amount collected) — show full summary directly
       action = { type: "SHOW_FULL_SUMMARY" };
     }
@@ -371,26 +383,27 @@ export async function POST(req: NextRequest) {
     // Steps with a typed action always get a direct template response — zero LLM hallucination risk.
     // Steps without an action (5, 6, 7, 8) go to the LLM for nuanced handling.
     const reply = action
-      ? buildDirectResponse(action, conversation.name, knownFields)
+      ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
 
     // ── Persist core update + advance step ─────────────────────────
-    // Stay at step 3 until BOTH mileage and specs are collected.
-    // Once both known: skip to step 5 for old cars (5+ years), else advance to step 4.
+    // Stay at step 4 until BOTH mileage and specs are collected.
+    // Once both known: skip to step 6 for old cars (5+ years), else advance to step 5.
     // Don't advance from step 1 if the customer only sent a greeting (not a real name)
-    const stayAtStep1 = currentStep === 1 && GREETING_ONLY.test(messageText);
-    // Don't advance from step 3 until both mileage AND specs are collected
-    const stayAtStep3 = currentStep === 3 && !hasAllVehicleFields;
-    // Don't advance from step 4 if loan=yes but amount not yet collected
-    const stayAtStep4 = currentStep === 4 && loanIsYes
+    const stayAtStep1        = currentStep === 1 && GREETING_ONLY.test(messageText);
+    // Don't advance from step 4 until both mileage AND specs are collected
+    const stayAtMileageSpecs = currentStep === 4 && !hasAllVehicleFields;
+    // Don't advance from step 5 if loan=yes but amount not yet collected
+    const stayAtLoanAmount   = currentStep === 5 && loanIsYes
       && !mortgageAmount && !conversation.mortgage_amount;
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
-      : stayAtStep1 ? 1
-      : stayAtStep3 ? 3
-      : stayAtStep4 ? 4
-      : skipLoan    ? 5
+      : stayAtStep1        ? 1
+      : stayAtMileageSpecs ? 4
+      : stayAtLoanAmount   ? 5
+      : currentStep === 1 && isUAE ? 3  // UAE senders skip the UAE-phone step
+      : skipLoan           ? 6
       : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
