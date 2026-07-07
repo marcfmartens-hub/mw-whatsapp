@@ -108,7 +108,7 @@ Mileage: [Mileage] km
 Specs: [Specs]
 Mortgage: [No / Yes - AED [amount]]
 
-No emojis or icons in the summary. Skip any field that is Unknown.`,
+No emojis or icons in the summary. Include Unknown fields as-is — do not skip them.`,
 
   5: `The customer just responded to the car summary.
 - If they confirmed (yes / correct / looks good): ask "When are you planning to sell the car?"

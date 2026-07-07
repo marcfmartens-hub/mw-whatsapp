@@ -127,7 +127,11 @@ export async function POST(req: NextRequest) {
     // ── Core update (guaranteed columns only) ──────────────────────
     const coreUpdates: Partial<Conversation> = { last_msg_id: message.id };
     if (fieldToSave && messageText) {
-      (coreUpdates as any)[fieldToSave] = messageText;
+      // Don't overwrite an already-saved loan answer with a mortgage amount follow-up
+      const isLoanAmountFollowUp = fieldToSave === "loan" && !!conversation.loan;
+      if (!isLoanAmountFollowUp) {
+        (coreUpdates as any)[fieldToSave] = messageText;
+      }
     }
 
     // ── Vehicle extraction — runs on EVERY message ─────────────────
@@ -154,18 +158,19 @@ export async function POST(req: NextRequest) {
     // At step 5 (sell timeline answer), detect urgency and pass Dubai hour
     const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
     const sellUrgent   = sellTimeline ? URGENT_KEYWORDS.test(sellTimeline) : undefined;
-    // ── Mortgage amount extraction (step 4 = mortgage answer) ────────
+    // ── Mortgage amount extraction ─────────────────────────────────
+    // Runs at step 4 whether the customer says "yes 50k" in one go,
+    // or says "yes" first and provides the amount as a follow-up.
     let mortgageAmount: string | undefined;
-    if (fieldToSave === "loan" && messageText) {
-      const isYes = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(messageText);
-      if (isYes) {
-        const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
-        if (amountMatch) {
-          const raw = amountMatch[0].replace(/,/g, "").trim();
-          mortgageAmount = /k$/i.test(raw)
-            ? String(parseFloat(raw) * 1000)
-            : raw;
-        }
+    const loanAnswer = fieldToSave === "loan" ? messageText : (conversation.loan ?? "");
+    const loanIsYes  = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(loanAnswer);
+    if (currentStep === 4 && loanIsYes && messageText) {
+      const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
+      if (amountMatch) {
+        const raw = amountMatch[0].replace(/,/g, "").trim();
+        mortgageAmount = /k$/i.test(raw)
+          ? String(parseFloat(raw) * 1000)
+          : raw;
       }
     }
 
@@ -204,9 +209,13 @@ export async function POST(req: NextRequest) {
     const stayAtStep1 = currentStep === 1 && GREETING_ONLY.test(messageText);
     // Don't advance from step 3 until both mileage AND specs are collected
     const stayAtStep3 = currentStep === 3 && !hasAllVehicleFields;
+    // Don't advance from step 4 if loan=yes but amount not yet collected
+    const stayAtStep4 = currentStep === 4 && loanIsYes
+      && !mortgageAmount && !conversation.mortgage_amount;
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
       : stayAtStep1 ? 1
       : stayAtStep3 ? 3
+      : stayAtStep4 ? 4
       : skipLoan    ? 5
       : currentStep + 1;
     coreUpdates.step = nextStep;
