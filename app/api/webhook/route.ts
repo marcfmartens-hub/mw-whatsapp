@@ -41,7 +41,8 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
 const FINAL_STEP  = 7;
 const CLOSING_STEP = 8;
 
-const URGENT_KEYWORDS = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
+const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
+const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
 
 function getDubaiHour(): number {
   return new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
@@ -189,8 +190,12 @@ export async function POST(req: NextRequest) {
     // ── Persist core update + advance step ─────────────────────────
     // Stay at step 3 until BOTH mileage and specs are collected.
     // Once both known: skip to step 5 for old cars (5+ years), else advance to step 4.
+    // Don't advance from step 1 if the customer only sent a greeting (not a real name)
+    const stayAtStep1 = currentStep === 1 && GREETING_ONLY.test(messageText);
+    // Don't advance from step 3 until both mileage AND specs are collected
     const stayAtStep3 = currentStep === 3 && !hasAllVehicleFields;
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
+      : stayAtStep1 ? 1
       : stayAtStep3 ? 3
       : skipLoan    ? 5
       : currentStep + 1;

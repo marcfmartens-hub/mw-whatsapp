@@ -55,8 +55,10 @@ const STEP_INSTRUCTIONS: Record<number, string> = {
 
 Before we start, may I know your name please?"`,
 
-  1: `The customer just told you their name. Greet them warmly by name — e.g. "Hi [name], nice to have you here! 😊 How can I help you today?"
-NEVER say your own name (Kaya) or mention Mister Wheelz again after this step.`,
+  1: `The customer just responded to "may I know your name please?"
+- If the message is ONLY a greeting (hi / hey / hello / hiya / yo / etc.) and NOT an actual name: do not accept it as a name. Ask again warmly: "And what's your name? 😊"
+- If the message contains a real name (e.g. "Marc", "I'm Marc", "it's Sarah"): greet them by name — e.g. "Hi [name], nice to have you here! 😊 How can I help you today?"
+NEVER say your own name (Kaya) or mention Mister Wheelz again after step 0.`,
 
   2: `The customer just told you what they want.
 First check "What you already know" for typo_check — if any entries exist, address them before anything else (e.g. "Just to confirm — did you mean [suggestion]? 😊").
@@ -67,17 +69,21 @@ Do NOT ask for mileage or specs until make + model + year are all known.`,
 
   3: `The customer just gave you vehicle details.
 
-FIRST — check "What you already know" for "Typo check". If there is a typo_check entry:
-- Ask for confirmation BEFORE anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊"
-- Do not continue until confirmed.
+STRICT ORDER — follow these checks top to bottom and stop at the first one that applies:
 
-If no typo issues, check what is still missing in "What you already know":
-- make / model / year missing → ask for them
-- Mileage missing → ask for BOTH mileage and specs (GCC or non-GCC) in one question
-- Mileage known but Specs missing → ask for specs only
-- Make + model + year + mileage + specs are ALL present → check "Skip mortgage":
-  - Skip mortgage YES: show the car summary (plain, no emojis) and ask "Does that look correct?"
-  - Skip mortgage NO: ask "Is there any outstanding mortgage on the car?"
+1. Typo check present in "What you already know"? → Ask for confirmation BEFORE anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊" Do not continue until confirmed.
+
+2. Make / model / year missing? → Ask for them.
+
+3. Mileage missing? → Ask for BOTH mileage and specs (GCC or non-GCC) in ONE question. NEVER skip this step.
+
+4. Specs missing? → Ask for specs only.
+
+5. Make + model + year + mileage + specs ALL present?
+   - Skip mortgage YES → show the car summary (plain text, no emojis) and ask "Does that look correct?"
+   - Skip mortgage NO → ask "Is there any outstanding mortgage on the car?"
+
+NEVER ask about mortgage or finance before mileage and specs are both collected.
 
 Summary format (no emojis, no icons):
 Make: [Make]
@@ -87,10 +93,11 @@ Mileage: [Mileage] km
 Specs: [Specs]`,
 
   4: `The customer answered the mortgage question.
-- If they said NO mortgage: acknowledge briefly (e.g. "Got it!").
-- If they said YES mortgage and the amount is not yet known: ask "How much is the outstanding amount?"
-- If they said YES and the amount IS known: acknowledge (e.g. "Got it!").
-Once mortgage status and amount (if applicable) are resolved, show the car summary and ask "Does that look correct?":
+- If they said NO mortgage: acknowledge briefly (e.g. "Got it!"). Then show the summary (below) and ask "Does that look correct?"
+- If they said YES mortgage: ALWAYS ask for the outstanding balance — "How much is the outstanding balance?" — before showing the summary. Do not show the summary until you have the amount.
+- If the amount is now known: acknowledge it, then show the summary and ask "Does that look correct?"
+
+Summary and ask "Does that look correct?":
 
 Make: [Make]
 Model: [Model]
