@@ -33,12 +33,11 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   2: "car",           // customer states intent / car info
   3: "mileage",       // customer gives mileage + specs (raw)
   4: "loan",          // loan status
-  5: "appointment",   // appointment day/time
-  6: "phone_number",  // phone number
+  5: "appointment",   // appointment day/time — Bigin fires after this
 };
 
-const FINAL_STEP = 6;   // phone number collected — booking complete, push to Bigin
-const CLOSING_STEP = 7;
+const FINAL_STEP = 5;   // appointment collected — booking complete, push to Bigin
+const CLOSING_STEP = 6;
 
 interface IncomingMessage {
   from: string;
@@ -95,6 +94,12 @@ export async function POST(req: NextRequest) {
     // ──────────────────────────────────────────────────────────────
 
     const conversation = await getOrCreateConversation(phone);
+
+    // Auto-save WhatsApp number as phone_number if not set yet
+    if (!conversation.phone_number) {
+      await updateConversation(phone, { phone_number: phone });
+      conversation.phone_number = phone;
+    }
 
     if (conversation.last_msg_id && conversation.last_msg_id === message.id) {
       return NextResponse.json({ status: "duplicate" }, { status: 200 });

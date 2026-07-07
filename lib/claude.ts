@@ -61,9 +61,7 @@ Check "What you already know":
 
   4: `The customer answered the loan question. Acknowledge briefly and ask what day and time works best for their appointment at the Mister Wheelz office.`,
 
-  5: `The customer just gave you an appointment day and time. Acknowledge it warmly, then ask for their phone number so the team can confirm the appointment.`,
-
-  6: `The customer just gave their phone number. Confirm the full booking in one warm message: use their name, repeat the appointment day and time, and let them know the team will be in touch on that number.`,
+  5: `The customer just gave you an appointment day and time. Confirm the full booking in one warm message: use their name, repeat the appointment day and time, and let them know the Mister Wheelz team will be in touch with them on WhatsApp to confirm.`,
 };
 
 const CLOSING_INSTRUCTION =
