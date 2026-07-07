@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { MAKES_LIST, CAR_MODELS } from "./carData";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY as string,
@@ -231,34 +232,37 @@ export async function extractVehicleInfo(
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 80,
-      system: `You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data.
+      system: `You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data. If you are not 100% sure, return "Unknown" or omit the field.
 
-Return ONLY a JSON object with the fields you are 100% certain about:
-- "make"    — exact manufacturer name, properly cased (e.g. "Toyota", "BMW", "Mercedes-Benz", "Land Rover", "Rolls-Royce"). Brand name ONLY — never include model here.
-- "model"   — exact model name ONLY, no make, no year (e.g. "Camry", "X5", "C 200", "Patrol", "Prado", "Discovery"). If unsure whether it's make or model, omit it.
-- "year"    — 4-digit year between 1990 and 2026 as a string. Only include if explicitly stated or unambiguous.
-- "mileage" — digits only, no units or commas (e.g. "125000"). "k"/"K" = thousands (80k → "80000"). Only include if a number is clearly the odometer reading.
-- "specs"   — exactly one of: "GCC", "Non-GCC", "Unknown". GCC = Gulf spec / local. Non-GCC = imported / personal import. Unknown = not sure / idk.
+Return ONLY a JSON object with the fields you are certain about:
+- "make"    — must exactly match one of the valid makes below. Use the canonical spelling. If unsure, omit.
+- "model"   — must be a known model for that make (see reference). No make name, no year. If unsure, omit.
+- "year"    — 4-digit year 1990–2026 as string. Only if explicitly stated.
+- "mileage" — digits only (e.g. "125000"). "k"/"K" = ×1000. Only if clearly the odometer reading.
+- "specs"   — exactly "GCC", "Non-GCC", or "Unknown". GCC = local/Gulf spec. Non-GCC = imported. Unknown = not sure/idk.
+
+Valid makes: ${MAKES_LIST}
+
+Model reference (make: models):
+${Object.entries(CAR_MODELS).map(([m, ms]) => `${m}: ${ms.join(", ")}`).join("\n")}
 
 Strict rules:
-- If you are not certain, OMIT the field. Never guess or infer.
-- Never put the model name in "make" or vice versa.
-- Never put the year in "model".
-- Already known — do NOT overwrite: ${knownSummary || "nothing yet"}.
+- If the make is not in the valid makes list, return "Unknown" for make.
+- If the model is not listed for that make, return "Unknown" for model.
+- Never put model name in "make" or make name in "model".
+- Never put year in "model".
+- Do NOT overwrite already known fields: ${knownSummary || "nothing yet"}.
 - If nothing vehicle-related is in the message, return {}.
 
 Examples:
 "BMW X5 2019"             → {"make":"BMW","model":"X5","year":"2019"}
 "toyota camry 2021"       → {"make":"Toyota","model":"Camry","year":"2021"}
-"it's a Patrol"           → {"model":"Patrol"}
+"it's a Patrol"           → {"make":"Nissan","model":"Patrol"}
 "125k km gcc"             → {"mileage":"125000","specs":"GCC"}
-"non gcc, about 80000 km" → {"specs":"Non-GCC","mileage":"80000"}
-"the year is 2020"        → {"year":"2020"}
-"Mercedes C200 2022 GCC"  → {"make":"Mercedes-Benz","model":"C 200","year":"2022","specs":"GCC"}
+"Mercedes C200 2022 GCC"  → {"make":"Mercedes-Benz","model":"C-Class","year":"2022","specs":"GCC"}
 "Land Rover Discovery"    → {"make":"Land Rover","model":"Discovery"}
 "I want to sell my car"   → {}
-"yes"                     → {}
-"ok sounds good"          → {}`,
+"yes" / "ok"              → {}`,
       messages: [{ role: "user", content: messageText }],
     });
 
