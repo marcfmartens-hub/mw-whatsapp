@@ -231,29 +231,34 @@ export async function extractVehicleInfo(
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 80,
-      system: `Extract car listing details from a customer's WhatsApp message.
+      system: `You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data.
 
-Return ONLY a JSON object containing the fields you can confidently identify:
-- "make"    — brand only, title case (e.g. "Toyota", "BMW", "Mercedes-Benz")
-- "model"   — model only, title case (e.g. "Camry", "520", "C 200", "X5")
-- "year"    — 4-digit year as string (e.g. "2019")
-- "mileage" — digits only, no units or commas (e.g. "125000")
-- "specs"   — exactly "GCC", "Non-GCC", or "Unknown"
+Return ONLY a JSON object with the fields you are 100% certain about:
+- "make"    — exact manufacturer name, properly cased (e.g. "Toyota", "BMW", "Mercedes-Benz", "Land Rover", "Rolls-Royce"). Brand name ONLY — never include model here.
+- "model"   — exact model name ONLY, no make, no year (e.g. "Camry", "X5", "C 200", "Patrol", "Prado", "Discovery"). If unsure whether it's make or model, omit it.
+- "year"    — 4-digit year between 1990 and 2026 as a string. Only include if explicitly stated or unambiguous.
+- "mileage" — digits only, no units or commas (e.g. "125000"). "k"/"K" = thousands (80k → "80000"). Only include if a number is clearly the odometer reading.
+- "specs"   — exactly one of: "GCC", "Non-GCC", "Unknown". GCC = Gulf spec / local. Non-GCC = imported / personal import. Unknown = not sure / idk.
 
-Rules:
-- Omit any key you are not confident about. Never guess.
-- Already known (skip these): ${knownSummary || "nothing yet"}.
-- If nothing relevant is in the message, return {}.
-- "k" or "K" after a number means thousands (80k = 80000).
-- Specs hints: "gcc", "local" → "GCC"; "non gcc", "non-gcc", "personal import", "imported" → "Non-GCC"; "not sure", "don't know", "idk" → "Unknown".
+Strict rules:
+- If you are not certain, OMIT the field. Never guess or infer.
+- Never put the model name in "make" or vice versa.
+- Never put the year in "model".
+- Already known — do NOT overwrite: ${knownSummary || "nothing yet"}.
+- If nothing vehicle-related is in the message, return {}.
 
 Examples:
-"BMW 520 2019"            → {"make":"BMW","model":"520","year":"2019"}
-"its a 2021 toyota camry" → {"make":"Toyota","model":"Camry","year":"2021"}
+"BMW X5 2019"             → {"make":"BMW","model":"X5","year":"2019"}
+"toyota camry 2021"       → {"make":"Toyota","model":"Camry","year":"2021"}
+"it's a Patrol"           → {"model":"Patrol"}
 "125k km gcc"             → {"mileage":"125000","specs":"GCC"}
-"non gcc"                 → {"specs":"Non-GCC"}
+"non gcc, about 80000 km" → {"specs":"Non-GCC","mileage":"80000"}
 "the year is 2020"        → {"year":"2020"}
-"I want to sell"          → {}`,
+"Mercedes C200 2022 GCC"  → {"make":"Mercedes-Benz","model":"C 200","year":"2022","specs":"GCC"}
+"Land Rover Discovery"    → {"make":"Land Rover","model":"Discovery"}
+"I want to sell my car"   → {}
+"yes"                     → {}
+"ok sounds good"          → {}`,
       messages: [{ role: "user", content: messageText }],
     });
 
