@@ -6,7 +6,7 @@ const anthropic = new Anthropic({
 });
 
 const MODEL = "claude-haiku-4-5-20251001";
-const MAX_TOKENS = 150;
+const MAX_TOKENS = 250;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,7 @@ export type KnownFields = {
   dubai_hour?: number | null;
   appointment?: string | null;
   typo_check?: TypoCheck[] | null;
+  skip_mortgage?: boolean | null;
   [key: string]: unknown;
 };
 
@@ -57,8 +58,9 @@ Before we start, may I know your name please?"`,
 NEVER say your own name (Kaya) or mention Mister Wheelz again after this step.`,
 
   2: `The customer just told you what they want.
-Check "What you already know" for make, model and year.
-- If make + model + year are ALL present: react naturally (e.g. "Nice [make] [model] [year]! 👌") and ask ONLY for the mileage and whether it's GCC or non-GCC specs.
+First check "What you already know" for typo_check — if any entries exist, address them before anything else (e.g. "Just to confirm — did you mean [suggestion]? 😊").
+Then check for make, model and year:
+- If make + model + year are ALL present: react naturally (e.g. "Nice [make] [model] [year]! 👌") and in that same message ask for BOTH the mileage AND whether it's GCC or non-GCC specs.
 - If ANY of make / model / year is missing: say "Sure, I can help! 😊 Could you share the make, model and year of your car?"
 Do NOT ask for mileage or specs until make + model + year are all known.`,
 
@@ -66,21 +68,28 @@ Do NOT ask for mileage or specs until make + model + year are all known.`,
 
 FIRST — check "What you already know" for "Typo check". If there is a typo_check entry:
 - Ask for confirmation BEFORE anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊"
-- Wait for their answer. Do not advance until confirmed.
+- Do not continue until confirmed.
 
-If no typo issues, check "What you already know":
-- If make + model + year are still missing or incomplete: ask for them first.
-- If make + model + year are all present but mileage or specs are missing: ask only for what's missing.
-- If make + model + year + mileage + specs are ALL present:
-  - If the car year is less than 5 years old (from today 2026): acknowledge and ask if there is any outstanding mortgage on the car. If yes, also ask for the outstanding amount.
-  - If the car is 5 years old or older: skip the mortgage question and go straight to the summary — show the collected details and ask if everything is correct.`,
+If no typo issues, check what is still missing in "What you already know":
+- make / model / year missing → ask for them
+- Mileage missing → ask for BOTH mileage and specs (GCC or non-GCC) in one question
+- Mileage known but Specs missing → ask for specs only
+- Make + model + year + mileage + specs are ALL present → check "Skip mortgage":
+  - Skip mortgage YES: show the car summary (plain, no emojis) and ask "Does that look correct?"
+  - Skip mortgage NO: ask "Is there any outstanding mortgage on the car?"
+
+Summary format (no emojis, no icons):
+Make: [Make]
+Model: [Model]
+Year: [Year]
+Mileage: [Mileage] km
+Specs: [Specs]`,
 
   4: `The customer answered the mortgage question.
-- If they said NO mortgage: acknowledge briefly, then go to the summary.
-- If they said YES mortgage: check "What you already know" for "Mortgage amount". If the amount is not yet known, ask: "How much is the outstanding amount?" and wait for the answer before showing the summary.
-- Once you have mortgage status AND amount (if applicable), summarize all collected car details and ask to confirm:
-
-"Here's what I've got so far:
+- If they said NO mortgage: acknowledge briefly (e.g. "Got it!").
+- If they said YES mortgage and the amount is not yet known: ask "How much is the outstanding amount?"
+- If they said YES and the amount IS known: acknowledge (e.g. "Got it!").
+Once mortgage status and amount (if applicable) are resolved, show the car summary and ask "Does that look correct?":
 
 Make: [Make]
 Model: [Model]
@@ -89,14 +98,12 @@ Mileage: [Mileage] km
 Specs: [Specs]
 Mortgage: [No / Yes - AED [amount]]
 
-Does that look correct?"
+No emojis or icons in the summary. Skip any field that is Unknown.`,
 
-Skip any field that is Unknown. Do not use emojis or icons in the summary.`,
-
-  5: `The customer just confirmed (or corrected) their car details.
-- If they confirmed (yes / correct / looks good): acknowledge and ask: "When are you planning to sell the car?"
-- If they corrected something: acknowledge the correction warmly, update your understanding, then show the corrected summary (same plain format, no icons) and ask again if everything is correct now.
-Do NOT move on to the sell question until they have confirmed.`,
+  5: `The customer just responded to the car summary.
+- If they confirmed (yes / correct / looks good): ask "When are you planning to sell the car?"
+- If they corrected something: acknowledge warmly, show the corrected summary in the same plain format, and ask "Does that look correct?" again.
+Do NOT move on to the sell question until the customer has confirmed.`,
 
   6: `The customer just told you when they want to sell. Check "What you already know" for "Sell urgency" and "Dubai time".
 - If sell urgency is YES (they want to sell today / now / anytime / asap / when the price is right):
@@ -136,11 +143,11 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
 
   const contextLines: string[] = [];
   if (known.name)         contextLines.push(`Customer name: ${known.name}`);
-  if (known.make)         contextLines.push(`Make: ${known.make}`);
-  if (known.model)        contextLines.push(`Model: ${known.model}`);
-  if (known.year)         contextLines.push(`Year: ${known.year}`);
-  if (known.mileage)      contextLines.push(`Mileage: ${known.mileage} km`);
-  if (known.specs)        contextLines.push(`Specs: ${known.specs}`);
+  if (known.make   && known.make   !== "Unknown") contextLines.push(`Make: ${known.make}`);
+  if (known.model  && known.model  !== "Unknown") contextLines.push(`Model: ${known.model}`);
+  if (known.year)                                 contextLines.push(`Year: ${known.year}`);
+  if (known.mileage)                              contextLines.push(`Mileage: ${known.mileage} km`);
+  if (known.specs  && known.specs  !== "Unknown") contextLines.push(`Specs: ${known.specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
   if (known.loan)           contextLines.push(`Mortgage: ${known.loan}`);
   if (known.mortgage_amount) contextLines.push(`Mortgage amount: AED ${known.mortgage_amount}`);
@@ -148,6 +155,7 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
     const checks = (known.typo_check as TypoCheck[]).map(t => `${t.field} "${t.input}" → did you mean "${t.suggestion}"?`).join("; ");
     contextLines.push(`Typo check (needs confirmation): ${checks}`);
   }
+  if (known.skip_mortgage != null) contextLines.push(`Skip mortgage: ${known.skip_mortgage ? "YES" : "NO"}`);
   if (known.sell_timeline) contextLines.push(`Sell timeline: ${known.sell_timeline}`);
   if (known.sell_urgent != null) contextLines.push(`Sell urgency: ${known.sell_urgent ? "YES" : "NO"}`);
   if (known.dubai_hour != null)  contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);

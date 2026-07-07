@@ -31,7 +31,7 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   0: undefined,          // first contact — nothing to save
   1: "name",             // customer gives name
   2: "car",              // customer states intent / car info
-  3: "mileage",          // customer gives mileage + specs (raw)
+  3: undefined,          // mileage+specs collected via vehicle extraction only
   4: "loan",             // loan status (skipped for cars 5+ years old)
   5: undefined,          // summary confirmation — no field to save
   6: "sell_timeline",    // when do they want to sell?
@@ -152,7 +152,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const knownFields  = {
+    const carYear    = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
+    const carMileage = vehicleUpdates.mileage ?? conversation.mileage;
+    const carSpecs   = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
+                         ? vehicleUpdates.specs
+                         : (conversation.specs && conversation.specs !== "Unknown" ? conversation.specs : null);
+    const currentYear = new Date().getFullYear();
+    // All vehicle fields must be present before leaving step 3
+    const hasAllVehicleFields = !!carMileage && !!carSpecs;
+    // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
+    const skipLoan = currentStep === 3 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
+
+    const knownFields = {
       ...conversation,
       ...coreUpdates,
       ...vehicleUpdates,
@@ -160,20 +171,20 @@ export async function POST(req: NextRequest) {
       sell_urgent:     sellUrgent,
       dubai_hour:      getDubaiHour(),
       mortgage_amount: mortgageAmount ?? conversation.mortgage_amount,
+      skip_mortgage:   hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
     };
     const reply = await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
 
     // ── Persist core update + advance step ─────────────────────────
-    // After step 3 (mileage), skip loan (step 4) if car is 5+ years old
-    // Only skip if mileage is actually known — don't skip just because year was extracted early
-    const carYear = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
-    const carMileage = vehicleUpdates.mileage ?? conversation.mileage;
-    const currentYear = new Date().getFullYear();
-    const skipLoan = currentStep === 3 && carYear > 0 && !!carMileage && (currentYear - carYear) >= 5;
-    // skipLoan jumps from mileage step (3) directly to sell_timeline step (5), skipping loan (4)
-    const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : skipLoan ? 5 : currentStep + 1;
+    // Stay at step 3 until BOTH mileage and specs are collected.
+    // Once both known: skip to step 5 for old cars (5+ years), else advance to step 4.
+    const stayAtStep3 = currentStep === 3 && !hasAllVehicleFields;
+    const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
+      : stayAtStep3 ? 3
+      : skipLoan    ? 5
+      : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
 
