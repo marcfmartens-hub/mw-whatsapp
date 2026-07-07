@@ -44,8 +44,16 @@ const CLOSING_STEP = 8;
 const URGENT_KEYWORDS = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 
 function getDubaiHour(): number {
-  // Dubai is UTC+4
   return new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
+}
+
+function getDubaiDateTime(): string {
+  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()} ${d.getUTCFullYear()}, ${hh}:${mm}`;
 }
 
 interface IncomingMessage {
@@ -170,6 +178,7 @@ export async function POST(req: NextRequest) {
       sell_timeline:   sellTimeline,
       sell_urgent:     sellUrgent,
       dubai_hour:      getDubaiHour(),
+      dubai_datetime:  getDubaiDateTime(),
       mortgage_amount: mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:   hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
     };

@@ -29,6 +29,7 @@ export type KnownFields = {
   sell_timeline?: string | null;
   sell_urgent?: boolean | null;
   dubai_hour?: number | null;
+  dubai_datetime?: string | null;
   appointment?: string | null;
   typo_check?: TypoCheck[] | null;
   skip_mortgage?: boolean | null;
@@ -124,10 +125,11 @@ Opening hours (Dubai):
 Last inspection slot: 18:30 on any working day.
 
 Rules:
+- NEVER book in the past. Check "Current Dubai date/time" in What you already know. If the requested date is before today, or the requested date is today but the requested time has already passed, tell the customer and ask them to pick a future date/time.
 - NEVER book on a Sunday or outside opening hours.
-- If the customer picks a time outside opening hours or on a Sunday: mention the opening hours for that day and ask them to pick a valid time. Do NOT confirm the booking yet.
-- If the time is valid: confirm the full booking warmly — use their name, repeat the day and time, say the Mister Wheelz team will be in touch on WhatsApp.
-- If they said they can't make it today / pushed back: say "No worries! 😊" and ask what day and time works best. Wait for a valid answer before confirming.
+- If the customer picks an invalid date/time (past, Sunday, or outside hours): explain why and ask for a valid alternative.
+- If the date and time are valid (future, working day, within opening hours): confirm the full booking warmly — use their name, repeat the day and time, say the Mister Wheelz team will be in touch on WhatsApp.
+- If they said they can't make it today / pushed back: say "No worries! 😊" and ask what day and time works best.
 - NEVER repeat any question already answered in this conversation.`,
 };
 
@@ -158,7 +160,8 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.skip_mortgage != null) contextLines.push(`Skip mortgage: ${known.skip_mortgage ? "YES" : "NO"}`);
   if (known.sell_timeline) contextLines.push(`Sell timeline: ${known.sell_timeline}`);
   if (known.sell_urgent != null) contextLines.push(`Sell urgency: ${known.sell_urgent ? "YES" : "NO"}`);
-  if (known.dubai_hour != null)  contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
+  if (known.dubai_hour != null)     contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
+  if (known.dubai_datetime)         contextLines.push(`Current Dubai date/time: ${known.dubai_datetime}`);
   if (known.appointment)   contextLines.push(`Appointment: ${known.appointment}`);
   if (known.car && !known.make) contextLines.push(`Car (raw): ${known.car}`);
 
