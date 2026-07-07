@@ -25,6 +25,7 @@ export interface Conversation {
   appointment_date: string | null;
   appointment_time: string | null;
   last_msg_id: string | null;
+  nudged_at: string | null;
 }
 
 const TABLE = "mw_whatsapp";
@@ -97,6 +98,7 @@ export async function resetConversation(phone: string): Promise<void> {
       loan: null,
       appointment: null,
       last_msg_id: null,
+      nudged_at: null,
     })
     .eq("phone", phone);
 

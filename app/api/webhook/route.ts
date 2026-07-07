@@ -86,9 +86,7 @@ export async function POST(req: NextRequest) {
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
-      await updateConversation(phone, { step: 1 }); // next message = name
-      const resetReply = await getKayaReply(0, [], "hi", {});
-      await sendWhatsAppMessage(phone, resetReply);
+      // step stays at 0 — greeting fires on next message
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
     // ──────────────────────────────────────────────────────────────
@@ -134,9 +132,11 @@ export async function POST(req: NextRequest) {
 
     // ── Persist core update + advance step ─────────────────────────
     // After step 3 (mileage), skip loan (step 4) if car is 5+ years old
+    // Only skip if mileage is actually known — don't skip just because year was extracted early
     const carYear = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
+    const carMileage = vehicleUpdates.mileage ?? conversation.mileage;
     const currentYear = new Date().getFullYear();
-    const skipLoan = currentStep === 3 && carYear > 0 && (currentYear - carYear) >= 5;
+    const skipLoan = currentStep === 3 && carYear > 0 && !!carMileage && (currentYear - carYear) >= 5;
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : skipLoan ? 5 : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
