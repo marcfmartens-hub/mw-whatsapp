@@ -57,7 +57,9 @@ Do NOT ask for mileage or specs until make + model + year are all known.`,
 Check "What you already know":
 - If make + model + year are still missing or incomplete: ask for them first.
 - If make + model + year are all present but mileage or specs are missing: ask only for what's missing.
-- If make + model + year + mileage + specs are ALL present: acknowledge them and ask if there is any outstanding bank loan or finance on the car.`,
+- If make + model + year + mileage + specs are ALL present:
+  - If the car year is less than 5 years old (from today 2026): acknowledge and ask if there is any outstanding bank loan or finance on the car.
+  - If the car is 5 years old or older: skip the loan question, acknowledge the details and ask what day and time works best for their appointment at the Mister Wheelz office.`,
 
   4: `The customer answered the loan question. Acknowledge briefly and ask what day and time works best for their appointment at the Mister Wheelz office.`,
 

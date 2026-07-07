@@ -133,7 +133,11 @@ export async function POST(req: NextRequest) {
     await sendWhatsAppMessage(phone, reply);
 
     // ── Persist core update + advance step ─────────────────────────
-    const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : currentStep + 1;
+    // After step 3 (mileage), skip loan (step 4) if car is 5+ years old
+    const carYear = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
+    const currentYear = new Date().getFullYear();
+    const skipLoan = currentStep === 3 && carYear > 0 && (currentYear - carYear) >= 5;
+    const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : skipLoan ? 5 : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
 
