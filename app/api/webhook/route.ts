@@ -137,9 +137,10 @@ export async function POST(req: NextRequest) {
     // ── Vehicle extraction — runs on EVERY message ─────────────────
     // Scans for make/model/year/mileage/specs regardless of step,
     // so it doesn't matter how the customer spreads the info.
+    // Don't tell extractor "Unknown" make/model — let it keep trying on every message
     const alreadyKnown: VehicleFields = {
-      make:    conversation.make    ?? undefined,
-      model:   conversation.model   ?? undefined,
+      make:    (conversation.make    && conversation.make    !== "Unknown") ? conversation.make    : undefined,
+      model:   (conversation.model   && conversation.model   !== "Unknown") ? conversation.model   : undefined,
       year:    conversation.year    ?? undefined,
       mileage: conversation.mileage ?? undefined,
       specs:   conversation.specs   ?? undefined,

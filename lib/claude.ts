@@ -56,9 +56,16 @@ const STEP_INSTRUCTIONS: Record<number, string> = {
 Before we start, may I know your name please?"`,
 
   1: `The customer just responded to "may I know your name please?"
-- If the message is ONLY a greeting (hi / hey / hello / hiya / yo / etc.) and NOT an actual name: do not accept it as a name. Ask again warmly: "And what's your name? 😊"
-- If the message contains a real name (e.g. "Marc", "I'm Marc", "it's Sarah"): greet them by name — e.g. "Hi [name], nice to have you here! 😊 How can I help you today?"
-NEVER say your own name (Kaya) or mention Mister Wheelz again after step 0.`,
+
+Case A — message is ONLY a greeting (hi / hey / hello / hiya / yo / sup / etc.) with no name:
+  Reply ONLY: "And what's your name? 😊"
+  Do NOT say "nice to have you here", "how can I help", or anything else. Just ask for the name.
+
+Case B — message contains a real name (Marc / I'm Marc / it's Sarah / my name is John / etc.):
+  Extract the name and reply: "Hi [name]! 😊 How can I help you today?"
+  Do NOT ask about the car yet — that comes next.
+
+NEVER say your own name (Kaya) or mention Mister Wheelz after step 0.`,
 
   2: `The customer just told you what they want.
 First check "What you already know" for typo_check — if any entries exist, address them before anything else (e.g. "Just to confirm — did you mean [suggestion]? 😊").
@@ -69,30 +76,29 @@ Do NOT ask for mileage or specs until make + model + year are all known.`,
 
   3: `The customer just gave you vehicle details.
 
-STRICT ORDER — follow these checks top to bottom and stop at the first one that applies:
+STEP 1 — Typo check first.
+If "Typo check (needs confirmation)" is in "What you already know": ask for confirmation before doing anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊"
 
-1. Typo check present in "What you already know"? → Ask for confirmation BEFORE anything else. E.g. "Just to confirm — did you mean [suggestion]? 😊" Do not continue until confirmed.
+STEP 2 — Check "Still needed".
+"Still needed" in "What you already know" tells you exactly what to collect next. Act on the FIRST item only:
 
-2. Make / model / year missing? → Ask for them.
+• make / model / year listed → Ask for the missing item(s). If "Car as typed by customer" is shown, use it to ask specifically — e.g. "Just to confirm, you mentioned [X] as the model — did you mean [known model for that make]?"
+• mileage listed → Ask for BOTH mileage AND specs (GCC or non-GCC) in one question.
+• specs (GCC / non-GCC) listed only → Ask for specs only. If customer says they don't know, reply "No problem, I'll note it as Unknown!" and stop — do not continue to mortgage.
 
-3. Mileage missing? → Ask for BOTH mileage and specs (GCC or non-GCC) in ONE question. NEVER skip this step.
+STEP 3 — "Still needed" is gone (all vehicle fields collected).
+Check "Skip mortgage":
+• YES → show the car summary (plain text, no emojis) and ask "Does that look correct?"
+• NO → ask "Is there any outstanding mortgage on the car?"
 
-4. Specs missing? → Ask for specs only (GCC or non-GCC). If the customer says they don't know or are not sure, accept it — reply "No problem, I'll note it as Unknown!" and continue.
+NEVER ask about mortgage or finance while "Still needed" is still shown.
 
-5. Specs is "Unknown (customer not sure)"? → Treat as answered and proceed.
-
-6. Make + model + year + mileage + specs ALL present (or Unknown)?
-   - Skip mortgage YES → show the car summary (plain text, no emojis) and ask "Does that look correct?"
-   - Skip mortgage NO → ask "Is there any outstanding mortgage on the car?"
-
-NEVER ask about mortgage or finance before mileage and specs are both collected.
-
-Summary format (no emojis, no icons — include Unknown fields as-is):
+Summary format (no emojis, no icons):
 Make: [Make]
 Model: [Model]
 Year: [Year]
 Mileage: [Mileage] km
-Specs: [Specs or Unknown]`,
+Specs: [GCC / Non-GCC / Unknown]`,
 
   4: `The customer answered the mortgage question.
 - If they said NO mortgage: acknowledge briefly (e.g. "Got it!"). Then show the summary (below) and ask "Does that look correct?"
@@ -172,7 +178,21 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.dubai_hour != null)     contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
   if (known.dubai_datetime)         contextLines.push(`Current Dubai date/time: ${known.dubai_datetime}`);
   if (known.appointment)   contextLines.push(`Appointment: ${known.appointment}`);
-  if (known.car && !known.make) contextLines.push(`Car (raw): ${known.car}`);
+
+  // "Still needed" — computed list so the model never has to guess what's missing
+  const missingVehicle: string[] = [];
+  if (!known.make   || known.make   === "Unknown") missingVehicle.push("make");
+  if (!known.model  || known.model  === "Unknown") missingVehicle.push("model");
+  if (!known.year)                                  missingVehicle.push("year");
+  if (!known.mileage)                               missingVehicle.push("mileage");
+  // specs is only "missing" if null/undefined — "Unknown" means the customer explicitly said so
+  if (!known.specs)                                 missingVehicle.push("specs (GCC / non-GCC)");
+  if (missingVehicle.length > 0) contextLines.push(`Still needed: ${missingVehicle.join(", ")}`);
+
+  // If model is unconfirmed, expose the raw car text so model knows what the customer typed
+  if ((!known.model || known.model === "Unknown") && known.car) {
+    contextLines.push(`Car as typed by customer: ${known.car}`);
+  }
 
   const contextBlock = contextLines.length
     ? `\nWhat you already know:\n${contextLines.join("\n")}`
