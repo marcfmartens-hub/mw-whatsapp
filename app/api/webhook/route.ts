@@ -309,6 +309,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Guard: don't let extractor overwrite already-confirmed fields ──
+    // e.g. "340k" at the mortgage step must not overwrite mileage "12k".
+    // The extractor's "do not overwrite" instruction isn't 100% reliable,
+    // so we enforce it here too for mileage and specs.
+    if (alreadyKnown.mileage && vehicleUpdates.mileage) delete vehicleUpdates.mileage;
+    if (alreadyKnown.specs   && vehicleUpdates.specs)   delete vehicleUpdates.specs;
+
     // ── Explicit "I don't know specs" detection ────────────────────
     // If at step 4, specs not yet known, and customer expresses uncertainty → record Unknown
     const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
@@ -345,7 +352,10 @@ export async function POST(req: NextRequest) {
     // Runs at step 4 whether the customer says "yes 50k" in one go,
     // or says "yes" first and provides the amount as a follow-up.
     let mortgageAmount: string | undefined;
-    const loanAnswer = fieldToSave === "loan" ? messageText : (conversation.loan ?? "");
+    // Use the saved loan answer when collecting the amount (follow-up message).
+    // Without this, "340k" would be the loanAnswer and loanIsYes would be false.
+    const isLoanFollowUp = fieldToSave === "loan" && !!conversation.loan;
+    const loanAnswer = isLoanFollowUp ? (conversation.loan ?? "") : (fieldToSave === "loan" ? messageText : (conversation.loan ?? ""));
     const loanIsYes  = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(loanAnswer);
     if (currentStep === 5 && loanIsYes && messageText) {
       const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
