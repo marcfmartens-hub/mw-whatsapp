@@ -36,6 +36,8 @@ export type KnownFields = {
   dubai_datetime?: string | null;
   dubai_tomorrow?: string | null;
   appointment?: string | null;
+  appointment_date?: string | null;
+  appointment_time?: string | null;
   typo_check?: TypoCheck[] | null;
   skip_mortgage?: boolean | null;
   next_action?: string | null;
@@ -126,7 +128,9 @@ Do NOT move on to the sell question until the customer has confirmed.`,
   - Acknowledge warmly and ask what specific day and time works best for the appointment.
 NEVER repeat the sell question if already answered.`,
 
-  8: `The customer just gave you an appointment day/time or responded to the today-vs-tomorrow question.
+  8: `The customer is arranging a drop-off appointment. Check "What you already know" FIRST:
+- "Appointment date (captured so far)" and "Appointment time (captured so far)" show what has already been extracted.
+- Do NOT ask for something already captured. If date is known but time is missing, ask ONLY for the time (and vice versa).
 
 Opening hours (Dubai):
 - Monday–Thursday: 10:00–19:00
@@ -136,13 +140,13 @@ Opening hours (Dubai):
 Last inspection slot: 18:30 on any working day.
 
 Rules:
-- NEVER book in the past. Check "Current Dubai date/time" in What you already know. If the requested date is before today, or the requested date is today but the requested time has already passed, tell the customer and ask them to pick a future date/time.
+- NEVER book in the past. Check "Current Dubai date/time". If the date is today but the time has already passed, or the date is before today, say so and ask for a future slot.
 - NEVER book on a Sunday or outside opening hours.
-- If the customer picks an invalid date/time (past, Sunday, or outside hours): explain why and ask for a valid alternative.
-- If the date and time are valid (future, working day, within opening hours): confirm the full booking warmly — use their name, repeat the EXACT date (e.g. "Tuesday 8th of July") never "tomorrow" or "this Saturday" or other relative terms — always the actual day name and date. Repeat the time. Say the Mister Wheelz team will be in touch on WhatsApp.
-- IMPORTANT: "tomorrow" means the date shown in "Tomorrow in Dubai" from What you already know. Always convert to that actual date.
-- If they said they can't make it today / pushed back: say "No worries! 😊" and ask what day and time works best.
-- NEVER repeat any question already answered in this conversation.`,
+- If invalid (past, Sunday, outside hours): explain why briefly and ask for a valid alternative.
+- "tomorrow" = the date in "Tomorrow in Dubai". Always convert relative terms to the actual day name + date (e.g. "Wednesday 8th of July"). Never say "tomorrow" in your reply.
+- When BOTH date and time are valid and confirmed: confirm the booking warmly using their name, the EXACT date and time. End with EXACTLY this sentence: "The Mister Wheelz team will be in touch on WhatsApp. 😊"
+- If they push back or say they can't make it: "No worries! 😊" then ask what day and time works best.
+- Do NOT repeat a question already answered.`,
 };
 
 const CLOSING_INSTRUCTION =
@@ -183,7 +187,8 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
   if (known.dubai_hour != null)     contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
   if (known.dubai_datetime)         contextLines.push(`Current Dubai date/time: ${known.dubai_datetime}`);
   if (known.dubai_tomorrow)         contextLines.push(`Tomorrow in Dubai: ${known.dubai_tomorrow}`);
-  if (known.appointment)   contextLines.push(`Appointment: ${known.appointment}`);
+  if (known.appointment_date) contextLines.push(`Appointment date (captured so far): ${known.appointment_date}`);
+  if (known.appointment_time) contextLines.push(`Appointment time (captured so far): ${known.appointment_time}`);
 
   // next_action — single directive computed by the webhook; model just executes it
   if (known.next_action) contextLines.push(`Next action: ${known.next_action}`);

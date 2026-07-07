@@ -282,8 +282,28 @@ export async function POST(req: NextRequest) {
     const specsExplicitlyUnknown = currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
     if (specsExplicitlyUnknown) vehicleUpdates.specs = "Unknown";
 
+    // ── Appointment extraction — runs EARLY for step 8 so the LLM has ──
+    // accumulated date/time context on every back-and-forth exchange.
+    let apptDate = conversation.appointment_date ?? "";
+    let apptTime = conversation.appointment_time ?? "";
+    if (currentStep === FINAL_STEP && messageText) {
+      try {
+        const ea = await extractAppointment(messageText);
+        if (ea.appointment_date) apptDate = ea.appointment_date;
+        if (ea.appointment_time) apptTime  = ea.appointment_time;
+        // Persist immediately so context is accurate on next turn
+        const apptSave: Partial<Conversation> = {};
+        if (ea.appointment_date) apptSave.appointment_date = ea.appointment_date;
+        if (ea.appointment_time) apptSave.appointment_time  = ea.appointment_time;
+        if (Object.keys(apptSave).length > 0)
+          await updateConversation(phone, apptSave);
+      } catch (e) {
+        console.error("early appointment extraction error:", e);
+      }
+    }
+
     // ── Build knownFields for Kaya's system prompt ─────────────────
-    // At step 5 (sell timeline answer), detect urgency and pass Dubai hour
+    // At step 7 (sell timeline answer), detect urgency and pass Dubai hour
     const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
     const sellUrgent   = sellTimeline ? URGENT_KEYWORDS.test(sellTimeline) : undefined;
     // ── Mortgage amount extraction ─────────────────────────────────
@@ -368,14 +388,17 @@ export async function POST(req: NextRequest) {
       ...conversation,
       ...coreUpdates,
       ...vehicleUpdates,
-      sell_timeline:   sellTimeline,
-      sell_urgent:     sellUrgent,
-      dubai_hour:      getDubaiHour(),
-      dubai_datetime:  getDubaiDateTime(),
-      dubai_tomorrow:  getDubaiTomorrow(),
-      mortgage_amount: mortgageAmount ?? conversation.mortgage_amount,
-      skip_mortgage:   hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
-      next_action:     action ? describeAction(action) : undefined,
+      sell_timeline:    sellTimeline,
+      sell_urgent:      sellUrgent,
+      dubai_hour:       getDubaiHour(),
+      dubai_datetime:   getDubaiDateTime(),
+      dubai_tomorrow:   getDubaiTomorrow(),
+      mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
+      skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
+      next_action:      action ? describeAction(action) : undefined,
+      // Progressive appointment context — accumulated across step 8 exchanges
+      appointment_date: apptDate || conversation.appointment_date || undefined,
+      appointment_time: apptTime || conversation.appointment_time || undefined,
     };
 
     console.log(`[kaya] step=${currentStep} action=${action?.type ?? "none"}`);
@@ -388,6 +411,13 @@ export async function POST(req: NextRequest) {
 
     await sendWhatsAppMessage(phone, reply);
 
+    // ── Detect booking confirmation in the reply ───────────────────
+    // Step 8 (appointment) stays open until the LLM sends the standard
+    // confirmation phrase. This prevents premature Bigin sync and the
+    // "forgotten context" loop caused by advancing to CLOSING_STEP early.
+    const appointmentConfirmed = currentStep === FINAL_STEP && !action &&
+      /team will be in touch on whatsapp/i.test(reply);
+
     // ── Persist core update + advance step ─────────────────────────
     // Stay at step 4 until BOTH mileage and specs are collected.
     // Once both known: skip to step 6 for old cars (5+ years), else advance to step 5.
@@ -398,10 +428,13 @@ export async function POST(req: NextRequest) {
     // Don't advance from step 5 if loan=yes but amount not yet collected
     const stayAtLoanAmount   = currentStep === 5 && loanIsYes
       && !mortgageAmount && !conversation.mortgage_amount;
+    // Don't advance from step 8 until the LLM has sent the booking confirmation
+    const stayAtAppointment  = currentStep === FINAL_STEP && !appointmentConfirmed;
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
       : stayAtStep1        ? 1
       : stayAtMileageSpecs ? 4
       : stayAtLoanAmount   ? 5
+      : stayAtAppointment  ? FINAL_STEP
       : currentStep === 1 && isUAE ? 3  // UAE senders skip the UAE-phone step
       : skipLoan           ? 6
       : currentStep + 1;
@@ -426,23 +459,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Appointment date/time extraction (step 7 = appointment answer) ──
-    if (fieldToSave === "appointment" && messageText) {
-      try {
-        const appt = await extractAppointment(messageText);
-        const apptUpdates: Partial<Conversation> = {};
-        if (appt.appointment_date) apptUpdates.appointment_date = appt.appointment_date;
-        if (appt.appointment_time) apptUpdates.appointment_time = appt.appointment_time;
-        if (Object.keys(apptUpdates).length > 0) {
-          await updateConversation(phone, apptUpdates);
-        }
-      } catch (e) {
-        console.error("appointmentUpdates save error (non-fatal):", e);
-      }
-    }
+    // Appointment date/time is extracted early (before the LLM call) — no second pass needed.
 
-    if (currentStep === FINAL_STEP) {
-      // Re-fetch latest state so Bigin gets all extracted fields (make/model/year/specs/appointment_date/appointment_time)
+    if (currentStep === FINAL_STEP && appointmentConfirmed) {
+      // Re-fetch latest state so Bigin gets all extracted fields
       const { getConversation } = await import("@/lib/supabase");
       const latestConv = await getConversation(phone);
       await createBiginContact((latestConv ?? updatedConversation) as Conversation);
