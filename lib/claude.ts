@@ -24,6 +24,9 @@ export type KnownFields = {
   mileage?: string | null;
   specs?: string | null;
   loan?: string | null;
+  sell_timeline?: string | null;
+  sell_urgent?: boolean | null;
+  dubai_hour?: number | null;
   appointment?: string | null;
   [key: string]: unknown;
 };
@@ -61,9 +64,19 @@ Check "What you already know":
   - If the car year is less than 5 years old (from today 2026): acknowledge and ask if there is any outstanding bank loan or finance on the car.
   - If the car is 5 years old or older: skip the loan question, acknowledge the details and ask what day and time works best for their appointment at the Mister Wheelz office.`,
 
-  4: `The customer answered the loan question. Acknowledge briefly and ask what day and time works best for their appointment at the Mister Wheelz office.`,
+  4: `The customer answered the loan question. Acknowledge briefly, then ask: "When are you planning to sell the car?"`,
 
-  5: `The customer just gave you an appointment day and time. Confirm the full booking in one warm message: use their name, repeat the appointment day and time, and let them know the Mister Wheelz team will be in touch with them on WhatsApp to confirm.`,
+  5: `The customer just told you when they want to sell. Check "What you already know" for "Sell urgency" and "Dubai time".
+- If sell urgency is YES (they said today / now / anytime / when the price is right / asap):
+  - Reply: "Alright, sounds good! 😊"
+  - If Dubai time is before 15:00: ask "What time can you bring the car to our branch today for inspection?"
+  - If Dubai time is 15:00 or later: say "Unfortunately it's a bit late today — " then ask what day and time works best for them.
+- If sell urgency is NO (they gave a future date or timeframe):
+  - Acknowledge warmly and ask what specific day and time works best for the appointment.`,
+
+  6: `The customer just gave you an appointment day and time (or confirmed today's time).
+- If they agreed to a time: confirm the full booking warmly — use their name, repeat the appointment day and time, and say the Mister Wheelz team will be in touch on WhatsApp to confirm.
+- If they said they can't make it today or pushed back: say "No worries! 😊" and ask what day and time works best for them. Wait for their answer before confirming.`,
 };
 
 const CLOSING_INSTRUCTION =
@@ -84,8 +97,11 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   if (known.mileage)      contextLines.push(`Mileage: ${known.mileage} km`);
   if (known.specs)        contextLines.push(`Specs: ${known.specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
-  if (known.loan)         contextLines.push(`Loan: ${known.loan}`);
-  if (known.appointment)  contextLines.push(`Appointment: ${known.appointment}`);
+  if (known.loan)          contextLines.push(`Loan: ${known.loan}`);
+  if (known.sell_timeline) contextLines.push(`Sell timeline: ${known.sell_timeline}`);
+  if (known.sell_urgent != null) contextLines.push(`Sell urgency: ${known.sell_urgent ? "YES" : "NO"}`);
+  if (known.dubai_hour != null)  contextLines.push(`Dubai time: ${known.dubai_hour}:00 (24h)`);
+  if (known.appointment)   contextLines.push(`Appointment: ${known.appointment}`);
   if (known.car && !known.make) contextLines.push(`Car (raw): ${known.car}`);
 
   const contextBlock = contextLines.length

@@ -21,6 +21,7 @@ export interface Conversation {
   mileage: string | null;
   specs: string | null;
   loan: string | null;
+  sell_timeline: string | null;
   appointment: string | null;
   appointment_date: string | null;
   appointment_time: string | null;
@@ -96,6 +97,7 @@ export async function resetConversation(phone: string): Promise<void> {
       car: null,
       mileage: null,
       loan: null,
+      sell_timeline: null,
       appointment: null,
       last_msg_id: null,
       nudged_at: null,

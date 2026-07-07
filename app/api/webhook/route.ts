@@ -28,16 +28,24 @@ export async function GET(req: NextRequest) {
 // Vehicle details (make/model/year/mileage/specs) are extracted separately
 // from every message and saved on top of this.
 const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
-  0: undefined,       // first contact — nothing to save
-  1: "name",          // customer gives name
-  2: "car",           // customer states intent / car info
-  3: "mileage",       // customer gives mileage + specs (raw)
-  4: "loan",          // loan status
-  5: "appointment",   // appointment day/time — Bigin fires after this
+  0: undefined,          // first contact — nothing to save
+  1: "name",             // customer gives name
+  2: "car",              // customer states intent / car info
+  3: "mileage",          // customer gives mileage + specs (raw)
+  4: "loan",             // loan status (skipped for cars 5+ years old)
+  5: "sell_timeline",    // when do they want to sell?
+  6: "appointment",      // appointment day/time — Bigin fires after this
 };
 
-const FINAL_STEP = 5;   // appointment collected — booking complete, push to Bigin
-const CLOSING_STEP = 6;
+const FINAL_STEP  = 6;
+const CLOSING_STEP = 7;
+
+const URGENT_KEYWORDS = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
+
+function getDubaiHour(): number {
+  // Dubai is UTC+4
+  return new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
+}
 
 interface IncomingMessage {
   from: string;
@@ -125,7 +133,17 @@ export async function POST(req: NextRequest) {
     const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
 
     // ── Build knownFields for Kaya's system prompt ─────────────────
-    const knownFields = { ...conversation, ...coreUpdates, ...vehicleUpdates };
+    // At step 5 (sell timeline answer), detect urgency and pass Dubai hour
+    const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
+    const sellUrgent   = sellTimeline ? URGENT_KEYWORDS.test(sellTimeline) : undefined;
+    const knownFields  = {
+      ...conversation,
+      ...coreUpdates,
+      ...vehicleUpdates,
+      sell_timeline: sellTimeline,
+      sell_urgent:   sellUrgent,
+      dubai_hour:    getDubaiHour(),
+    };
     const reply = await getKayaReply(currentStep, [], messageText, knownFields);
 
     await sendWhatsAppMessage(phone, reply);
@@ -137,6 +155,7 @@ export async function POST(req: NextRequest) {
     const carMileage = vehicleUpdates.mileage ?? conversation.mileage;
     const currentYear = new Date().getFullYear();
     const skipLoan = currentStep === 3 && carYear > 0 && !!carMileage && (currentYear - carYear) >= 5;
+    // skipLoan jumps from mileage step (3) directly to sell_timeline step (5), skipping loan (4)
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP : skipLoan ? 5 : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
