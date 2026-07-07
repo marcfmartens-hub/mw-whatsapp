@@ -33,12 +33,13 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   2: "car",              // customer states intent / car info
   3: "mileage",          // customer gives mileage + specs (raw)
   4: "loan",             // loan status (skipped for cars 5+ years old)
-  5: "sell_timeline",    // when do they want to sell?
-  6: "appointment",      // appointment day/time — Bigin fires after this
+  5: undefined,          // summary confirmation — no field to save
+  6: "sell_timeline",    // when do they want to sell?
+  7: "appointment",      // appointment day/time — Bigin fires after this
 };
 
-const FINAL_STEP  = 6;
-const CLOSING_STEP = 7;
+const FINAL_STEP  = 7;
+const CLOSING_STEP = 8;
 
 const URGENT_KEYWORDS = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 

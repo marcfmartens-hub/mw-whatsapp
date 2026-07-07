@@ -72,11 +72,23 @@ If no typo issues, check "What you already know":
 - If make + model + year are all present but mileage or specs are missing: ask only for what's missing.
 - If make + model + year + mileage + specs are ALL present:
   - If the car year is less than 5 years old (from today 2026): acknowledge and ask if there is any outstanding bank loan or finance on the car.
-  - If the car is 5 years old or older: skip the loan question, acknowledge the details and ask what day and time works best for their appointment at the Mister Wheelz office.`,
+  - If the car is 5 years old or older: skip the loan question and go straight to the summary — show the collected details and ask if everything is correct.`,
 
-  4: `The customer answered the loan question. Acknowledge briefly, then ask: "When are you planning to sell the car?"`,
+  4: `The customer answered the loan question. Acknowledge briefly, then summarize all collected car details in a short list and ask them to confirm it's correct. Format like:
+"Here's what I've got so far:
+🚗 [Make] [Model] [Year]
+📍 [Mileage] km | [Specs]
+💳 Loan: [Loan status]
 
-  5: `The customer just told you when they want to sell. Check "What you already know" for "Sell urgency" and "Dubai time".
+Does that look correct? 😊"
+If any field is Unknown, skip it from the summary and do not mention it.`,
+
+  5: `The customer just confirmed (or corrected) their car details.
+- If they confirmed (yes / correct / looks good): acknowledge and ask: "When are you planning to sell the car?"
+- If they corrected something: acknowledge the correction warmly, update your understanding, then show the corrected summary and ask again if everything is correct now.
+Do NOT move on to the sell question until they have confirmed.`,
+
+  6: `The customer just told you when they want to sell. Check "What you already know" for "Sell urgency" and "Dubai time".
 - If sell urgency is YES (they want to sell today / now / anytime / asap / when the price is right):
   - Reply: "Alright, sounds good! 😊"
   - If Dubai time is before 15:00: ask "What time can you bring the car to our branch today for inspection?" (last slot is 18:30)
@@ -85,7 +97,7 @@ If no typo issues, check "What you already know":
   - Acknowledge warmly and ask what specific day and time works best for the appointment.
 NEVER repeat the sell question if already answered.`,
 
-  6: `The customer just gave you an appointment day/time or responded to the today-vs-tomorrow question.
+  7: `The customer just gave you an appointment day/time or responded to the today-vs-tomorrow question.
 
 Opening hours (Dubai):
 - Monday–Thursday: 10:00–19:00
