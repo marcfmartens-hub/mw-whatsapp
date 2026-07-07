@@ -88,6 +88,7 @@ export async function updateConversation(
 }
 
 export async function resetConversation(phone: string): Promise<void> {
+  // Core columns — guaranteed to exist
   const { error } = await supabase
     .from(TABLE)
     .update({
@@ -101,13 +102,8 @@ export async function resetConversation(phone: string): Promise<void> {
       mileage: null,
       specs: null,
       loan: null,
-      mortgage_amount: null,
-      sell_timeline: null,
       appointment: null,
-      appointment_date: null,
-      appointment_time: null,
       last_msg_id: null,
-      nudged_at: null,
     })
     .eq("phone", phone);
 
@@ -115,4 +111,13 @@ export async function resetConversation(phone: string): Promise<void> {
     console.error("resetConversation error:", error);
     throw error;
   }
+
+  // Optional columns — added via migration; fail silently if missing
+  await supabase.from(TABLE).update({
+    mortgage_amount: null,
+    sell_timeline: null,
+    appointment_date: null,
+    appointment_time: null,
+    nudged_at: null,
+  }).eq("phone", phone);
 }
