@@ -130,7 +130,7 @@ Rules:
 - NEVER book in the past. Check "Current Dubai date/time" in What you already know. If the requested date is before today, or the requested date is today but the requested time has already passed, tell the customer and ask them to pick a future date/time.
 - NEVER book on a Sunday or outside opening hours.
 - If the customer picks an invalid date/time (past, Sunday, or outside hours): explain why and ask for a valid alternative.
-- If the date and time are valid (future, working day, within opening hours): confirm the full booking warmly — use their name, repeat the day and time, say the Mister Wheelz team will be in touch on WhatsApp.
+- If the date and time are valid (future, working day, within opening hours): confirm the full booking warmly — use their name, repeat the EXACT date (e.g. "Tuesday July 8") never "tomorrow" or other relative terms, repeat the time, say the Mister Wheelz team will be in touch on WhatsApp.
 - If they said they can't make it today / pushed back: say "No worries! 😊" and ask what day and time works best.
 - NEVER repeat any question already answered in this conversation.`,
 };
