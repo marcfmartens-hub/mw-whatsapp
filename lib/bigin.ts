@@ -44,27 +44,24 @@ export async function createBiginContact(conversation: Conversation): Promise<vo
     const [firstName, ...rest] = (conversation.name || "Customer").trim().split(/\s+/);
     const lastName = rest.length > 0 ? rest.join(" ") : firstName;
 
-    const payload = {
-      data: [
-        {
-          First_Name: firstName,
-          Last_Name: lastName,
-          Phone: conversation.phone_number || conversation.phone,
-          Lead_Source: "WhatsApp Bot",
-          Description: [
-            `Make: ${conversation.make || "N/A"}`,
-            `Model: ${conversation.model || "N/A"}`,
-            `Year: ${conversation.year || "N/A"}`,
-            `Mileage: ${conversation.mileage ? `${conversation.mileage} km` : "N/A"}`,
-            `Specs: ${conversation.specs || "N/A"}`,
-            `Mortgage: ${conversation.loan || "N/A"}`,
-            `Mortgage amount: ${conversation.mortgage_amount ? `AED ${conversation.mortgage_amount}` : "N/A"}`,
-            `Appointment Date: ${conversation.appointment_date || "N/A"}`,
-            `Appointment Time: ${conversation.appointment_time || "N/A"}`,
-          ].join("\n"),
-        },
-      ],
+    const record: Record<string, string> = {
+      First_Name: firstName,
+      Last_Name: lastName,
+      Phone: conversation.phone_number || conversation.phone,
+      Lead_Source: "WhatsApp Bot",
     };
+
+    if (conversation.make)             record["Make"]             = conversation.make;
+    if (conversation.model)            record["Model"]            = conversation.model;
+    if (conversation.year)             record["Year"]             = conversation.year;
+    if (conversation.mileage)          record["Mileage"]          = conversation.mileage;
+    if (conversation.specs)            record["Regional_Specs"]   = conversation.specs;
+    if (conversation.loan)             record["Mortgage"]         = conversation.loan;
+    if (conversation.mortgage_amount)  record["Mortgage_Amount"]  = conversation.mortgage_amount;
+    if (conversation.appointment_date) record["Appointment_Date"] = conversation.appointment_date;
+    if (conversation.appointment_time) record["Appointment_Time"] = conversation.appointment_time;
+
+    const payload = { data: [record] };
 
     console.log("[Bigin] sending payload:", JSON.stringify(payload));
 
