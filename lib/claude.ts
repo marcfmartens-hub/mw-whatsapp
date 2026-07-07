@@ -345,6 +345,7 @@ Strict rules:
 - Never put model name in "make" or vice versa. Never put year in "model".
 - Do NOT overwrite already known fields: ${knownSummary || "nothing yet"}.
 - If nothing vehicle-related is in the message, return {}.
+- Messages may contain filler words ("sorry", "actually", "I mean", "oops", "it's the"). Extract the vehicle fields and ignore the filler.
 - For each suspected typo add an entry to "typo_check": [{"field":"make"|"model"|"year", "input":"what they typed", "suggestion":"what you think they meant"}]
 
 Examples:
@@ -357,9 +358,13 @@ Examples:
 "Toyata Camry"            → {"make":"Toyota","model":"Camry","typo_check":[{"field":"make","input":"Toyata","suggestion":"Toyota"}]}
 "Mercedez GLC"            → {"make":"Mercedes-Benz","model":"GLC","typo_check":[{"field":"make","input":"Mercedez","suggestion":"Mercedes-Benz"}]}
 "x5" (BMW already known)  → {"model":"X5"}
+"X7 sorry" (BMW known)    → {"model":"X7"}
+"sorry it's the X7" (BMW) → {"model":"X7"}
+"I mean the Camry" (Toyota) → {"model":"Camry"}
 "camry" (Toyota known)    → {"model":"Camry"}
 "patrol" (Nissan known)   → {"model":"Patrol"}
 "I want to sell my car"   → {}
+"just told you"           → {}
 "yes" / "ok"              → {}`,
       messages: [{ role: "user", content: messageText }],
     });

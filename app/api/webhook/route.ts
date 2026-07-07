@@ -3,6 +3,7 @@ import { getOrCreateConversation, updateConversation, resetConversation, Convers
 import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields } from "@/lib/claude";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
+import { CAR_MODELS } from "@/lib/carData";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,20 @@ function extractNameFromMessage(text: string): string {
   // Fallback: first word capitalised
   const first = text.trim().split(/\s+/)[0];
   return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
+// Deterministic fallback: scan message for any known model of the given make.
+// Used when the LLM extractor misses the model (e.g. "X7 sorry", "I mean Camry").
+function quickModelMatch(text: string, make: string): string | undefined {
+  const models = CAR_MODELS[make];
+  if (!models) return undefined;
+  // Sort longest first so "X5 M" matches before "X5"
+  const sorted = [...models].sort((a, b) => b.length - a.length);
+  for (const m of sorted) {
+    const escaped = m.replace(/[-/]/g, "[-/]?").replace(/\s+/g, "\\s+");
+    if (new RegExp(`(?<![A-Za-z])${escaped}(?![A-Za-z0-9])`, "i").test(text)) return m;
+  }
+  return undefined;
 }
 
 function formatMileage(raw: string | null | undefined): string {
@@ -273,6 +288,26 @@ export async function POST(req: NextRequest) {
       specs:   conversation.specs   ?? undefined,
     };
     const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
+
+    // ── Deterministic model fallback ───────────────────────────────
+    // If the extractor didn't return a model (e.g. "X7 sorry", "I mean Camry"),
+    // scan the raw message text for any known model of the established make.
+    if (!vehicleUpdates.model || vehicleUpdates.model === "Unknown") {
+      const effectiveMake = vehicleUpdates.make ?? conversation.make;
+      if (effectiveMake && effectiveMake !== "Unknown") {
+        const found = quickModelMatch(messageText, effectiveMake);
+        if (found) {
+          vehicleUpdates.model = found;
+          // Remove any stale typo entry for this field now that we have a real model
+          if (vehicleUpdates.typo_check) {
+            vehicleUpdates.typo_check = vehicleUpdates.typo_check.filter(
+              (t) => t.field !== "model"
+            );
+            if (vehicleUpdates.typo_check.length === 0) delete vehicleUpdates.typo_check;
+          }
+        }
+      }
+    }
 
     // ── Explicit "I don't know specs" detection ────────────────────
     // If at step 4, specs not yet known, and customer expresses uncertainty → record Unknown
