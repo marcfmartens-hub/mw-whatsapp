@@ -1,13 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
 import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields, ConversationMessage } from "@/lib/claude";
-import { sendWhatsAppMessage } from "@/lib/meta";
+import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 import { CAR_MODELS } from "@/lib/carData";
 
 export const dynamic = "force-dynamic";
 
 const RESET_KEYWORD = "reset chat 007";
+
+const LOCATION_KEYWORDS = /\b(location|address|where are you|where is|how to get|directions?|map|find you|your office|office location|come to you)\b/i;
+
+const LOCATION_IMAGE_URL = "https://mw-whatsapp2.vercel.app/location.jpg";
+
+const LOCATION_TEXT = `📍 Mister Wheelz Car Buyers
+
+409 Sheikh Zayed Rd
+F1rst Motors Bldg.
+1st Floor, Office 7
+Al Quoz First - Dubai
+
+Entrance - Left side of the Building
+
+https://maps.app.goo.gl/4L7EkwGZfnffofuh8`;
 
 // ---- GET: Meta webhook verification ----
 export async function GET(req: NextRequest) {
@@ -64,17 +79,17 @@ function getDubaiTomorrow(): string {
 }
 
 // Extract just the real name from messages like "im Marc", "I'm Marc", "my name is Marc".
-function extractNameFromMessage(text: string): string {
+function extractNameFromMessage(text: string): string | null {
   const m = text.match(
     /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|it'?s\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)?)/i
   );
   if (m) return m[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
-  // Whole message is already a name (1–2 words, letters only)
-  if (/^[A-Za-z]+(?:\s+[A-Za-z]+)?$/.test(text.trim()))
-    return text.trim().replace(/\b\w/g, (c) => c.toUpperCase());
-  // Fallback: first word capitalised
-  const first = text.trim().split(/\s+/)[0];
-  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+  // Whole message is a simple name: 1–2 words, letters only, under 30 chars
+  const trimmed = text.trim();
+  if (/^[A-Za-z]+(?:\s+[A-Za-z]+)?$/.test(trimmed) && trimmed.length <= 30)
+    return trimmed.replace(/\b\w/g, (c) => c.toUpperCase());
+  // Can't identify a real name — don't save anything
+  return null;
 }
 
 // Deterministic fallback: scan message for any known model of the given make.
@@ -196,6 +211,7 @@ interface IncomingMessage {
   from: string;
   id: string;
   text?: { body?: string };
+  image?: { caption?: string };
   type: string;
 }
 
@@ -206,7 +222,7 @@ function extractMessage(body: any): IncomingMessage | null {
     const value = change?.value;
     if (!value?.messages || value.messages.length === 0) return null;
     const message = value.messages[0];
-    return { from: message.from, id: message.id, text: message.text, type: message.type };
+    return { from: message.from, id: message.id, text: message.text, image: message.image, type: message.type };
   } catch (error) {
     console.error("extractMessage parse error:", error);
     return null;
@@ -235,13 +251,25 @@ export async function POST(req: NextRequest) {
 
     const phone   = message.from;
     const isUAE   = phone.startsWith("971");
-    const messageText = message.text?.body?.trim() ?? "";
+    const isImageMessage = message.type === "image";
+    // Use image caption as text when no text body (e.g. photo sent with description)
+    const messageText = message.text?.body?.trim() ?? message.image?.caption?.trim() ?? "";
 
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
       await sendWhatsAppMessage(phone, "Chat has been reset. Send a message to start again. 👋");
       return NextResponse.json({ status: "reset" }, { status: 200 });
+    }
+    // ──────────────────────────────────────────────────────────────
+
+    // ── Location trigger ───────────────────────────────────────────
+    const isLocationMessage = message.type === "location";
+    const isLocationRequest = LOCATION_KEYWORDS.test(messageText);
+    if (isLocationMessage || isLocationRequest) {
+      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      return NextResponse.json({ status: "location_sent" }, { status: 200 });
     }
     // ──────────────────────────────────────────────────────────────
 
@@ -271,11 +299,13 @@ export async function POST(req: NextRequest) {
       // Don't save a greeting ("hi", "hello") as the customer's name
       const isGreetingOnly = fieldToSave === "name" && GREETING_ONLY.test(messageText);
       if (!isLoanAmountFollowUp && !isGreetingOnly) {
-        // For name field: extract the real name from "im Marc", "I'm Marc", etc.
         const valueToSave = fieldToSave === "name"
           ? extractNameFromMessage(messageText)
           : messageText;
-        (coreUpdates as any)[fieldToSave] = valueToSave;
+        // null means extractNameFromMessage couldn't find a real name — skip saving
+        if (valueToSave !== null) {
+          (coreUpdates as any)[fieldToSave] = valueToSave;
+        }
       }
     }
 
@@ -383,6 +413,28 @@ export async function POST(req: NextRequest) {
     // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
 
+    // ── If customer is confirming a previous typo suggestion, apply the correction ──
+    // When "toyota corrola 2012" fires CONFIRM_TYPO, model is saved as "Unknown".
+    // Next message "yes" at step 4 would otherwise re-fire CLARIFY_MODEL forever.
+    // Detect affirmation + Unknown model + prior "did you mean X?" message → apply X.
+    const YES_AFFIRMATION = /^(yes|yeah|yep|yup|correct|right|sure|that'?s (right|correct)|exactly|confirmed?|affirmative|ok|okay|y)\s*[!.,]*$/i;
+    if (
+      (currentStep === 3 || currentStep === 4) &&
+      YES_AFFIRMATION.test(messageText) &&
+      (conversation.model === "Unknown" || !conversation.model) &&
+      !vehicleUpdates.model
+    ) {
+      const historyMsgs = (conversation.messages ?? []) as ConversationMessage[];
+      const lastAssistant = [...historyMsgs].reverse().find(m => m.role === "assistant");
+      if (lastAssistant) {
+        const typoMatch = lastAssistant.content.match(/did you mean\s+([A-Za-z0-9 \-]+?)\s*[?😊]/i);
+        if (typoMatch) {
+          vehicleUpdates.model = typoMatch[1].trim();
+          console.log(`[kaya] typo confirmed → model set to "${vehicleUpdates.model}"`);
+        }
+      }
+    }
+
     // ── Compute next_action for steps 2–4 so the model executes one clear directive ──
     // The webhook evaluates all conditions; the model just phrases the result naturally.
     const hasTypo  = Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0;
@@ -436,6 +488,7 @@ export async function POST(req: NextRequest) {
       ...conversation,
       ...coreUpdates,
       ...vehicleUpdates,
+      image_shared: isImageMessage || undefined,
       sell_timeline:    sellTimeline,
       sell_urgent:      sellUrgent,
       dubai_hour:       getDubaiHour(),
@@ -459,7 +512,20 @@ export async function POST(req: NextRequest) {
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(currentStep, history, messageText, knownFields);
 
-    await sendWhatsAppMessage(phone, reply);
+    // Detect confirmation early so we can append the location note to the reply
+    const appointmentConfirmedEarly = currentStep === FINAL_STEP && !action &&
+      /team will be in touch on whatsapp/i.test(reply);
+
+    const replyToSend = appointmentConfirmedEarly
+      ? reply + "\n\nHere below is our location."
+      : reply;
+
+    await sendWhatsAppMessage(phone, replyToSend);
+
+    if (appointmentConfirmedEarly) {
+      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+    }
 
     // ── Persist conversation history ───────────────────────────────
     // Keep the last 40 messages (~20 exchanges) so context stays fresh
@@ -476,11 +542,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Detect booking confirmation in the reply ───────────────────
-    // Step 8 (appointment) stays open until the LLM sends the standard
-    // confirmation phrase. This prevents premature Bigin sync and the
-    // "forgotten context" loop caused by advancing to CLOSING_STEP early.
-    const appointmentConfirmed = currentStep === FINAL_STEP && !action &&
-      /team will be in touch on whatsapp/i.test(reply);
+    const appointmentConfirmed = appointmentConfirmedEarly;
 
     // ── Persist core update + advance step ─────────────────────────
     // Stay at step 4 until BOTH mileage and specs are collected.
