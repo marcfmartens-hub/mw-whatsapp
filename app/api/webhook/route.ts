@@ -50,13 +50,12 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   3: "car",              // customer states intent / car info
   4: undefined,          // mileage+specs collected via vehicle extraction only
   5: "loan",             // loan status (skipped for cars 5+ years old)
-  6: undefined,          // summary confirmation — no field to save
-  7: "sell_timeline",    // when do they want to sell?
-  8: "appointment",      // appointment day/time — Bigin fires after this
+  6: "sell_timeline",    // when do they want to sell? (summary no longer waits for confirmation)
+  7: "appointment",      // appointment day/time — Bigin fires after this
 };
 
-const FINAL_STEP  = 8;
-const CLOSING_STEP = 9;
+const FINAL_STEP  = 7;
+const CLOSING_STEP = 8;
 
 const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
@@ -125,8 +124,7 @@ type NextAction =
   | { type: "ASK_AMOUNT" }
   | { type: "CLARIFY_MODEL" }
   | { type: "SHOW_SUMMARY" }
-  | { type: "SHOW_FULL_SUMMARY" }
-  | { type: "CONFIRM_TYPO"; suggestion: string };
+  | { type: "SHOW_FULL_SUMMARY" };
 
 // Human-readable version sent to the LLM (for nuanced fallback cases)
 function describeAction(a: NextAction): string {
@@ -139,9 +137,8 @@ function describeAction(a: NextAction): string {
     case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
     case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
     case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
-    case "SHOW_SUMMARY":      return `Show the car summary (plain, no emojis) and ask "Does that look correct?"`;
-    case "SHOW_FULL_SUMMARY": return `Show the car summary including mortgage (plain, no emojis) and ask "Does that look correct?"`;
-    case "CONFIRM_TYPO":      return `Confirm typo — ask: "Just to confirm — did you mean ${a.suggestion}? 😊" Do not ask for mileage yet.`;
+    case "SHOW_SUMMARY":      return `Show the car summary (plain, no emojis) then ask "When are you planning to sell the car?"`;
+    case "SHOW_FULL_SUMMARY": return `Show the car summary including mortgage (plain, no emojis) then ask "When are you planning to sell the car?"`;
   }
 }
 
@@ -171,8 +168,6 @@ function buildDirectResponse(
       return "How much is the outstanding balance?";
     case "CLARIFY_MODEL":
       return `Could you confirm the car model and year${n}?`;
-    case "CONFIRM_TYPO":
-      return `Just to confirm${n} — did you mean ${action.suggestion}? 😊`;
     case "SHOW_SUMMARY": {
       // Old cars (5+ years) — mortgage step was skipped, so mortgage = AED 0
       const make    = known.make    || "Unknown";
@@ -180,7 +175,7 @@ function buildDirectResponse(
       const year    = known.year    || "Unknown";
       const mileage = formatMileage(known.mileage);
       const specs   = known.specs   || "Unknown";
-      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: AED 0\n\nDoes that look correct?`;
+      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: AED 0\n\nWhen are you planning to sell the car?`;
     }
     case "SHOW_FULL_SUMMARY": {
       // After mortgage step — include mortgage line with amount or AED 0
@@ -193,7 +188,7 @@ function buildDirectResponse(
       const rawAmt  = known.mortgage_amount ? parseInt(known.mortgage_amount, 10) : NaN;
       const fmtAmt  = isNaN(rawAmt) ? "TBC" : rawAmt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
       const mortgage = hasLoan ? `Yes — AED ${fmtAmt}` : "AED 0";
-      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: ${mortgage}\n\nDoes that look correct?`;
+      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: ${mortgage}\n\nWhen are you planning to sell the car?`;
     }
   }
 }
@@ -413,31 +408,24 @@ export async function POST(req: NextRequest) {
     // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
 
-    // ── If customer is confirming a previous typo suggestion, apply the correction ──
-    // When "toyota corrola 2012" fires CONFIRM_TYPO, model is saved as "Unknown".
-    // Next message "yes" at step 4 would otherwise re-fire CLARIFY_MODEL forever.
-    // Detect affirmation + Unknown model + prior "did you mean X?" message → apply X.
-    const YES_AFFIRMATION = /^(yes|yeah|yep|yup|correct|right|sure|that'?s (right|correct)|exactly|confirmed?|affirmative|ok|okay|y)\s*[!.,]*$/i;
-    if (
-      (currentStep === 3 || currentStep === 4) &&
-      YES_AFFIRMATION.test(messageText) &&
-      (conversation.model === "Unknown" || !conversation.model) &&
-      !vehicleUpdates.model
-    ) {
-      const historyMsgs = (conversation.messages ?? []) as ConversationMessage[];
-      const lastAssistant = [...historyMsgs].reverse().find(m => m.role === "assistant");
-      if (lastAssistant) {
-        const typoMatch = lastAssistant.content.match(/did you mean\s+([A-Za-z0-9 \-]+?)\s*[?😊]/i);
-        if (typoMatch) {
-          vehicleUpdates.model = typoMatch[1].trim();
-          console.log(`[kaya] typo confirmed → model set to "${vehicleUpdates.model}"`);
+    // ── Auto-correct typos silently — no "did you mean?" confirmation needed ──
+    if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
+      for (const tc of vehicleUpdates.typo_check) {
+        if (tc.field === "model" && (!vehicleUpdates.model || vehicleUpdates.model === "Unknown")) {
+          vehicleUpdates.model = tc.suggestion;
+          console.log(`[kaya] typo auto-corrected: model "${tc.input}" → "${tc.suggestion}"`);
+        }
+        if (tc.field === "make" && (!vehicleUpdates.make || vehicleUpdates.make === "Unknown")) {
+          vehicleUpdates.make = tc.suggestion;
+          console.log(`[kaya] typo auto-corrected: make "${tc.input}" → "${tc.suggestion}"`);
         }
       }
+      vehicleUpdates.typo_check = []; // clear so it doesn't show in context
     }
 
     // ── Compute next_action for steps 2–4 so the model executes one clear directive ──
     // The webhook evaluates all conditions; the model just phrases the result naturally.
-    const hasTypo  = Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0;
+    const hasTypo  = false; // typos are now auto-corrected silently, never surfaced
     const hasModel = !!(vehicleUpdates.make ?? conversation.make) && !!(
       (vehicleUpdates.model && vehicleUpdates.model !== "Unknown") ||
       (conversation.model   && conversation.model   !== "Unknown")
@@ -456,17 +444,13 @@ export async function POST(req: NextRequest) {
       // UAE phone just provided — move straight to asking about the car
       action = { type: "ASK_CAR_DETAILS" };
     } else if (currentStep === 3) {
-      if (hasTypo) {
-        action = { type: "CONFIRM_TYPO", suggestion: vehicleUpdates.typo_check![0].suggestion };
-      } else if (!hasModel || !hasYear) {
+      if (!hasModel || !hasYear) {
         action = { type: "ASK_CAR_DETAILS" };
       } else {
         action = { type: "ASK_MILEAGE_SPECS" };
       }
     } else if (currentStep === 4) {
-      if (hasTypo) {
-        action = { type: "CONFIRM_TYPO", suggestion: vehicleUpdates.typo_check![0].suggestion };
-      } else if (!hasModel || !hasYear) {
+      if (!hasModel || !hasYear) {
         action = { type: "CLARIFY_MODEL" };
       } else if (!carMileage) {
         action = { type: "ASK_MILEAGE_SPECS" };
