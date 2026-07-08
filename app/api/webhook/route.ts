@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
-      // step stays at 0 — greeting fires on next message
+      await sendWhatsAppMessage(phone, "Chat has been reset. Send a message to start again. 👋");
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
     // ──────────────────────────────────────────────────────────────
@@ -261,7 +261,10 @@ export async function POST(req: NextRequest) {
     const fieldToSave = FIELD_BY_STEP[currentStep];
 
     // ── Core update (guaranteed columns only) ──────────────────────
-    const coreUpdates: Partial<Conversation> = { last_msg_id: message.id };
+    const coreUpdates: Partial<Conversation> = {
+      last_msg_id: message.id,
+      last_message_at: new Date().toISOString(),
+    };
     if (fieldToSave && messageText) {
       // Don't overwrite an already-saved loan answer with a mortgage amount follow-up
       const isLoanAmountFollowUp = fieldToSave === "loan" && !!conversation.loan;
@@ -527,6 +530,12 @@ export async function POST(req: NextRequest) {
       const { getConversation } = await import("@/lib/supabase");
       const latestConv = await getConversation(phone);
       await createBiginContact((latestConv ?? updatedConversation) as Conversation);
+      // Mark as pushed so the inactivity cron doesn't create a duplicate
+      try {
+        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+      } catch (e) {
+        console.error("bigin_pushed_at save error (non-fatal):", e);
+      }
     }
 
     return NextResponse.json({ status: "ok" }, { status: 200 });

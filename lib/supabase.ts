@@ -28,6 +28,9 @@ export interface Conversation {
   appointment_time: string | null;
   last_msg_id: string | null;
   nudged_at: string | null;
+  source_url: string | null;
+  last_message_at: string | null;
+  bigin_pushed_at: string | null;
   messages?: Array<{ role: "user" | "assistant"; content: string }> | null;
 }
 
@@ -121,5 +124,7 @@ export async function resetConversation(phone: string): Promise<void> {
     appointment_time: null,
     nudged_at: null,
     messages: [],
+    bigin_pushed_at: null,
+    last_message_at: null,
   }).eq("phone", phone);
 }
