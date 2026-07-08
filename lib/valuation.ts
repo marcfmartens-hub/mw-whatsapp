@@ -1,6 +1,6 @@
 import carPrices from "./carPrices";
 
-// UAE depreciation table: index = age in years (1-based), value = fraction of new price remaining
+// UAE depreciation table: index = age in years, value = fraction of new price remaining
 const DEPRECIATION: number[] = [
   1.00, // age 0 (new)
   0.75, // age 1
@@ -27,34 +27,57 @@ function getDepreciationFactor(age: number): number {
   return Math.max(0.03, 0.05 - (age - 20) * 0.004);
 }
 
-// Brand multipliers applied on top of base depreciation
-// Toyota/Lexus/Patrol hold better; BMW/MB/LR depreciate faster
+// Annual list-price inflation rate by brand.
+// Premium/luxury brands have risen faster (~5% yr) than mass-market (~1.5%).
+// Used to deflate current list price back to what the car cost new at time of purchase.
+const PRICE_INFLATION_RATE: Record<string, number> = {
+  "BMW":           0.955, // ~4.5% per year rise
+  "Mercedes-Benz": 0.955,
+  "Audi":          0.960,
+  "Land Rover":    0.955,
+  "LandRover":     0.955,
+  "Jaguar":        0.960,
+  "Porsche":       0.960,
+  "Maserati":      0.965,
+  "Bentley":       0.970,
+};
+const DEFAULT_INFLATION_RATE = 0.985; // ~1.5% per year for mass-market
+
+// Brand value-retention multipliers (applied after base depreciation).
+// High = holds value better than average; low = depreciates faster.
 const BRAND_MULTIPLIER: Record<string, number> = {
-  "Toyota":        1.12,
+  "Toyota":        1.15,
   "Lexus":         1.15,
-  "Nissan":        1.05,  // Patrol pulls the average up
+  "Nissan":        1.05,
   "Honda":         1.05,
-  "Porsche":       1.08,
-  "BMW":           0.85,
-  "Audi":          0.88,
-  "Land Rover":    0.80,
-  "LandRover":     0.80,
-  "Jaguar":        0.80,
-  "Maserati":      0.75,
-  "Mercedes-Benz": 0.85,
+  "Porsche":       1.05,
+  "BMW":           0.80,
+  "Audi":          0.83,
+  "Land Rover":    0.75,
+  "LandRover":     0.75,
+  "Jaguar":        0.75,
+  "Maserati":      0.70,
+  "Mercedes-Benz": 0.80,
+};
+
+// Model-specific overrides for extraordinary UAE demand (e.g. Patrol, Land Cruiser).
+// These models retain value well beyond their brand average.
+const MODEL_MULTIPLIER: Record<string, Record<string, number>> = {
+  "Nissan":  { "Patrol": 1.60 },
+  "Toyota":  { "Land Cruiser": 1.50, "Land Cruiser Prado": 1.30 },
+  "Lexus":   { "LX": 1.20 },
 };
 
 // Normalise stored make names to carPrices keys
 const MAKE_KEY_MAP: Record<string, string> = {
-  "Land Rover":    "LandRover",
-  "Mercedes-Benz": "Mercedes-Benz", // same
+  "Land Rover": "LandRover",
 };
 
 export interface ValuationResult {
-  baseNewPrice: number; // lowest trim new price used
+  baseNewPrice: number;
   low:  number;
   high: number;
-  formatted: string; // "AED 15,000 – 18,000"
+  formatted: string;
 }
 
 function fmtAED(n: number): string {
@@ -68,8 +91,7 @@ export function estimateCarValue(
   mileageStr?: string | null,
   specs?:      string | null,
 ): ValuationResult | null {
-  // Resolve make key used in carPrices
-  const priceKey = MAKE_KEY_MAP[make] ?? make;
+  const priceKey  = MAKE_KEY_MAP[make] ?? make;
   const makeData  = carPrices[priceKey];
   if (!makeData) return null;
   const modelData = makeData[model];
@@ -82,11 +104,19 @@ export function estimateCarValue(
   const currentYear = new Date().getFullYear();
   const age = Math.max(0, currentYear - carYear);
 
+  // Deflate current list price back to purchase-year equivalent
+  const inflationRate     = PRICE_INFLATION_RATE[make] ?? DEFAULT_INFLATION_RATE;
+  const adjustedBasePrice = baseNewPrice * Math.pow(inflationRate, age);
+
   // Base depreciation
   let factor = getDepreciationFactor(age);
 
   // Brand adjustment
   factor *= (BRAND_MULTIPLIER[make] ?? 1.0);
+
+  // Model-specific override (Patrol, Land Cruiser, etc.)
+  const modelBoost = MODEL_MULTIPLIER[make]?.[model];
+  if (modelBoost) factor *= modelBoost;
 
   // Mileage adjustment: UAE average ~20,000 km/year
   if (mileageStr) {
@@ -97,23 +127,19 @@ export function estimateCarValue(
       if      (ratio > 2.0) factor -= 0.15;
       else if (ratio > 1.5) factor -= 0.10;
       else if (ratio > 1.2) factor -= 0.05;
-      else if (ratio < 0.6) factor += 0.05; // low mileage premium
+      else if (ratio < 0.6) factor += 0.05;
     }
   }
 
-  // Specs adjustment
+  // Non-GCC penalty
   if (specs === "Non-GCC") factor -= 0.10;
 
   factor = Math.max(0.03, factor);
 
-  const mid  = baseNewPrice * factor;
-  const low  = Math.round((mid * 0.88) / 500)  * 500;
-  const high = Math.round((mid * 1.12) / 500)  * 500;
+  const mid  = adjustedBasePrice * factor;
+  // ±20% range — reflects inherent uncertainty without seeing the car
+  const low  = Math.round((mid * 0.80) / 500) * 500;
+  const high = Math.round((mid * 1.20) / 500) * 500;
 
-  return {
-    baseNewPrice,
-    low,
-    high,
-    formatted: `${fmtAED(low)} – ${fmtAED(high)}`,
-  };
+  return { baseNewPrice, low, high, formatted: `${fmtAED(low)} – ${fmtAED(high)}` };
 }
