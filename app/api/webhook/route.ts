@@ -4,6 +4,7 @@ import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields, Co
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 import { CAR_MODELS } from "@/lib/carData";
+import { estimateCarValue } from "@/lib/valuation";
 
 export const dynamic = "force-dynamic";
 
@@ -468,6 +469,16 @@ export async function POST(req: NextRequest) {
       action = { type: "SHOW_FULL_SUMMARY" };
     }
 
+    // Compute a rough market estimate when make/model/year are all known
+    const estMake    = (vehicleUpdates.make  ?? conversation.make)  ?? "";
+    const estModel   = (vehicleUpdates.model ?? conversation.model) ?? "";
+    const estYear    = (vehicleUpdates.year  ?? conversation.year)  ?? "";
+    const estMileage = vehicleUpdates.mileage ?? conversation.mileage;
+    const estSpecs   = vehicleUpdates.specs   ?? conversation.specs;
+    const valuation  = (estMake && estModel && estModel !== "Unknown" && estYear)
+      ? estimateCarValue(estMake, estModel, estYear, estMileage, estSpecs)
+      : null;
+
     const knownFields = {
       ...conversation,
       ...coreUpdates,
@@ -480,6 +491,7 @@ export async function POST(req: NextRequest) {
       dubai_tomorrow:   getDubaiTomorrow(),
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
+      estimated_value:  valuation?.formatted ?? null,
       next_action:      action ? describeAction(action) : undefined,
       // Progressive appointment context — accumulated across step 8 exchanges
       appointment_date: apptDate || conversation.appointment_date || undefined,
