@@ -278,7 +278,7 @@ export default function MonitorPage() {
       <div style={S.sidebar}>
         <div style={S.sideHeader}>
           <div style={S.botRow}>
-            <div style={S.botAvatar}>🤖</div>
+            <img src="/mw-logo.png" alt="Mister Wheelz" style={S.botAvatar} />
             <div>
               <div style={S.botName}>WhatsApp AI Bot</div>
               <div style={S.botSub}><span style={S.dot} />Kaya · Mister Wheelz</div>
@@ -339,7 +339,7 @@ export default function MonitorPage() {
       <div style={S.chatPanel}>
         {!activeConv ? (
           <div style={S.emptyState}>
-            <div style={S.emptyIcon}>🤖</div>
+            <img src="/mw-logo.png" alt="Mister Wheelz" style={S.emptyIcon} />
             <div style={S.emptyTitle}>WhatsApp AI Bot — Kaya</div>
             <div style={S.emptySub}>Select a conversation to view Kaya&rsquo;s messages.<br />Auto-refreshes every 5 seconds.</div>
           </div>
@@ -399,7 +399,7 @@ const S: Record<string, React.CSSProperties> = {
   sidebar: { width:380, minWidth:380, display:"flex", flexDirection:"column", background:"#111b21", borderRight:"1px solid #222d34", overflow:"hidden" },
   sideHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 16px", background:"#202c33", minHeight:59, flexShrink:0 },
   botRow: { display:"flex", alignItems:"center", gap:12 },
-  botAvatar: { width:40, height:40, borderRadius:"50%", background:"linear-gradient(135deg,#25d366,#128c7e)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 },
+  botAvatar: { width:40, height:40, borderRadius:6, objectFit:"contain", flexShrink:0 },
   botName: { color:"#e9edef", fontSize:17, fontWeight:600 },
   botSub: { color:"#8696a0", fontSize:12, marginTop:1, display:"flex", alignItems:"center", gap:4 },
   dot: { width:7, height:7, borderRadius:"50%", background:"#25d366", display:"inline-block" },
@@ -428,7 +428,7 @@ const S: Record<string, React.CSSProperties> = {
   emptyMsg: { color:"#8696a0", textAlign:"center", padding:"32px 16px", fontSize:14 },
   chatPanel: { flex:1, display:"flex", flexDirection:"column", background:"#0b141a", overflow:"hidden" },
   emptyState: { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 },
-  emptyIcon: { width:160, height:160, borderRadius:"50%", background:"#202c33", display:"flex", alignItems:"center", justifyContent:"center", fontSize:64, border:"2px solid #222d34" },
+  emptyIcon: { width:160, height:160, borderRadius:20, objectFit:"contain" },
   emptyTitle: { color:"#e9edef", fontSize:26, fontWeight:300 },
   emptySub: { color:"#8696a0", fontSize:14, textAlign:"center", lineHeight:1.7 },
   chatHeader: { display:"flex", alignItems:"center", padding:"10px 16px", background:"#202c33", minHeight:59, gap:12, flexShrink:0, flexWrap:"wrap" },

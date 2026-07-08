@@ -37,7 +37,7 @@ export default function LoginPage() {
   return (
     <div style={S.page}>
       <div style={S.card}>
-        <div style={S.logo}>🤖</div>
+        <img src="/mw-logo.png" alt="Mister Wheelz" style={S.logo} />
         <div style={S.title}>WhatsApp AI Bot</div>
         <div style={S.sub}>Kaya · Mister Wheelz · Monitor</div>
 
@@ -96,10 +96,8 @@ const S: Record<string, React.CSSProperties> = {
     boxShadow: "0 8px 32px rgba(0,0,0,.4)",
   },
   logo: {
-    width: 72, height: 72, borderRadius: "50%",
-    background: "linear-gradient(135deg,#25d366,#128c7e)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 32, marginBottom: 16,
+    width: 80, height: 80, borderRadius: 12,
+    objectFit: "contain", marginBottom: 16,
   },
   title: { color: "#e9edef", fontSize: 22, fontWeight: 700, marginBottom: 4 },
   sub: { color: "#8696a0", fontSize: 13, marginBottom: 32 },
