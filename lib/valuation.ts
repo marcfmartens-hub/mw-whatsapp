@@ -1,69 +1,39 @@
 import carPrices from "./carPrices";
 
-// ── Standard depreciation (European/American brands) ───────────────────────────
-// index = age in years, value = fraction of new price remaining
+// UAE depreciation table — unified baseline for all brands (index = age in years)
 const DEPRECIATION: number[] = [
-  1.00, // age 0
+  1.00, // age 0  (new)
   0.75, // age 1
   0.65, // age 2
   0.55, // age 3
   0.48, // age 4
-  0.42, // age 5
-  0.37, // age 6
-  0.33, // age 7
-  0.29, // age 8
-  0.26, // age 9
-  0.23, // age 10
-  0.21, // age 11
-  0.19, // age 12
-  0.17, // age 13
-  0.15, // age 14
-  0.13, // age 15
+  0.40, // age 5
+  0.34, // age 6
+  0.29, // age 7
+  0.25, // age 8
+  0.21, // age 9
+  0.18, // age 10
+  0.16, // age 11
+  0.14, // age 12
+  0.12, // age 13
+  0.10, // age 14
+  0.08, // age 15
+  0.07, // age 16
+  0.06, // age 17
+  0.05, // age 18
+  0.04, // age 19
+  0.03, // age 20+ (floor)
 ];
 
-// ── High-retention depreciation (Japanese/Korean popular brands in UAE) ────────
-// Toyota, Nissan, Honda, Mitsubishi, Hyundai, Kia hold value significantly
-// better in the UAE — calibrated against Dubizzle listings (Jul 2026).
-// RAV4 2020 GCC floor on Dubizzle = 63k → age-6 factor must produce low ≥ 63k.
-const HIGH_RETENTION_DEPRECIATION: number[] = [
-  1.00, // age 0
-  0.85, // age 1
-  0.78, // age 2
-  0.72, // age 3
-  0.68, // age 4
-  0.64, // age 5
-  0.60, // age 6  → RAV4 2020 GCC: mid ~AED 62k, range 50k–75k (Dubizzle floor 63k sits in middle)
-  0.56, // age 7
-  0.52, // age 8
-  0.48, // age 9
-  0.44, // age 10
-  0.40, // age 11
-  0.36, // age 12
-  0.32, // age 13
-  0.29, // age 14
-  0.26, // age 15
-];
-
-const HIGH_RETENTION_BRANDS = new Set([
-  "Toyota", "Lexus", "Nissan", "Honda",
-  "Mitsubishi", "Hyundai", "Kia", "Mazda", "Suzuki",
-]);
-
-function getDepreciationFactor(make: string, age: number): number {
-  const table = HIGH_RETENTION_BRANDS.has(make)
-    ? HIGH_RETENTION_DEPRECIATION
-    : DEPRECIATION;
-
+function getDepreciationFactor(age: number): number {
   if (age <= 0) return 1.0;
-  if (age < table.length) return table[age];
-
-  // Tail extrapolation past age 15
-  const last = table[table.length - 1];
-  const excess = age - (table.length - 1);
-  return Math.max(0.05, last - excess * 0.016);
+  if (age <= 20) return DEPRECIATION[age];
+  return 0.03;
 }
 
 // Annual list-price inflation rate by brand.
+// Premium brands have risen faster — deflates current list price back to what
+// the car cost new at the time of purchase.
 const PRICE_INFLATION_RATE: Record<string, number> = {
   "BMW":           0.955,
   "Mercedes-Benz": 0.955,
@@ -77,10 +47,17 @@ const PRICE_INFLATION_RATE: Record<string, number> = {
 };
 const DEFAULT_INFLATION_RATE = 0.985;
 
-// Brand multipliers — only needed for brands NOT in HIGH_RETENTION_BRANDS,
-// since high-retention brands already have their own depreciation curve.
-// High-retention brands default to 1.0 here.
+// Brand value-retention multipliers applied on top of the base depreciation table.
+// Japanese/Korean mass-market brands hold value better than average in UAE.
+// European/luxury brands depreciate faster than average.
 const BRAND_MULTIPLIER: Record<string, number> = {
+  "Toyota":        1.15,
+  "Lexus":         1.15,
+  "Nissan":        1.05,
+  "Honda":         1.05,
+  "Mitsubishi":    1.00,
+  "Hyundai":       1.00,
+  "Kia":           1.00,
   "Porsche":       1.05,
   "BMW":           0.80,
   "Audi":          0.83,
@@ -91,11 +68,11 @@ const BRAND_MULTIPLIER: Record<string, number> = {
   "Mercedes-Benz": 0.80,
 };
 
-// Model-specific overrides for extraordinary UAE demand.
+// Model-specific multipliers for UAE demand outliers.
 const MODEL_MULTIPLIER: Record<string, Record<string, number>> = {
-  "Nissan":  { "Patrol": 1.50 },
-  "Toyota":  { "Land Cruiser": 1.05, "Land Cruiser Prado": 1.05 },
-  "Lexus":   { "LX": 1.15 },
+  "Nissan": { "Patrol": 1.65 },
+  "Toyota": { "Land Cruiser": 1.40, "Land Cruiser Prado": 1.20 },
+  "Lexus":  { "LX": 1.20 },
 };
 
 const MAKE_KEY_MAP: Record<string, string> = {
@@ -114,9 +91,9 @@ function fmtAED(n: number): string {
 }
 
 export function estimateCarValue(
-  make:       string,
-  model:      string,
-  yearStr:    string,
+  make:        string,
+  model:       string,
+  yearStr:     string,
   mileageStr?: string | null,
   specs?:      string | null,
 ): ValuationResult | null {
@@ -137,17 +114,13 @@ export function estimateCarValue(
   const inflationRate     = PRICE_INFLATION_RATE[make] ?? DEFAULT_INFLATION_RATE;
   const adjustedBasePrice = baseNewPrice * Math.pow(inflationRate, age);
 
-  // Depreciation — brand-aware table
-  let factor = getDepreciationFactor(make, age);
-
-  // Brand adjustment (no-op for high-retention brands — already in their table)
+  let factor = getDepreciationFactor(age);
   factor *= (BRAND_MULTIPLIER[make] ?? 1.0);
 
-  // Model-specific boost
   const modelBoost = MODEL_MULTIPLIER[make]?.[model];
   if (modelBoost) factor *= modelBoost;
 
-  // Mileage adjustment: UAE average ~20,000 km/year
+  // Mileage: UAE average 15–20k km/year; >20k considered high
   if (mileageStr) {
     const actualKm   = parseInt(mileageStr.replace(/[^0-9]/g, ""), 10);
     const expectedKm = age * 20000;
@@ -160,7 +133,6 @@ export function estimateCarValue(
     }
   }
 
-  // Non-GCC penalty
   if (specs === "Non-GCC") factor -= 0.10;
 
   factor = Math.max(0.03, factor);
