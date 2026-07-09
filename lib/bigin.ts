@@ -58,10 +58,11 @@ export async function createBiginContact(conversation: Conversation, attempt = 1
     if (conversation.make)             record["Make"]             = conversation.make;
     if (conversation.model)            record["Model"]            = conversation.model;
     if (conversation.year)             record["Year"]             = conversation.year;
-    if (conversation.mileage)          record["Mileage"]          = conversation.mileage;
+    if (conversation.mileage)          record["Mileage_Range"]    = conversation.mileage;
     if (conversation.specs)            record["Regional_Specs"]   = conversation.specs;
     if (conversation.appointment_date) record["Appointment_Date"] = conversation.appointment_date;
     if (conversation.appointment_time) record["Appointment_Time"] = conversation.appointment_time;
+    if (conversation.estimated_price)  record["Estimated_Price"]  = conversation.estimated_price;
 
     const payload = { data: [record] };
 

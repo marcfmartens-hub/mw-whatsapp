@@ -572,6 +572,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Save estimated price when valuation is available ─────────────
+    if (valuation?.formatted) {
+      try {
+        await updateConversation(phone, { estimated_price: valuation.formatted } as any);
+      } catch (e) {
+        console.error("estimated_price save error (non-fatal):", e);
+      }
+    }
+
     // ── Save mortgage amount if extracted ─────────────────────────────
     if (mortgageAmount) {
       try {

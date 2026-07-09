@@ -31,6 +31,7 @@ export interface Conversation {
   source_url: string | null;
   last_message_at: string | null;
   bigin_pushed_at: string | null;
+  estimated_price?: string | null;
   messages?: Array<{ role: "user" | "assistant"; content: string }> | null;
 }
 
@@ -92,7 +93,6 @@ export async function updateConversation(
 }
 
 export async function resetConversation(phone: string): Promise<void> {
-  // Core columns — guaranteed to exist
   const { error } = await supabase
     .from(TABLE)
     .update({
@@ -106,8 +106,16 @@ export async function resetConversation(phone: string): Promise<void> {
       mileage: null,
       specs: null,
       loan: null,
+      mortgage_amount: null,
+      sell_timeline: null,
       appointment: null,
+      appointment_date: null,
+      appointment_time: null,
       last_msg_id: null,
+      nudged_at: null,
+      last_message_at: null,
+      bigin_pushed_at: null,
+      messages: [],
     })
     .eq("phone", phone);
 
@@ -115,16 +123,4 @@ export async function resetConversation(phone: string): Promise<void> {
     console.error("resetConversation error:", error);
     throw error;
   }
-
-  // Optional columns — added via migration; fail silently if missing
-  await supabase.from(TABLE).update({
-    mortgage_amount: null,
-    sell_timeline: null,
-    appointment_date: null,
-    appointment_time: null,
-    nudged_at: null,
-    messages: [],
-    bigin_pushed_at: null,
-    last_message_at: null,
-  }).eq("phone", phone);
 }
