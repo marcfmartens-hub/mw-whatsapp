@@ -27,21 +27,21 @@ const DEPRECIATION: number[] = [
 // RAV4 2020 GCC floor on Dubizzle = 63k → age-6 factor must produce low ≥ 63k.
 const HIGH_RETENTION_DEPRECIATION: number[] = [
   1.00, // age 0
-  0.90, // age 1
-  0.85, // age 2
-  0.82, // age 3
-  0.80, // age 4
-  0.78, // age 5
-  0.75, // age 6  → RAV4 2020 GCC: ~AED 62,500–93,500 ✓
-  0.70, // age 7
-  0.65, // age 8
-  0.60, // age 9
-  0.55, // age 10
-  0.50, // age 11
-  0.45, // age 12
-  0.40, // age 13
-  0.36, // age 14
-  0.32, // age 15
+  0.85, // age 1
+  0.78, // age 2
+  0.72, // age 3
+  0.68, // age 4
+  0.64, // age 5
+  0.60, // age 6  → RAV4 2020 GCC: mid ~AED 62k, range 50k–75k (Dubizzle floor 63k sits in middle)
+  0.56, // age 7
+  0.52, // age 8
+  0.48, // age 9
+  0.44, // age 10
+  0.40, // age 11
+  0.36, // age 12
+  0.32, // age 13
+  0.29, // age 14
+  0.26, // age 15
 ];
 
 const HIGH_RETENTION_BRANDS = new Set([
