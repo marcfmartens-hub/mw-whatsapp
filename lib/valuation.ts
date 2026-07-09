@@ -71,7 +71,7 @@ const BRAND_MULTIPLIER: Record<string, number> = {
 // Model-specific multipliers for UAE demand outliers.
 const MODEL_MULTIPLIER: Record<string, Record<string, number>> = {
   "Nissan": { "Patrol": 1.65 },
-  "Toyota": { "Land Cruiser": 1.40, "Land Cruiser Prado": 1.20 },
+  "Toyota": { "Land Cruiser": 1.00, "Land Cruiser Prado": 1.10 },
   "Lexus":  { "LX": 1.20 },
 };
 
