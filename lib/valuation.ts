@@ -1,8 +1,9 @@
 import carPrices from "./carPrices";
 
-// UAE depreciation table: index = age in years, value = fraction of new price remaining
+// ── Standard depreciation (European/American brands) ───────────────────────────
+// index = age in years, value = fraction of new price remaining
 const DEPRECIATION: number[] = [
-  1.00, // age 0 (new)
+  1.00, // age 0
   0.75, // age 1
   0.65, // age 2
   0.55, // age 3
@@ -20,18 +21,51 @@ const DEPRECIATION: number[] = [
   0.13, // age 15
 ];
 
-function getDepreciationFactor(age: number): number {
+// ── High-retention depreciation (Japanese/Korean popular brands in UAE) ────────
+// Toyota, Nissan, Honda, Mitsubishi, Hyundai, Kia hold value significantly
+// better in the UAE — calibrated against Dubizzle listings (Jul 2026).
+// RAV4 2020 GCC floor on Dubizzle = 63k → age-6 factor must produce low ≥ 63k.
+const HIGH_RETENTION_DEPRECIATION: number[] = [
+  1.00, // age 0
+  0.90, // age 1
+  0.85, // age 2
+  0.82, // age 3
+  0.80, // age 4
+  0.78, // age 5
+  0.75, // age 6  → RAV4 2020 GCC: ~AED 62,500–93,500 ✓
+  0.70, // age 7
+  0.65, // age 8
+  0.60, // age 9
+  0.55, // age 10
+  0.50, // age 11
+  0.45, // age 12
+  0.40, // age 13
+  0.36, // age 14
+  0.32, // age 15
+];
+
+const HIGH_RETENTION_BRANDS = new Set([
+  "Toyota", "Lexus", "Nissan", "Honda",
+  "Mitsubishi", "Hyundai", "Kia", "Mazda", "Suzuki",
+]);
+
+function getDepreciationFactor(make: string, age: number): number {
+  const table = HIGH_RETENTION_BRANDS.has(make)
+    ? HIGH_RETENTION_DEPRECIATION
+    : DEPRECIATION;
+
   if (age <= 0) return 1.0;
-  if (age <= 15) return DEPRECIATION[age];
-  if (age <= 20) return Math.max(0.05, 0.13 - (age - 15) * 0.016);
-  return Math.max(0.03, 0.05 - (age - 20) * 0.004);
+  if (age < table.length) return table[age];
+
+  // Tail extrapolation past age 15
+  const last = table[table.length - 1];
+  const excess = age - (table.length - 1);
+  return Math.max(0.05, last - excess * 0.016);
 }
 
 // Annual list-price inflation rate by brand.
-// Premium/luxury brands have risen faster (~5% yr) than mass-market (~1.5%).
-// Used to deflate current list price back to what the car cost new at time of purchase.
 const PRICE_INFLATION_RATE: Record<string, number> = {
-  "BMW":           0.955, // ~4.5% per year rise
+  "BMW":           0.955,
   "Mercedes-Benz": 0.955,
   "Audi":          0.960,
   "Land Rover":    0.955,
@@ -41,15 +75,12 @@ const PRICE_INFLATION_RATE: Record<string, number> = {
   "Maserati":      0.965,
   "Bentley":       0.970,
 };
-const DEFAULT_INFLATION_RATE = 0.985; // ~1.5% per year for mass-market
+const DEFAULT_INFLATION_RATE = 0.985;
 
-// Brand value-retention multipliers (applied after base depreciation).
-// High = holds value better than average; low = depreciates faster.
+// Brand multipliers — only needed for brands NOT in HIGH_RETENTION_BRANDS,
+// since high-retention brands already have their own depreciation curve.
+// High-retention brands default to 1.0 here.
 const BRAND_MULTIPLIER: Record<string, number> = {
-  "Toyota":        1.15,
-  "Lexus":         1.15,
-  "Nissan":        1.05,
-  "Honda":         1.05,
   "Porsche":       1.05,
   "BMW":           0.80,
   "Audi":          0.83,
@@ -60,15 +91,13 @@ const BRAND_MULTIPLIER: Record<string, number> = {
   "Mercedes-Benz": 0.80,
 };
 
-// Model-specific overrides for extraordinary UAE demand (e.g. Patrol, Land Cruiser).
-// These models retain value well beyond their brand average.
+// Model-specific overrides for extraordinary UAE demand.
 const MODEL_MULTIPLIER: Record<string, Record<string, number>> = {
-  "Nissan":  { "Patrol": 1.60 },
-  "Toyota":  { "Land Cruiser": 1.50, "Land Cruiser Prado": 1.30 },
-  "Lexus":   { "LX": 1.20 },
+  "Nissan":  { "Patrol": 1.50 },
+  "Toyota":  { "Land Cruiser": 1.40, "Land Cruiser Prado": 1.20 },
+  "Lexus":   { "LX": 1.15 },
 };
 
-// Normalise stored make names to carPrices keys
 const MAKE_KEY_MAP: Record<string, string> = {
   "Land Rover": "LandRover",
 };
@@ -108,13 +137,13 @@ export function estimateCarValue(
   const inflationRate     = PRICE_INFLATION_RATE[make] ?? DEFAULT_INFLATION_RATE;
   const adjustedBasePrice = baseNewPrice * Math.pow(inflationRate, age);
 
-  // Base depreciation
-  let factor = getDepreciationFactor(age);
+  // Depreciation — brand-aware table
+  let factor = getDepreciationFactor(make, age);
 
-  // Brand adjustment
+  // Brand adjustment (no-op for high-retention brands — already in their table)
   factor *= (BRAND_MULTIPLIER[make] ?? 1.0);
 
-  // Model-specific override (Patrol, Land Cruiser, etc.)
+  // Model-specific boost
   const modelBoost = MODEL_MULTIPLIER[make]?.[model];
   if (modelBoost) factor *= modelBoost;
 
@@ -137,7 +166,6 @@ export function estimateCarValue(
   factor = Math.max(0.03, factor);
 
   const mid  = adjustedBasePrice * factor;
-  // ±20% range — reflects inherent uncertainty without seeing the car
   const low  = Math.round((mid * 0.80) / 500) * 500;
   const high = Math.round((mid * 1.20) / 500) * 500;
 
