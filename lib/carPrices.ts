@@ -1191,6 +1191,124 @@ const carPrices: CarPrices = {
       ],
     },
   },
+  "Mercedes-Benz": {
+    "A-Class": {
+      year: 2025,
+      trims: [
+        { trim: "A 200", display: "AED 139,000 - 155,000", price: 139000 },
+        { trim: "A 250", display: "AED 165,000 - 175,000", price: 165000 },
+      ],
+    },
+    "C-Class": {
+      year: 2025,
+      trims: [
+        { trim: "C 200", display: "AED 195,000 - 215,000", price: 195000 },
+        { trim: "C 300", display: "AED 230,000 - 250,000", price: 230000 },
+        { trim: "C 43 AMG", display: "AED 310,000 - 330,000", price: 310000 },
+        { trim: "C 63 AMG", display: "AED 420,000 - 450,000", price: 420000 },
+      ],
+    },
+    "E-Class": {
+      year: 2025,
+      trims: [
+        { trim: "E 200", display: "AED 245,000 - 265,000", price: 245000 },
+        { trim: "E 300", display: "AED 285,000 - 310,000", price: 285000 },
+        { trim: "E 450", display: "AED 345,000 - 370,000", price: 345000 },
+        { trim: "E 53 AMG", display: "AED 430,000 - 460,000", price: 430000 },
+        { trim: "E 63 AMG", display: "AED 590,000 - 620,000", price: 590000 },
+      ],
+    },
+    "S-Class": {
+      year: 2025,
+      trims: [
+        { trim: "S 450", display: "AED 560,000 - 600,000", price: 560000 },
+        { trim: "S 500", display: "AED 640,000 - 680,000", price: 640000 },
+        { trim: "S 580", display: "AED 750,000 - 800,000", price: 750000 },
+        { trim: "S 63 AMG", display: "AED 950,000 - 1,050,000", price: 950000 },
+      ],
+    },
+    "GLA": {
+      year: 2025,
+      trims: [
+        { trim: "GLA 200", display: "AED 155,000 - 170,000", price: 155000 },
+        { trim: "GLA 250", display: "AED 185,000 - 200,000", price: 185000 },
+        { trim: "GLA 35 AMG", display: "AED 250,000 - 265,000", price: 250000 },
+      ],
+    },
+    "GLC": {
+      year: 2025,
+      trims: [
+        { trim: "GLC 200", display: "AED 225,000 - 245,000", price: 225000 },
+        { trim: "GLC 300", display: "AED 265,000 - 285,000", price: 265000 },
+        { trim: "GLC 43 AMG", display: "AED 360,000 - 385,000", price: 360000 },
+        { trim: "GLC 63 AMG", display: "AED 490,000 - 520,000", price: 490000 },
+      ],
+    },
+    "GLE": {
+      year: 2025,
+      trims: [
+        { trim: "GLE 300d", display: "AED 320,000 - 345,000", price: 320000 },
+        { trim: "GLE 450", display: "AED 380,000 - 410,000", price: 380000 },
+        { trim: "GLE 53 AMG", display: "AED 500,000 - 530,000", price: 500000 },
+        { trim: "GLE 63 AMG", display: "AED 650,000 - 700,000", price: 650000 },
+      ],
+    },
+    "GLS": {
+      year: 2025,
+      trims: [
+        { trim: "GLS 450", display: "AED 460,000 - 490,000", price: 460000 },
+        { trim: "GLS 580", display: "AED 590,000 - 630,000", price: 590000 },
+        { trim: "GLS 63 AMG", display: "AED 780,000 - 830,000", price: 780000 },
+      ],
+    },
+    "CLA": {
+      year: 2025,
+      trims: [
+        { trim: "CLA 200", display: "AED 165,000 - 180,000", price: 165000 },
+        { trim: "CLA 250", display: "AED 195,000 - 210,000", price: 195000 },
+        { trim: "CLA 35 AMG", display: "AED 265,000 - 280,000", price: 265000 },
+        { trim: "CLA 45 AMG", display: "AED 330,000 - 355,000", price: 330000 },
+      ],
+    },
+    "CLS": {
+      year: 2025,
+      trims: [
+        { trim: "CLS 350", display: "AED 340,000 - 365,000", price: 340000 },
+        { trim: "CLS 450", display: "AED 395,000 - 420,000", price: 395000 },
+        { trim: "CLS 53 AMG", display: "AED 510,000 - 545,000", price: 510000 },
+      ],
+    },
+    "G-Class": {
+      year: 2025,
+      trims: [
+        { trim: "G 500", display: "AED 620,000 - 660,000", price: 620000 },
+        { trim: "G 63 AMG", display: "AED 850,000 - 920,000", price: 850000 },
+      ],
+    },
+    "GLB": {
+      year: 2025,
+      trims: [
+        { trim: "GLB 200", display: "AED 175,000 - 190,000", price: 175000 },
+        { trim: "GLB 250", display: "AED 205,000 - 220,000", price: 205000 },
+        { trim: "GLB 35 AMG", display: "AED 270,000 - 285,000", price: 270000 },
+      ],
+    },
+    "SL": {
+      year: 2025,
+      trims: [
+        { trim: "SL 43 AMG", display: "AED 450,000 - 480,000", price: 450000 },
+        { trim: "SL 55 AMG", display: "AED 590,000 - 630,000", price: 590000 },
+        { trim: "SL 63 AMG", display: "AED 720,000 - 770,000", price: 720000 },
+      ],
+    },
+    "EQS": {
+      year: 2025,
+      trims: [
+        { trim: "EQS 450+", display: "AED 420,000 - 450,000", price: 420000 },
+        { trim: "EQS 580", display: "AED 520,000 - 560,000", price: 520000 },
+      ],
+    },
+  },
 };
 
 export default carPrices;
