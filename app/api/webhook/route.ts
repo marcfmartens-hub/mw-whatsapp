@@ -497,9 +497,10 @@ export async function POST(req: NextRequest) {
     );
     const callbackSignal =
       HUMAN_REQUEST.test(messageText) ||
-      (currentStep >= FINAL_STEP && PRICE_PUSH.test(messageText)) ||
+      (currentStep >= FINAL_STEP && currentStep < CLOSING_STEP && PRICE_PUSH.test(messageText)) ||
       (alreadyExplainedOptions && (PRICE_PUSH.test(messageText) || BOOKING_REFUSAL.test(messageText)));
-    if (!action && currentStep >= 5 && callbackSignal) {
+    // Only trigger callback before the appointment is confirmed — not after booking is done
+    if (!action && currentStep >= 5 && currentStep < CLOSING_STEP && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
     }
 

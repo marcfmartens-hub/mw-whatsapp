@@ -156,7 +156,9 @@ Then the booking confirmation. End with EXACTLY this sentence: "The Mister Wheel
 };
 
 const CLOSING_INSTRUCTION =
-  "The booking is complete. If the customer messages again, warmly let them know everything is set and the team will reach out. No more questions, do not restart the flow.";
+  `The booking is complete.
+- If the customer asks for a price/estimate: share it if "Estimated market value" is in context ("Based on market data, a [year] [make] [model] typically trades around [range] — rough estimate, not an offer."). Do NOT trigger a callback or repeat the inspection pitch.
+- Otherwise: warmly confirm everything is set and the team will be in touch. No more questions, do not restart the flow.`;
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
