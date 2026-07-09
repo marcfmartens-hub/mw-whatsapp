@@ -487,6 +487,7 @@ export async function POST(req: NextRequest) {
     //   A) Explicitly asks for a human / to speak to someone
     //   B) At appointment step, still pushing for price (whole flow done, still not committing)
     //   C) Avoiding booking after options were already explained (price push or flat refusal)
+    const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
     const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
     const HUMAN_REQUEST   = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
     const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested)\b/i;
@@ -536,7 +537,6 @@ export async function POST(req: NextRequest) {
     // Steps with a typed action always get a direct template response — zero LLM hallucination risk.
     // Steps without an action (6, 7, 8) go to the LLM — pass the full conversation history
     // so the model remembers what was already said (prevents "which day?" after "tomorrow" etc.)
-    const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
     const reply = action
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(currentStep, history, messageText, knownFields);
