@@ -125,7 +125,8 @@ type NextAction =
   | { type: "ASK_AMOUNT" }
   | { type: "CLARIFY_MODEL" }
   | { type: "SHOW_SUMMARY" }
-  | { type: "SHOW_FULL_SUMMARY" };
+  | { type: "SHOW_FULL_SUMMARY" }
+  | { type: "OFFER_CALLBACK" };
 
 // Human-readable version sent to the LLM (for nuanced fallback cases)
 function describeAction(a: NextAction): string {
@@ -140,6 +141,7 @@ function describeAction(a: NextAction): string {
     case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
     case "SHOW_SUMMARY":      return `Show the car summary (plain, no emojis) then ask "When are you planning to sell the car?"`;
     case "SHOW_FULL_SUMMARY": return `Show the car summary including mortgage (plain, no emojis) then ask "When are you planning to sell the car?"`;
+    case "OFFER_CALLBACK":   return "Tell the customer the purchasing team will call them back within the hour, and they're welcome to come in whenever.";
   }
 }
 
@@ -191,7 +193,16 @@ function buildDirectResponse(
       const mortgage = hasLoan ? `Yes — AED ${fmtAmt}` : "AED 0";
       return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: ${mortgage}\n\nWhen are you planning to sell the car?`;
     }
+    case "OFFER_CALLBACK":
+      return "Our purchasing team will call you back within the hour. You're also welcome to come in whenever you're ready.";
   }
+}
+
+function getDubaiDateStr(): string {
+  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 function getDubaiDateTime(): string {
@@ -469,6 +480,19 @@ export async function POST(req: NextRequest) {
       action = { type: "SHOW_FULL_SUMMARY" };
     }
 
+    // ── Callback detection ─────────────────────────────────────────
+    // After Kaya has already explained the 3 selling options, if the customer
+    // is still pushing for a price/offer, offer a purchasing-team callback
+    // instead of repeating the same answer.
+    const PRICE_PUSH = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price|raptor|specific.*trim|variant)\b/i;
+    const THREE_OPTIONS_SENT = /three ways to sell|direct cash sale|consignment.*private|we offer three/i;
+    const alreadyExplainedOptions = history.some(
+      m => m.role === "assistant" && THREE_OPTIONS_SENT.test(m.content)
+    );
+    if (!action && alreadyExplainedOptions && PRICE_PUSH.test(messageText) && currentStep >= 5) {
+      action = { type: "OFFER_CALLBACK" };
+    }
+
     // Compute a rough market estimate when make/model/year are all known
     const estMake    = (vehicleUpdates.make  ?? conversation.make)  ?? "";
     const estModel   = (vehicleUpdates.model ?? conversation.model) ?? "";
@@ -524,6 +548,24 @@ export async function POST(req: NextRequest) {
     if (appointmentConfirmedEarly) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
+    }
+
+    // Callback path: send location + push to Bigin with a "today 08:00" appointment (internal flag)
+    if (action?.type === "OFFER_CALLBACK") {
+      await sendWhatsAppMessage(phone, "You're also welcome to walk in whenever — here's where to find us.");
+      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      try {
+        const callbackConv = {
+          ...conversation,
+          appointment_date: getDubaiDateStr(),
+          appointment_time: "08:00",
+        } as Conversation;
+        await createBiginContact(callbackConv);
+        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+      } catch (e) {
+        console.error("callback Bigin push error (non-fatal):", e);
+      }
     }
 
     // ── Persist conversation history ───────────────────────────────
