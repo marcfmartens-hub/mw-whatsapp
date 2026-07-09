@@ -203,7 +203,7 @@ function buildDirectResponse(
       return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: ${mortgage}\n\nWhen are you planning to sell the car?`;
     }
     case "OFFER_CALLBACK":
-      return "Our purchasing team will call you back within the hour. You're also welcome to come in whenever you're ready.";
+      return "No worries — I'll have someone from our team call you back within the hour. Whenever you're ready to come in, we're here for you.";
   }
 }
 
@@ -495,8 +495,14 @@ export async function POST(req: NextRequest) {
     //   A) Customer explicitly asks to speak to a person / human / agent
     //   B) Still pushing for price at the appointment step (whole flow done, still not happy)
     //   C) History shows 3 options were already explained and they're still pushing price
-    const PRICE_PUSH    = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
-    const HUMAN_REQUEST = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
+    // ── Callback detection ─────────────────────────────────────────
+    // Fire when the customer is stuck — any one of these signals is enough:
+    //   A) Explicitly asks for a human / to speak to someone
+    //   B) At appointment step, still pushing for price (whole flow done, still not committing)
+    //   C) Avoiding booking after options were already explained (price push or flat refusal)
+    const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
+    const HUMAN_REQUEST   = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
+    const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested)\b/i;
     const THREE_OPTIONS_SENT = /three ways to sell|direct cash sale|consignment.*private|we offer three/i;
     const alreadyExplainedOptions = history.some(
       m => m.role === "assistant" && THREE_OPTIONS_SENT.test(m.content)
@@ -504,7 +510,7 @@ export async function POST(req: NextRequest) {
     const callbackSignal =
       HUMAN_REQUEST.test(messageText) ||
       (currentStep >= FINAL_STEP && PRICE_PUSH.test(messageText)) ||
-      (alreadyExplainedOptions && PRICE_PUSH.test(messageText));
+      (alreadyExplainedOptions && (PRICE_PUSH.test(messageText) || BOOKING_REFUSAL.test(messageText)));
     if (!action && currentStep >= 5 && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
     }
