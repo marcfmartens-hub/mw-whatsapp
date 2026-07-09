@@ -267,6 +267,11 @@ export async function POST(req: NextRequest) {
     if (isLocationMessage || isLocationRequest) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      // If we're in the appointment booking step, nudge them to pick a time
+      const convForLocation = await getOrCreateConversation(phone);
+      if ((convForLocation.step ?? 0) >= FINAL_STEP - 1) {
+        await sendWhatsAppMessage(phone, "What time works best for you to bring the car in?");
+      }
       return NextResponse.json({ status: "location_sent" }, { status: 200 });
     }
     // ──────────────────────────────────────────────────────────────
