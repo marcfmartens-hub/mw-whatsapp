@@ -490,15 +490,22 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Callback detection ─────────────────────────────────────────
-    // After Kaya has already explained the 3 selling options, if the customer
-    // is still pushing for a price/offer, offer a purchasing-team callback
-    // instead of repeating the same answer.
-    const PRICE_PUSH = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price|raptor|specific.*trim|variant)\b/i;
+    // Triggers when the customer is stuck and needs a human touch.
+    // Three independent signals — any one is enough:
+    //   A) Customer explicitly asks to speak to a person / human / agent
+    //   B) Still pushing for price at the appointment step (whole flow done, still not happy)
+    //   C) History shows 3 options were already explained and they're still pushing price
+    const PRICE_PUSH    = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
+    const HUMAN_REQUEST = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
     const THREE_OPTIONS_SENT = /three ways to sell|direct cash sale|consignment.*private|we offer three/i;
     const alreadyExplainedOptions = history.some(
       m => m.role === "assistant" && THREE_OPTIONS_SENT.test(m.content)
     );
-    if (!action && alreadyExplainedOptions && PRICE_PUSH.test(messageText) && currentStep >= 5) {
+    const callbackSignal =
+      HUMAN_REQUEST.test(messageText) ||
+      (currentStep >= FINAL_STEP && PRICE_PUSH.test(messageText)) ||
+      (alreadyExplainedOptions && PRICE_PUSH.test(messageText));
+    if (!action && currentStep >= 5 && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
     }
 
