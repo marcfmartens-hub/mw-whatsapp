@@ -427,8 +427,8 @@ Model reference (make: models):
 ${Object.entries(CAR_MODELS).map(([m, ms]) => `${m}: ${ms.join(", ")}`).join("\n")}
 
 Strict rules:
-- If the make is not in the valid makes list but looks like a typo, set make to "Unknown" and add a typo_check entry.
-- If the model is not listed for that make but looks like a typo, set model to "Unknown" and add a typo_check entry.
+- If the make looks like a typo or phonetic variation of a known make (e.g. "Toyata" → "Toyota", "Mercedez" → "Mercedes-Benz"), set make to the canonical spelling and add a typo_check entry. Only use "Unknown" if you genuinely cannot determine which make was meant.
+- If the model looks like a typo or phonetic variation of a known model for that make (e.g. "Landcrusier" → "Land Cruiser", "Corolle" → "Corolla"), set model to the canonical model name and add a typo_check entry. Only use "Unknown" if you genuinely cannot determine which model was meant.
 - Never put model name in "make" or vice versa. Never put year in "model".
 - Do NOT overwrite already known fields: ${knownSummary || "nothing yet"}.
 - If nothing vehicle-related is in the message, return {}.
@@ -444,6 +444,7 @@ Examples:
 "BMW X9 2020"             → {"make":"BMW","model":"Unknown","year":"2020","typo_check":[{"field":"model","input":"X9","suggestion":"X5 or X7?"}]}
 "Toyata Camry"            → {"make":"Toyota","model":"Camry","typo_check":[{"field":"make","input":"Toyata","suggestion":"Toyota"}]}
 "Mercedez GLC"            → {"make":"Mercedes-Benz","model":"GLC","typo_check":[{"field":"make","input":"Mercedez","suggestion":"Mercedes-Benz"}]}
+"Toyota Landcrusier 2020" → {"make":"Toyota","model":"Land Cruiser","year":"2020","typo_check":[{"field":"model","input":"Landcrusier","suggestion":"Land Cruiser"}]}
 "x5" (BMW already known)  → {"model":"X5"}
 "X7 sorry" (BMW known)    → {"model":"X7"}
 "sorry it's the X7" (BMW) → {"model":"X7"}

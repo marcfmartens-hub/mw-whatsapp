@@ -94,7 +94,7 @@ const BRAND_MULTIPLIER: Record<string, number> = {
 // Model-specific overrides for extraordinary UAE demand.
 const MODEL_MULTIPLIER: Record<string, Record<string, number>> = {
   "Nissan":  { "Patrol": 1.50 },
-  "Toyota":  { "Land Cruiser": 1.40, "Land Cruiser Prado": 1.20 },
+  "Toyota":  { "Land Cruiser": 1.05, "Land Cruiser Prado": 1.05 },
   "Lexus":   { "LX": 1.15 },
 };
 
