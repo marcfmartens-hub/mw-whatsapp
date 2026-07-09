@@ -234,12 +234,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function MonitorPage() {
-  const [convs, setConvs]       = useState<Conv[]>([]);
-  const [active, setActive]     = useState<string | null>(null);
-  const [search, setSearch]     = useState("");
-  const [filter, setFilter]     = useState<"all"|"active"|"complete">("all");
-  const [loading, setLoading]   = useState(true);
-  const [settings, setSettings] = useState(false);
+  const [convs, setConvs]         = useState<Conv[]>([]);
+  const [active, setActive]       = useState<string | null>(null);
+  const [search, setSearch]       = useState("");
+  const [filter, setFilter]       = useState<"all"|"active"|"complete">("all");
+  const [loading, setLoading]     = useState(true);
+  const [settings, setSettings]   = useState(false);
+  const [resetting, setResetting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevLenRef = useRef<Record<string, number>>({});
 
@@ -269,6 +270,15 @@ export default function MonitorPage() {
   });
 
   const activeConv = convs.find((c) => c.phone === active) ?? null;
+
+  async function handleReset() {
+    if (!active || resetting) return;
+    if (!confirm("Reset this conversation? All data will be cleared.")) return;
+    setResetting(true);
+    await fetch("/api/reset-conversation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: active }) });
+    await fetchConvs();
+    setResetting(false);
+  }
 
   return (
     <div style={S.app}>
@@ -359,6 +369,9 @@ export default function MonitorPage() {
                 {activeConv.specs && <span style={S.pill}>{activeConv.specs}</span>}
                 {activeConv.appointment_date && <span style={{ ...S.pill, background: "#a855f720", color: "#a855f7" }}>📅 {activeConv.appointment_date} {activeConv.appointment_time ?? ""}</span>}
               </div>
+              <button style={{ ...S.resetBtn, opacity: resetting ? 0.5 : 1 }} onClick={handleReset} disabled={resetting} title="Reset conversation">
+                {resetting ? "Resetting…" : "↺ Reset"}
+              </button>
             </div>
 
             <div style={S.messagesWrap}>
@@ -448,6 +461,7 @@ const S: Record<string, React.CSSProperties> = {
   msgText: { fontSize:14.5, lineHeight:1.55 },
   inputBar: { background:"#202c33", padding:"14px 20px", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
   readonlyNote: { color:"#8696a0", fontSize:13 },
+  resetBtn: { background:"#3d1515", color:"#ff6b6b", border:"1px solid #7f2020", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" as const, flexShrink:0 },
 };
 
 const SP: Record<string, React.CSSProperties> = {
