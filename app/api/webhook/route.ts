@@ -159,8 +159,17 @@ function buildDirectResponse(
       return "And what's your name? 😊";
     case "ASK_UAE_PHONE":
       return `Hi${n}! 😊 On which UAE number can we reach you on?`;
-    case "ASK_CAR_DETAILS":
+    case "ASK_CAR_DETAILS": {
+      // Only ask for what's still missing — don't repeat info already given
+      const hasMake  = !!(known.make  && known.make  !== "Unknown");
+      const hasModel = !!(known.model && known.model !== "Unknown");
+      if (hasMake && hasModel) {
+        return `Alright, nice ${known.make} ${known.model}! Which year is it?`;
+      } else if (hasMake) {
+        return `Got it — ${known.make}! What's the model and year?`;
+      }
       return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
+    }
     case "ASK_MILEAGE_SPECS":
       return `Got it${n}! 👌 Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
     case "ASK_SPECS":
