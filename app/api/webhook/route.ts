@@ -512,11 +512,14 @@ export async function POST(req: NextRequest) {
     const appointmentConfirmedEarly = currentStep === FINAL_STEP && !action &&
       /team will be in touch on whatsapp/i.test(reply);
 
-    const replyToSend = appointmentConfirmedEarly
-      ? reply + "\n\nHere below is our location."
-      : reply;
-
-    await sendWhatsAppMessage(phone, replyToSend);
+    // Split on [SPLIT] markers so summaries and follow-up questions go as separate WhatsApp messages
+    const replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
+    if (appointmentConfirmedEarly && replyParts.length > 0) {
+      replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
+    }
+    for (const part of replyParts) {
+      await sendWhatsAppMessage(phone, part);
+    }
 
     if (appointmentConfirmedEarly) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
