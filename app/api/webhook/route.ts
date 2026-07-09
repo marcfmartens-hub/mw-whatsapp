@@ -427,7 +427,7 @@ export async function POST(req: NextRequest) {
     const hasAllVehicleFields = !!carMileage && (!!carSpecs || specsExplicitlyUnknown
                                   || conversation.specs === "Unknown");
     // Skip mortgage for cars 5+ years old (only once mileage+specs are collected)
-    const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5;
+    const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
 
     // ── Auto-correct typos silently — no "did you mean?" confirmation needed ──
     if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
@@ -523,7 +523,7 @@ export async function POST(req: NextRequest) {
       dubai_datetime:   getDubaiDateTime(),
       dubai_tomorrow:   getDubaiTomorrow(),
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
-      skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 5,
+      skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10,
       estimated_value:  valuation?.formatted ?? null,
       next_action:      action ? describeAction(action) : undefined,
       // Progressive appointment context — accumulated across step 8 exchanges
