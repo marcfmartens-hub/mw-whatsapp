@@ -180,28 +180,10 @@ function buildDirectResponse(
       return "How much is the outstanding balance?";
     case "CLARIFY_MODEL":
       return `Could you confirm the car model and year${n}?`;
-    case "SHOW_SUMMARY": {
-      // Old cars (5+ years) — mortgage step was skipped, so mortgage = AED 0
-      const make    = known.make    || "Unknown";
-      const model   = known.model   || "Unknown";
-      const year    = known.year    || "Unknown";
-      const mileage = formatMileage(known.mileage);
-      const specs   = known.specs   || "Unknown";
-      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: AED 0\n\nWhen are you planning to sell the car?`;
-    }
-    case "SHOW_FULL_SUMMARY": {
-      // After mortgage step — include mortgage line with amount or AED 0
-      const make    = known.make    || "Unknown";
-      const model   = known.model   || "Unknown";
-      const year    = known.year    || "Unknown";
-      const mileage = formatMileage(known.mileage);
-      const specs   = known.specs   || "Unknown";
-      const hasLoan = known.loan && /\byes\b/i.test(known.loan);
-      const rawAmt  = known.mortgage_amount ? parseInt(known.mortgage_amount, 10) : NaN;
-      const fmtAmt  = isNaN(rawAmt) ? "TBC" : rawAmt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-      const mortgage = hasLoan ? `Yes — AED ${fmtAmt}` : "AED 0";
-      return `Here's a summary of your car:\n\nMake: ${make}\nModel: ${model}\nYear: ${year}\nMileage: ${mileage}\nSpecs: ${specs}\nMortgage: ${mortgage}\n\nWhen are you planning to sell the car?`;
-    }
+    case "SHOW_SUMMARY":
+    case "SHOW_FULL_SUMMARY":
+      // No mid-flow summary — go straight to sell timeline question
+      return "When are you planning to sell the car?";
     case "OFFER_CALLBACK":
       return "No worries — I'll have someone from our team call you back within the hour. Whenever you're ready to come in, we're here for you.";
   }

@@ -108,35 +108,16 @@ Do NOT ask for mileage or specs until make + model + year are all known.`,
 
 Rules:
 - Do NOT ask more than one thing at a time.
-- Do NOT skip to appointment booking or sell timeline.
 - Do NOT confirm a booking.
-- If "Next action" says to show a summary, use this format (plain text, no emojis):
-  Make: [Make]
-  Model: [Model]
-  Year: [Year]
-  Mileage: [Mileage] km
-  Specs: [GCC / Non-GCC / Unknown]
-  [SPLIT]
-  When are you planning to sell the car?`,
+- If "Next action" says to ask "When are you planning to sell the car?": just ask that, nothing else.`,
 
   5: `If "Next action" is set in "What you already know": do exactly that (1 sentence).
 
-Otherwise the mortgage info is complete — show the summary, then [SPLIT], then ask "When are you planning to sell the car?":
+Otherwise the mortgage info is complete — ask directly: "When are you planning to sell the car?"`,
 
-Make: [Make]
-Model: [Model]
-Year: [Year]
-Mileage: [Mileage] km
-Specs: [Specs]
-Mortgage: [No / Yes - AED [amount]]
-[SPLIT]
-When are you planning to sell the car?
-
-No emojis or icons in the summary. Include Unknown fields as-is — do not skip them.`,
-
-  6: `The customer just responded after seeing the car summary (which already asked "When are you planning to sell?").
-- If they corrected car info (wrong model, year, mileage, specs): acknowledge warmly, show the corrected summary in the same plain format, then immediately ask "When are you planning to sell the car?" again.
-- Otherwise treat their message as their answer to "When are you planning to sell?" and proceed:
+  6: `The customer just answered "When are you planning to sell the car?".
+- If they corrected car info (wrong model, year, mileage, specs): acknowledge warmly and ask "When are you planning to sell the car?" again.
+- Otherwise treat their message as the answer and proceed:
   - If sell urgency is YES (today / now / asap / any time / when the price is right):
     - Reply: "Alright, sounds good!"
     - If Dubai time is before 15:00: ask "What time can you bring the car to our branch today for inspection?" (last slot is 18:30)
@@ -161,7 +142,15 @@ Rules:
 - If invalid (past, Sunday, outside hours): explain why briefly and ask for a valid alternative.
 - "tomorrow" = the date in "Tomorrow in Dubai". Always convert relative terms to the actual day name + date (e.g. "Wednesday 8th of July"). Never say "tomorrow" in your reply.
 - If "Customer name" is NOT in "What you already know": before confirming the booking, ask "Just to confirm — what's your name for the booking? 😊" and wait for their reply before completing the booking.
-- When BOTH date and time are valid and confirmed AND name is known: confirm the booking warmly using their name, the EXACT date and time. End with EXACTLY this sentence: "The Mister Wheelz team will be in touch on WhatsApp. 😊"
+- When BOTH date and time are valid and confirmed AND name is known: confirm the booking warmly using their name and the EXACT date and time. Include a brief car summary first (plain text, no emojis, no mortgage line):
+
+Make: [Make]
+Model: [Model]
+Year: [Year]
+Mileage: [Mileage] km
+Specs: [Specs]
+[SPLIT]
+Then the booking confirmation. End with EXACTLY this sentence: "The Mister Wheelz team will be in touch on WhatsApp. 😊"
 - If they push back or say they can't make it: "No worries! 😊" then ask what day and time works best.
 - Do NOT repeat a question already answered.`,
 };
