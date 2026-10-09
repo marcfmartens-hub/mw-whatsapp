@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createBiginContact } from "@/lib/bigin";
-import { flushPending } from "@/lib/push";
 import { generateInquirySummary } from "@/lib/claude";
 import type { ConversationMessage } from "@/lib/claude";
 
@@ -30,13 +29,6 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = getSupabase();
-
-  // 1) Queued pushes (new records delayed 5 min) that are due
-  let flushed = 0;
-  {
-    const { data: queued, error: qErr } = await supabase.from(TABLE).select("phone").not("bigin_pending", "is", null).limit(50);
-    if (!qErr) for (const q of queued ?? []) { if (await flushPending(q.phone).catch(() => false)) flushed++; }
-  }
   const cutoff = new Date(Date.now() - SILENCE_MINUTES * 60 * 1000).toISOString();
 
   // Silent for 12+ min (but active in the last 3 days), and either never pushed
@@ -50,8 +42,7 @@ export async function GET(req: NextRequest) {
     .gt("last_message_at", since)
     .limit(200);
   const stale = (candidates ?? []).filter((c: any) =>
-    !c.bigin_pending &&   // a queued push will carry this data
-    (!c.bigin_pushed_at || new Date(c.last_message_at) > new Date(c.bigin_pushed_at))
+    !c.bigin_pushed_at || new Date(c.last_message_at) > new Date(c.bigin_pushed_at)
   ).slice(0, 50);
 
   if (error) {
@@ -60,7 +51,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (!stale || stale.length === 0) {
-    return NextResponse.json({ pushed: 0, flushed });
+    return NextResponse.json({ pushed: 0 });
   }
 
   let pushed = 0;
@@ -112,5 +103,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ pushed, flushed, total: stale.length });
+  return NextResponse.json({ pushed, total: stale.length });
 }

@@ -33,8 +33,6 @@ export interface Conversation {
   source_url: string | null;
   last_message_at: string | null;
   bigin_pushed_at: string | null;
-  bigin_pending?: string | null;
-  processing_until?: string | null;
   estimated_price?: string | null;
   insult_count?: number | null;
   non_gcc_handoff?: boolean | null;

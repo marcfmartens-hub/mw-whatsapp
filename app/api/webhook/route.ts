@@ -3,7 +3,6 @@ import { getOrCreateConversation, updateConversation, resetConversation, getConv
 import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact, toIsoDate, toTime24 } from "@/lib/bigin";
-import { pushLead } from "@/lib/push";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
@@ -146,6 +145,52 @@ function formatMileage(raw: string | null | undefined): string {
   const n = parseInt(raw, 10);
   if (isNaN(n)) return `${raw} km`;
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " km";
+}
+
+// ── Bigin push — one path for every milestone ───────────────────────────────
+// Called on: booking confirmed, team follow-up / handoff, and (from the cron) 12-min silence.
+// Bigin upserts by phone, so pushing more than once just updates the same contact.
+async function pushLead(
+  phone: string,
+  reason: string,
+  opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string; clearAppointment?: boolean;
+          topNote?: string;
+          // Milestone → new record in Bigin; red tag if the customer already exists there
+          milestone?: "DUPLICATE" | "RESCHEDULE" | "CANCEL" | "FOLLOW UP" } = {}
+): Promise<void> {
+  try {
+    const latest = await getConversation(phone);
+    if (!latest) return;
+    const history: ConversationMessage[] = Array.isArray(latest.messages) ? latest.messages : [];
+    const aiSummary = await generateInquirySummary(history, latest as any).catch(() => "");
+    const notesAll = String((latest as any).car_conditions ?? "");
+    const otherCars = notesAll.split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
+    const buyerNote = [
+      /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "",
+      /OPTED OUT:/.test(notesAll) ? "OPTED OUT — customer asked not to be messaged. Do not contact." : "",
+      /Prefers WhatsApp/.test(notesAll) ? "Prefers WhatsApp — no phone calls." : "",
+      /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
+      notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
+    ].filter(Boolean).join("\n");
+    const summary = [opts.topNote ?? "", buyerNote, otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
+    const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
+    const ok = await createBiginContact({
+      ...latest,
+      phone_number: latest.phone_number || phone,
+      alternative_phone: opts.altPhone ?? latest.alternative_phone ?? undefined,
+      sales_inquiry: /Trade-in:/.test(notesAll) && (!opts.salesInquiry || ["Cash Deal", "Consignment", "Not Sure - Need Advise"].includes(opts.salesInquiry))
+        ? "Trade-in Inquiry" : opts.salesInquiry,
+      inspection_booked: booked,
+      inquiry_summary: summary,
+      clear_appointment: opts.clearAppointment ?? false,
+      milestone_tag: opts.milestone,
+    } as any);
+    if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+    if (summary) await updateConversation(phone, { inquiry_summary: summary } as any).catch(() => {});
+    console.log(`[bigin] push (${reason}) for ${phone}: ${ok ? "ok" : "FAILED"}`);
+  } catch (e) {
+    console.error(`[bigin] push (${reason}) error for ${phone}:`, e);
+  }
 }
 
 async function appendHistory(phone: string, history: ConversationMessage[], user: string, assistant: string) {
