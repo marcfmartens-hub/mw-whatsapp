@@ -7,6 +7,7 @@ import { CAR_MODELS } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const RESET_KEYWORD = "reset chat 007";
 
@@ -55,7 +56,8 @@ const SELL_METHOD_CONSIGNMENT = /\b(consign|consignment|list|listing|display|mar
 const SELL_METHOD_NOT_SURE    = /\b(not sure|unsure|don.?t know|undecided|still deciding|what.?s better|which is better|explain|difference|options?)\b/i;
 
 // Handoff detection — complex conversations that need a human
-const HANDOFF_SIGNALS = /\b(too many questions|complicated|confused|call me|speak to someone|talk to a person|human|agent|manager|more information|tell me more|how does it work|what happens|walk me through|i don.?t understand)\b/i;
+// Explicit asks for a person only. Questions like "how does it work?" are answered by Kaya.
+const HANDOFF_SIGNALS = /\b(too many questions|call me|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|team)|real person|human agent)\b/i;
 
 // Special inquiry types
 const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
@@ -70,7 +72,9 @@ const POA_PATTERN   = /\b(poa|power\s*of\s*attorney|selling\s*for|on\s*behalf|no
 const CONDITION_PATTERN = /\b(accident|damage|damaged|dent|scratch|flood|fire|total\s*loss|write[\s-]?off|modified|modification|tuned|engine|gearbox|transmission|service|fine|fines|traffic\s*fine|salik|document|registration|mulkiya|expired|missing|lost|stolen|bank\s*loan|finance|mortgage)\b/i;
 
 // Insult detection
-const INSULT_PATTERN = /\b(stupid|idiot|dumb|useless|moron|asshole|ass hole|bastard|bitch|fuck|shit|scam|fraud|liar|pathetic|garbage|rubbish|trash|waste of time|terrible|horrible|disgusting)\b/i;
+// Real abuse only. Objections ("is this a scam?", "rubbish prices", "terrible offers") are NOT insults —
+// Kaya handles those as normal objections.
+const INSULT_PATTERN = /\b(stupid|idiot|dumb|moron|asshole|ass hole|bastard|bitch|fuck(?:ing|er)?|f\*+k|motherfucker|son of a bitch|dickhead|retard)\b/i;
 
 const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
@@ -346,7 +350,25 @@ export async function POST(req: NextRequest) {
     const phone   = message.from;
     const isUAE   = phone.startsWith("971");
     const isImageMessage = message.type === "image";
-    const messageText = message.text?.body?.trim() ?? message.image?.caption?.trim() ?? "";
+    let messageText = message.text?.body?.trim() ?? message.image?.caption?.trim() ?? "";
+
+    // ── Voice notes / media without text ────────────────────────────
+    if (message.type === "reaction") return NextResponse.json({ status: "ignored" }, { status: 200 });
+    if (!messageText && message.type === "audio") {
+      await sendWhatsAppMessage(phone, "Sorry, I can't listen to voice notes. Could you type your message instead?");
+      return NextResponse.json({ status: "voice_note" }, { status: 200 });
+    }
+    if (!messageText && !isImageMessage && message.type !== "text" && message.type !== "location") {
+      await sendWhatsAppMessage(phone, "Thanks! Could you type your message so I can help?");
+      return NextResponse.json({ status: "media_no_text" }, { status: 200 });
+    }
+
+    // ── English only ───────────────────────────────────────────────
+    // Arabic, Cyrillic, Indian scripts, CJK, Korean → never reply in that language, ask for English
+    if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0400-\u04FF\u0900-\u0DFF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(messageText)) {
+      await sendWhatsAppMessage(phone, "Sorry, I can only assist in English. Could you please continue in English?");
+      return NextResponse.json({ status: "non_english" }, { status: 200 });
+    }
 
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
@@ -434,6 +456,27 @@ export async function POST(req: NextRequest) {
     await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
     const freshConversation = await getConversation(phone).catch(() => null);
     if (freshConversation) Object.assign(conversation, freshConversation);
+
+    // ── Burst handling ─────────────────────────────────────────────
+    // Customers often send 2–3 quick messages ("fine monday 7pm" / "actually 6"). Record this
+    // message, wait a few seconds, and only the LATEST message replies — covering the whole burst.
+    {
+      const prior = (conversation.messages ?? []) as ConversationMessage[];
+      await updateConversation(phone, { messages: [...prior, { role: "user", content: messageText }].slice(-40) } as any).catch(() => {});
+      await new Promise(r => setTimeout(r, 4000));
+      const after = await getConversation(phone).catch(() => null);
+      if (after && after.last_msg_id && after.last_msg_id !== message.id) {
+        return NextResponse.json({ status: "superseded" }, { status: 200 });
+      }
+      // Combine the trailing customer messages (the burst) into one, history = everything before
+      const msgs = ((after?.messages ?? [...prior, { role: "user", content: messageText }]) as ConversationMessage[]);
+      let i = msgs.length;
+      while (i > 0 && msgs[i - 1].role === "user") i--;
+      const burst = msgs.slice(i).map(m => m.content).filter(Boolean);
+      if (after) Object.assign(conversation, after);
+      conversation.messages = msgs.slice(0, i) as any;
+      if (burst.length > 1) messageText = burst.join("\n");
+    }
 
     // ── Special inquiry detection (any step) ──────────────────────────────
     // Trade-in inquiry → collect info, push to Bigin, hand off.
@@ -757,8 +800,8 @@ export async function POST(req: NextRequest) {
 
     const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
     const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
-    const HUMAN_REQUEST   = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
-    const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested|forget it|not for me|bye|goodbye|leave it|never mind|nevermind)\b/i;
+    const HUMAN_REQUEST   = /\b(call me|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|staff|team)|real person|human agent)\b/i;
+    const BOOKING_REFUSAL = /\b(no\s*,?\s*thanks?|no\s*,?\s*thank\s*you|not\s*interested|maybe\s*later|i'?ll\s*pass|don'?t\s*want\s*(to|it)|forget\s*it|not\s*for\s*me|leave\s*it|never\s*mind|nevermind|bye|goodbye)\b/i;
     const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
     const alreadyExplainedOptions = history.some(
       m => m.role === "assistant" && OPTIONS_SENT.test(m.content)
