@@ -474,6 +474,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Name given later in the chat ("my name is Louise") — save it if we don't have one yet.
+    // Only explicit phrases here; bare words would catch things like "Cash" or "Tomorrow".
+    if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
+      const nm = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is|call\s+me|name\s*:)\s+([A-Za-z]{2,}(?:\s+[A-Za-z]{2,})?)\b/i);
+      const NOT_NAMES = /^(selling|looking|interested|not|ok|okay|fine|good|here|coming|ready|sure|busy|planning|going|thinking|in|at|from|the|a|an|out|done|happy|available|free|asking|trying)\b/i;
+      if (nm && !NOT_NAMES.test(nm[1])) {
+        (coreUpdates as any).name = nm[1].trim().replace(/\b\w/g, c => c.toUpperCase());
+      }
+    }
+
     const alreadyKnown: VehicleFields = {
       make:    (conversation.make    && conversation.make    !== "Unknown") ? conversation.make    : undefined,
       model:   (conversation.model   && conversation.model   !== "Unknown") ? conversation.model   : undefined,
