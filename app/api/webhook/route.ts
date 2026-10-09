@@ -165,6 +165,7 @@ async function pushLead(
     const buyerNote = [
       /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "",
       /OPTED OUT:/.test(notesAll) ? "OPTED OUT — customer asked not to be messaged. Do not contact." : "",
+      /Prefers WhatsApp/.test(notesAll) ? "Prefers WhatsApp — no phone calls." : "",
       /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
       notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
     ].filter(Boolean).join("\n");
@@ -648,7 +649,21 @@ export async function POST(req: NextRequest) {
     // ─────────────────────────────────────────────────────────────────────
 
     // ── Opt-out ("stop messaging me") ───────────────────────────────────────
-    if (/\b(stop (messaging|texting|contacting|sending|writing)|unsubscribe|don'?t (message|text|contact|call) me|do not (message|text|contact|call) me|leave me alone|remove my (number|details)|opt[\s-]?out)\b|^\s*stop\s*[.!]*\s*$/i.test(messageText)) {
+    // "Don't call me (just WhatsApp)" is a contact preference, not an opt-out
+    if (/\b(don'?t|do not|no)\s+(call|calls|phone)\b|\b(whatsapp|text|message)\s+only\b|\bonly\s+(whatsapp|text|message)/i.test(messageText)
+        && !String((conversation as any).car_conditions ?? "").includes("Prefers WhatsApp")) {
+      const ex = String((conversation as any).car_conditions ?? "");
+      const note = "Prefers WhatsApp, no calls";
+      (conversation as any).car_conditions = ex ? `${ex} | ${note}` : note;
+      await updateConversation(phone, { car_conditions: (conversation as any).car_conditions } as any).catch(() => {});
+    }
+    // 2. An opted-out customer who writes again has re-engaged → remove the opt-out note
+    if (String((conversation as any).car_conditions ?? "").includes("OPTED OUT:")) {
+      const cleaned = String((conversation as any).car_conditions).split(" | ").filter(n => !n.startsWith("OPTED OUT:")).join(" | ") || null;
+      (conversation as any).car_conditions = cleaned;
+      await updateConversation(phone, { car_conditions: cleaned } as any).catch(() => {});
+    }
+    if (/\b(stop (messaging|texting|contacting|sending|writing)( me)?|unsubscribe|don'?t (message|text|contact) me|do not (message|text|contact) me|leave me alone|remove my (number|details)|opt[\s-]?out)\b|^\s*stop\s*[.!]*\s*$/i.test(messageText)) {
       const reply = "I understand. Whenever you're ready, you're always welcome at our branch or to contact us again.";
       await sendWhatsAppMessage(phone, reply);
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);

@@ -483,7 +483,8 @@ const SAFE_LEAK_REPLY  = "I'm here to help you sell your car. What car are you l
 export function containsPrice(text: string): boolean {
   const t = text
     .replace(/\b\d[\d,.]*\s*k?\s*(km|kms|kilomet\w*|miles?)\b/gi, " ")                    // mileage is fine
-    .replace(/(\+?971|00971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b9715\d{8}\b/g, " ")       // phone numbers are fine
+    .replace(/(\+?971|00971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b9715\d{8}\b/g, " ")       // UAE phone numbers are fine
+    .replace(/(\+|\b00)\d{1,3}[\s-]?\(?\d{1,4}\)?([\s-]?\d{2,5}){2,4}\b/g, " ")               // international numbers too
     .replace(/\b(19[89]\d|20[0-3]\d)\b/g, " ");                                             // years are fine
   return /\b(aed|dhs?|dirhams?)\s*\.?\s*\d/i.test(t)
       || /\d[\d,.]*\s*(k|thousand|aed|dhs|dirhams?)\b/i.test(t)
