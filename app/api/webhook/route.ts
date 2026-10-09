@@ -304,6 +304,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "duplicate" }, { status: 200 });
     }
 
+    // Mark this message ID immediately to prevent duplicate processing during async Claude call
+    await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
+
     // ── Special inquiry detection (any step) ──────────────────────────────
     // Home visit or trade-in inquiry → collect info, push to Bigin, hand off
     const isHomeVisit = HOME_VISIT_PATTERN.test(messageText);
