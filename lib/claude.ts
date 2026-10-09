@@ -214,6 +214,7 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
   if (known.dubai_datetime)         contextLines.push(`Current Dubai date/time: ${known.dubai_datetime}`);
   if (known.dubai_tomorrow)         contextLines.push(`Tomorrow in Dubai: ${known.dubai_tomorrow}`);
   if (known.booking_slot)           contextLines.push(`Booking slot: ${known.booking_slot}`);
+  if ((known as any).team_when)     contextLines.push(`Team contact timing: ${(known as any).team_when} — when you say the team will contact the customer, say "${(known as any).team_when}". NEVER say "within the hour".`);
   if ((known as any).rebooking)     contextLines.push(`Rescheduling: ${(known as any).rebooking}`);
   if (known.appointment_date) contextLines.push(`Appointment date (captured so far): ${known.appointment_date}`);
   if (known.appointment_time) contextLines.push(`Appointment time (captured so far): ${known.appointment_time}`);
@@ -226,7 +227,7 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
 
   // price handoff state flags
   if ((known as any).price_handoff_collecting) contextLines.push(`Price handoff: collecting customer details for team`);
-  if ((known as any).price_handoff_ready)      contextLines.push(`Price handoff ready: all details collected — verify car info with customer, ask "Is there anything else we should know about the car?", then say goodbye ("Have a nice day! Our team will be in touch shortly.")`);
+  if ((known as any).price_handoff_ready)      contextLines.push(`Price handoff ready: all details collected — verify car info with customer, ask "Is there anything else we should know about the car?", then say goodbye ("Have a nice day! Our team will be in touch [Team contact timing].")`);
 
   // "Still needed" — computed list so the model never has to guess what's missing
   const missingVehicle: string[] = [];
@@ -323,8 +324,8 @@ IMPORTANT — Never let the customer reach "not interested". The moment they pus
 If they decline consignment and still want cash only:
   - Offer a team callback: "No problem — let me have someone from our purchase team reach out to you directly. They can discuss the numbers more freely than I can here."
   - Collect any missing: name, UAE phone number (always ask: "Which UAE number is best to reach you on?")
-  - Once collected: "Done — our team will be in touch shortly. Have a nice day!"
-  - Once you have everything and they've confirmed, say goodbye: "Done — have a nice day! Our team will be in touch with you shortly."
+  - Once collected: "Done — our team will be in touch [Team contact timing]. Have a nice day!"
+  - Once you have everything and they've confirmed, say goodbye: "Done — have a nice day! Our team will be in touch with you [Team contact timing]."
   - Then trigger Bigin push (AFTER saying goodbye). Do NOT book an appointment for this handoff.
   - For Sales_Inquiry label: analyse the customer's reason for the inquiry from the conversation context (e.g. "Wants price before committing to inspection", "Has mortgage concern", "In a hurry to sell", "Exploring options") — do NOT label it as "appointment".
 
@@ -332,12 +333,12 @@ Non-GCC / imported specs (American, US, Canadian, European, Japanese, Korean spe
 - When the customer confirms their car is non-GCC, do NOT continue to appointment booking.
 - Say: "Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team call you directly to discuss this."
 - Then collect (one question at a time): car details (make/model/year/mileage if not yet known), name, UAE phone (always ask: "Which UAE number is best to reach you on?"), best time to be reached.
-- Once done: "Thanks, I've got everything. Our team will be in touch shortly."
+- Once done: "Thanks, I've got everything. Our team will be in touch [Team contact timing]."
 - Do NOT book an appointment. Do NOT give any price.
 
 Special inquiries (trade-in, or anything outside normal flow):
 - Acknowledge warmly, then: "Our team will reach out to discuss this properly."
-- Collect: car details, name, UAE phone (always ask: "Which UAE number is best to reach you on?"), best contact time. Then: "Thanks — our team will be in touch shortly."
+- Collect: car details, name, UAE phone (always ask: "Which UAE number is best to reach you on?"), best contact time. Then: "Thanks — our team will be in touch [Team contact timing]."
 - Do NOT book an appointment for these.
 
 WHEN WE'RE CLOSED / TOO LATE TODAY:
@@ -476,7 +477,7 @@ Be direct and factual. No fluff. Write in third person ("The customer...").${con
 
 // ─── Hard output filter ──────────────────────────────────────────────────────
 // Last line of defence: a reply containing a price, or leaking instructions, is never sent.
-const SAFE_PRICE_REPLY = "I'm not able to share a price here — you'll get the final price after the free 10–15 minute inspection at our branch.";
+export const SAFE_PRICE_REPLY = "I'm not able to share a price here — you'll get the final price after the free 10–15 minute inspection at our branch.";
 const SAFE_LEAK_REPLY  = "I'm here to help you sell your car. What car are you looking to sell, or is there anything else I can help with?";
 
 export function containsPrice(text: string): boolean {

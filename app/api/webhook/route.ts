@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
-import { getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
+import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
@@ -101,7 +101,7 @@ const CAR_WORDS = new Set<string>([
   ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
   "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
 ].map(w => String(w).toLowerCase()));
-const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending)$/i;
+const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test)$/i;
 
 function looksLikeName(candidate: string, explicit = false): boolean {
   const words = candidate.trim().split(/\s+/);
@@ -164,6 +164,7 @@ async function pushLead(
     const otherCars = notesAll.split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
     const buyerNote = [
       /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "",
+      /OPTED OUT:/.test(notesAll) ? "OPTED OUT — customer asked not to be messaged. Do not contact." : "",
       /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
       notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
     ].filter(Boolean).join("\n");
@@ -231,7 +232,7 @@ function describeAction(a: NextAction): string {
     case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
     case "SHOW_SUMMARY":      return `Ask: "When are you planning to sell the car?"`;
     case "SHOW_FULL_SUMMARY": return `Ask: "When are you planning to sell the car?"`;
-    case "OFFER_CALLBACK":   return "Tell the customer the purchasing team will call them back within the hour, and they're welcome to come in whenever.";
+    case "OFFER_CALLBACK":   return `Tell the customer the purchasing team will call them ${teamWhen()}, and they're welcome to come in whenever.`;
   }
 }
 
@@ -285,7 +286,7 @@ function buildDirectResponse(
     case "SHOW_FULL_SUMMARY":
       return "When are you planning to sell the car?";
     case "OFFER_CALLBACK":
-      return "No worries — I'll have someone from our team call you back within the hour. Whenever you're ready to come in, we're here for you.";
+      return `No worries — I'll have someone from our team call you ${teamWhen()}. Whenever you're ready to come in, we're here for you.`;
   }
 }
 
@@ -321,6 +322,25 @@ function getBookingSlot(): string {
   return `Ask exactly: "${question}" — always ask for a TIME, never a yes/no question. ` +
     (todayOpen ? `Branch is open today until 19:00 (last slot 18:30). ` : `Too late for today. Do NOT hand off to the team. `) +
     `Next opening day: ${nextFull}.`;
+}
+
+// When the team will contact the customer: "shortly" while open, otherwise the next opening morning.
+function teamWhen(): string {
+  const OPEN: Record<number, number | null> = { 0: null, 1: 10, 2: 10, 3: 10, 4: 10, 5: 12, 6: 10 };
+  const now = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const todayOpen = OPEN[now.getUTCDay()];
+  if (todayOpen != null && mins >= todayOpen * 60 && mins < 19 * 60) return "shortly";
+  if (todayOpen != null && mins < todayOpen * 60) return todayOpen === 12 ? "today from 12:00" : "this morning";
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(now.getTime() + i * 86400000);
+    const open = OPEN[d.getUTCDay()];
+    if (open == null) continue;
+    const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    const day = i === 1 ? "tomorrow" : `on ${DAYS[d.getUTCDay()]}`;
+    return open === 12 ? `${day} from 12:00` : `${day} morning`;
+  }
+  return "shortly";
 }
 
 function getDubaiDateStr(): string {
@@ -627,6 +647,23 @@ export async function POST(req: NextRequest) {
     }
     // ─────────────────────────────────────────────────────────────────────
 
+    // ── Opt-out ("stop messaging me") ───────────────────────────────────────
+    if (/\b(stop (messaging|texting|contacting|sending|writing)|unsubscribe|don'?t (message|text|contact|call) me|do not (message|text|contact|call) me|leave me alone|remove my (number|details)|opt[\s-]?out)\b|^\s*stop\s*[.!]*\s*$/i.test(messageText)) {
+      const reply = "I understand. Whenever you're ready, you're always welcome at our branch or to contact us again.";
+      await sendWhatsAppMessage(phone, reply);
+      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      const ex = String((conversation as any).car_conditions ?? "");
+      const note = "OPTED OUT: asked not to be messaged — do not contact";
+      await updateConversation(phone, {
+        step: CLOSING_STEP, last_message_at: new Date().toISOString(),
+        ...(ex.includes("OPTED OUT:") ? {} : { car_conditions: ex ? `${ex} | ${note}` : note }),
+      } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      await pushLead(phone, "opted out", { inspectionBooked: false });
+      return NextResponse.json({ status: "opted_out" }, { status: 200 });
+    }
+
     // ── Buyers ───────────────────────────────────────────────────────────────
     {
       const BUY_INTENT = /\b(i\s*(want|need|would like|wanna|am looking|'?m looking|plan)\s+(to\s+)?(buy|purchase)\b|i\s*(want|need|would like|wanna)\s+(to\s+)?get\s+(a|an)\s+(new\s+|used\s+)?(car|vehicle|suv)\b|looking\s+to\s+buy|looking\s+for\s+a\s+(car|vehicle)\s+to\s+buy|do\s+you\s+(sell|have)\s+(any\s+)?cars|what\s+cars\s+do\s+you\s+have|your\s+(stock|inventory))/i;
@@ -666,7 +703,7 @@ export async function POST(req: NextRequest) {
           : !asked(BUYER_PHONE_Q) ? BUYER_PHONE_Q
           : !asked(BUYER_AVAIL_Q) ? BUYER_AVAIL_Q
           : null;
-        const reply = nextQ ?? "Thanks! Our sales team will contact you shortly. Have a nice day!";
+        const reply = nextQ ?? `Thanks! Our sales team will contact you ${teamWhen()}. Have a nice day!`;
         if (!nextQ) upd.step = CLOSING_STEP;
         await sendWhatsAppMessage(phone, reply);
         await updateConversation(phone, upd as any).catch(() => {});
@@ -905,7 +942,7 @@ export async function POST(req: NextRequest) {
         ? `That's something our team can discuss with you directly. ${nextQ}`
         : firstTime
           ? `Happy to look at all of them! ${DETAILS_Q}`
-          : nextQ ?? "Thanks, I've got everything I need. Our team will get back to you shortly. Have a nice day!";
+          : nextQ ?? `Thanks, I've got everything I need. Our team will get back to you ${teamWhen()}. Have a nice day!`;
 
       await sendWhatsAppMessage(phone, reply);
       updates.step = nextQ ? Math.max(currentStep, 2) : CLOSING_STEP;
@@ -1131,7 +1168,7 @@ export async function POST(req: NextRequest) {
         const nextQ = !name && !asked(HZ_NAME_Q) ? HZ_NAME_Q : !asked(HZ_PHONE_Q) ? HZ_PHONE_Q : null;
         const reply = !inHz
           ? `Thanks for letting me know. ${HZ_LINE} ${nextQ ?? ""}`.trim()
-          : nextQ ?? "Thanks! Our team will contact you shortly. Have a nice day!";
+          : nextQ ?? `Thanks! Our team will contact you ${teamWhen()}. Have a nice day!`;
         if (!nextQ && inHz) upd.step = CLOSING_STEP;
         await sendWhatsAppMessage(phone, reply);
         await updateConversation(phone, upd as any).catch(e => console.error("hiyaza save error:", e));
@@ -1146,7 +1183,7 @@ export async function POST(req: NextRequest) {
     {
       const NAMED_PERSON = /\b(speak|talk|chat)\s+(to|with)\s+(mr\.?\s+|mrs\.?\s+|ms\.?\s+)?(?!(you|u|me|him|her|them|us|someone|somebody|anyone|people|the|a|an|your|my|our|his|their|this|that|it|later|again|soon|family|wife|husband|brother|sister|friend|father|mother|dad|mom|bank)\b)[a-z]{3,}\b/i;
       const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b/i;
-      const HUMAN_LINE = "I'll have someone from our team contact you shortly.";
+      const HUMAN_LINE = "I'll have someone from our team contact you";   // + timing, see below
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE))
         || String((conversation as any).car_conditions ?? "").includes("Asked to speak to the team");
@@ -1183,13 +1220,13 @@ export async function POST(req: NextRequest) {
 
         const parts: string[] = [];
         if (firstAsk) {
-          parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE}`);
+          parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE} ${teamWhen()}.`);
           if (!conditions.includes("Asked to speak to the team")) {
             conditions = conditions ? `${conditions} | Asked to speak to the team` : "Asked to speak to the team";
             updates.car_conditions = conditions;
           }
         }
-        parts.push(nextQ ?? "Thanks, I've passed everything on. Our team will be in touch shortly. Have a nice day!");
+        parts.push(nextQ ?? `Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day!`);
 
         for (const part of parts) await sendWhatsAppMessage(phone, part);
         if (!nextQ) updates.step = CLOSING_STEP;
@@ -1267,7 +1304,7 @@ export async function POST(req: NextRequest) {
       const parts: string[] = [];
       if (ngQuestion) parts.push("That's something our purchasing team will discuss with you directly.");
       if (firstTime) parts.push("Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly.");
-      parts.push(nextQ ?? "Thanks, I've got everything I need. Our team will be in touch shortly. Have a nice day!");
+      parts.push(nextQ ?? `Thanks, I've got everything I need. Our team will be in touch ${teamWhen()}. Have a nice day!`);
 
       for (const part of parts) await sendWhatsAppMessage(phone, part);
       if (!nextQ) updates.step = CLOSING_STEP;
@@ -1389,7 +1426,7 @@ export async function POST(req: NextRequest) {
     const estMileage = vehicleUpdates.mileage ?? conversation.mileage;
     const estSpecs   = vehicleUpdates.specs   ?? conversation.specs;
     const valuation  = (estMake && estModel && estModel !== "Unknown" && estYear)
-      ? estimateCarValue(estMake, estModel, estYear, estMileage, estSpecs)
+      ? estimateCarValue(estMake, estModel, String(Math.min(parseInt(estYear, 10) || 0, new Date().getFullYear()) || estYear), estMileage, estSpecs)
       : null;
 
     // At step 0 (greeting), never pass stale vehicle data — customer is just saying hi
@@ -1408,6 +1445,7 @@ export async function POST(req: NextRequest) {
       dubai_datetime:   getDubaiDateTime(),
       dubai_tomorrow:   getDubaiTomorrow(),
       booking_slot:     getBookingSlot(),
+      team_when:        teamWhen(),
       rebooking:        isRebook && !hasBooking ? `Customer wants to book an inspection now (the chat was closed earlier without a booking). Confirm a valid date and time and send the confirmation. Ask for the name only if unknown; don't ask for the number again if it was already given.`
                       : isRebook ? `Customer is RESCHEDULING an existing booking (was: ${conversation.appointment_date ?? "?"} ${conversation.appointment_time ?? ""}). Confirm the new date/time and send the confirmation. Do NOT ask for name or number again.` : undefined,
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
@@ -1426,6 +1464,12 @@ export async function POST(req: NextRequest) {
     let reply = action && !customerAsked
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(jumpToBooking ? FINAL_STEP : currentStep, history, messageText, knownFields);
+    if (reply === SAFE_PRICE_REPLY) {
+      const follow = action && action.type !== "OFFER_CALLBACK"
+        ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
+        : getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "";
+      if (follow) reply = `${reply} ${follow}`;
+    }
     if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/not able to open|unable to open|can'?t open photos/i.test(reply)) {
       reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can only use the text you sent. ${reply}`;
     } else if (linkInMsg && currentStep <= 4 && /\?/.test(reply) && !/unable to open|not able to open/i.test(reply)) {
@@ -1481,7 +1525,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action?.type === "OFFER_CALLBACK") {
-      await sendWhatsAppMessage(phone, "Our purchase team will be in touch with you shortly. You're also welcome to walk in whenever — here's where to find us.");
+      await sendWhatsAppMessage(phone, `Our purchase team will be in touch with you ${teamWhen()}. You're also welcome to walk in whenever — here's where to find us.`);
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
     }
