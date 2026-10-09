@@ -331,6 +331,8 @@ interface IncomingMessage {
   id: string;
   text?: { body?: string };
   image?: { caption?: string };
+  document?: { caption?: string; filename?: string };
+  video?: { caption?: string };
   type: string;
 }
 
@@ -341,7 +343,7 @@ function extractMessage(body: any): IncomingMessage | null {
     const value = change?.value;
     if (!value?.messages || value.messages.length === 0) return null;
     const message = value.messages[0];
-    return { from: message.from, id: message.id, text: message.text, image: message.image, type: message.type };
+    return { from: message.from, id: message.id, text: message.text, image: message.image, document: message.document, video: message.video, type: message.type };
   } catch (error) {
     console.error("extractMessage parse error:", error);
     return null;
@@ -371,7 +373,8 @@ export async function POST(req: NextRequest) {
     const phone   = message.from;
     const isUAE   = phone.startsWith("971");
     const isImageMessage = message.type === "image";
-    let messageText = message.text?.body?.trim() ?? message.image?.caption?.trim() ?? "";
+    let messageText = message.text?.body?.trim() ?? message.image?.caption?.trim()
+      ?? message.document?.caption?.trim() ?? message.video?.caption?.trim() ?? "";
 
     // ── Voice notes / media without text ────────────────────────────
     if (message.type === "reaction") return NextResponse.json({ status: "ignored" }, { status: 200 });
@@ -379,7 +382,12 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, "Sorry, I can't listen to voice notes. Could you type your message instead?");
       return NextResponse.json({ status: "voice_note" }, { status: 200 });
     }
-    if (!messageText && !isImageMessage && message.type !== "text" && message.type !== "location") {
+    if (message.type === "sticker") return NextResponse.json({ status: "ignored" }, { status: 200 });
+    // Photos / files: Kaya can't open them. Tag them so the whole batch gets ONE reply,
+    // and any caption / ad text sent with them is still read.
+    const isMedia = ["image", "document", "video"].includes(message.type);
+    if (isMedia) messageText = `[${message.type === "image" ? "photo" : "file"}]${messageText ? " " + messageText : ""}`;
+    if (!messageText && message.type !== "text" && message.type !== "location") {
       await sendWhatsAppMessage(phone, "Thanks! Could you type your message so I can help?");
       return NextResponse.json({ status: "media_no_text" }, { status: 200 });
     }
@@ -445,7 +453,11 @@ export async function POST(req: NextRequest) {
     const RE_INTRO = /^(hi+|hey+|hello+|hiya|yo|good\s*(morning|afternoon|evening|day))[\s!.,]*(?:i'?m|my\s+name\s+is|i\s+am|it'?s|this\s+is|call\s+me)?\s+[A-Za-z]+/i;
     const isReIntro = RE_INTRO.test(messageText);
     const isStaleNoHistory = (conversation.step ?? 0) > 1 && (!Array.isArray(conversation.messages) || conversation.messages.length === 0);
-    const isRestart = (conversation.step ?? 0) >= 3 && isReIntro;
+    const hoursSinceLast = conversation.last_message_at ? (Date.now() - Date.parse(conversation.last_message_at)) / 3.6e6 : 0;
+    // Greeting + name after 12h+ silence (mid-flow), or ANY message 24h+ after a closed chat → new inquiry.
+    // (Same Bigin contact — it's matched by phone.) A "hi there" during an active chat never resets.
+    const isRestart = ((conversation.step ?? 0) >= 3 && isReIntro && hoursSinceLast > 12)
+      || ((conversation.step ?? 0) >= CLOSING_STEP && hoursSinceLast > 24);
 
     if (isStaleNoHistory || isRestart) {
       console.log(`[kaya] resetting for ${phone}: staleNoHistory=${isStaleNoHistory} reIntro=${isRestart} step=${conversation.step}`);
@@ -487,13 +499,20 @@ export async function POST(req: NextRequest) {
     const freshConversation = await getConversation(phone).catch(() => null);
     if (freshConversation) Object.assign(conversation, freshConversation);
 
+    let mediaInBurst = false;
     // ── Burst handling ─────────────────────────────────────────────
     // Customers often send 2–3 quick messages ("fine monday 7pm" / "actually 6"). Record this
     // message, wait a few seconds, and only the LATEST message replies — covering the whole burst.
     {
       const prior = (conversation.messages ?? []) as ConversationMessage[];
-      await updateConversation(phone, { messages: [...prior, { role: "user", content: messageText }].slice(-40) } as any).catch(() => {});
-      await new Promise(r => setTimeout(r, 4000));
+      // Photos without a caption don't write history (20 parallel writes would overwrite the ad text).
+      // Text is appended to the freshest copy to keep the race window tiny.
+      const bareMedia = /^\[(photo|file)\]$/.test(messageText);
+      if (!bareMedia) {
+        const freshest = ((await getConversation(phone).catch(() => null))?.messages ?? prior) as ConversationMessage[];
+        await updateConversation(phone, { messages: [...freshest, { role: "user", content: messageText }].slice(-40) } as any).catch(() => {});
+      }
+      await new Promise(r => setTimeout(r, isMedia ? 8000 : 4000));
       const after = await getConversation(phone).catch(() => null);
       if (after && after.last_msg_id && after.last_msg_id !== message.id) {
         return NextResponse.json({ status: "superseded" }, { status: 200 });
@@ -503,9 +522,30 @@ export async function POST(req: NextRequest) {
       let i = msgs.length;
       while (i > 0 && msgs[i - 1].role === "user") i--;
       const burst = msgs.slice(i).map(m => m.content).filter(Boolean);
+      if (bareMedia) burst.push(messageText); // this photo itself (not stored)
       if (after) Object.assign(conversation, after);
       conversation.messages = msgs.slice(0, i) as any;
       if (burst.length > 1) messageText = burst.join("\n");
+      // Photos/files in the burst: keep only the text the customer sent with them
+      const MEDIA_TAG = /^\[(photo|file)\]\s*/;
+      mediaInBurst = burst.some(b => MEDIA_TAG.test(b));
+      if (mediaInBurst) messageText = burst.map(b => b.replace(MEDIA_TAG, "").trim()).filter(Boolean).join("\n");
+    }
+
+    // Only photos/files, no text → say we can't see them and ask for the info as text
+    if (mediaInBurst && !messageText) {
+      const c = conversation as any;
+      const missing = ["make", "model", "year"].filter(k => !c[k] || c[k] === "Unknown");
+      if (!c.mileage) missing.push("mileage");
+      if (!c.specs) missing.push("whether it's GCC or non-GCC");
+      const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const ask = missing.length && (c.step ?? 0) <= 4
+        ? `Could you type the ${missing.length > 1 ? missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1] : missing[0]}?`
+        : /\?\s*$/.test(lastQ) && lastQ.length < 200 ? lastQ : "Could you type the details instead?";
+      const reply = `Thanks! I can't open photos or files, so I can't see what you sent. ${ask}`;
+      await sendWhatsAppMessage(phone, reply);
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], "[sent photos/files]", reply);
+      return NextResponse.json({ status: "media_only" }, { status: 200 });
     }
 
     // ── Special inquiry detection (any step) ──────────────────────────────
@@ -638,7 +678,14 @@ export async function POST(req: NextRequest) {
     const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
     const hasKnownSpecs = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
                           || (conversation.specs && conversation.specs !== "Unknown");
-    const specsExplicitlyUnknown = currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
+    let specsExplicitlyUnknown = currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
+    // Loop guard: never ask the same question a third time — save "Unknown" and move on
+    const histAssistant = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant");
+    const askedCount = (re: RegExp) => histAssistant.filter(m => re.test(m.content)).length;
+    if (currentStep === 4) {
+      if (!(vehicleUpdates.mileage || conversation.mileage) && askedCount(/\bmileage\b/i) >= 2) vehicleUpdates.mileage = "Unknown";
+      if (!hasKnownSpecs && !specsExplicitlyUnknown && conversation.specs !== "Unknown" && askedCount(/GCC or non-GCC/i) >= 2) specsExplicitlyUnknown = true;
+    }
     if (specsExplicitlyUnknown) vehicleUpdates.specs = "Unknown";
 
     let apptDate = conversation.appointment_date ?? "";
@@ -672,8 +719,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "cancelled" }, { status: 200 });
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
+    const timeInMsg = new RegExp(`\\b${TIME}`, "i").test(messageText);
+    const dayWord   = messageText.match(new RegExp(`\\b${DAY}\\b`, "i"))?.[0];
+    const differentDay = !!dayWord && toIsoDate(dayWord) !== conversation.appointment_date;
+    const GOODBYE = /\b(see you|thanks|thank you|great|perfect|cool|noted|got it)\b/i;
+    const newDayOrTime = (timeInMsg || differentDay) && !GOODBYE.test(messageText);
     const isRebook = currentStep >= CLOSING_STEP && hasBooking &&
-      (RESCHEDULE.test(messageText) || mentionsDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg));
+      (RESCHEDULE.test(messageText) || newDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg));
 
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
       try {
@@ -727,6 +779,10 @@ export async function POST(req: NextRequest) {
         // Customer doesn't know the amount — treat as "Unknown" so step advances
         mortgageAmount = "Unknown";
       }
+    }
+
+    if (currentStep === 5 && loanIsYes && !mortgageAmount && !conversation.mortgage_amount && askedCount(/outstanding balance/i) >= 2) {
+      mortgageAmount = "Unknown";
     }
 
     const carYear    = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
@@ -987,7 +1043,7 @@ export async function POST(req: NextRequest) {
       ...conversationForFields,
       ...coreUpdates,
       ...vehicleUpdates,
-      image_shared: isImageMessage || undefined,
+      image_shared: mediaInBurst || isImageMessage || undefined,
       sell_timeline:    sellTimeline,
       sell_urgent:      sellUrgent,
       dubai_hour:       getDubaiHour(),
@@ -1009,9 +1065,12 @@ export async function POST(req: NextRequest) {
     const ASKED_QUESTION = /\?|\b(do|does|can|could|will|would|are|is)\s+(you|u|it|they|there|this)\b|\b(how|what|whats|what's|where|why|which|when)\b/i;
     const customerAsked = !!action && action.type !== "OFFER_CALLBACK" && currentStep >= 1 && ASKED_QUESTION.test(messageText);
     if (customerAsked) (knownFields as any).answer_question_first = true;
-    const reply = action && !customerAsked
+    let reply = action && !customerAsked
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(jumpToBooking ? FINAL_STEP : currentStep, history, messageText, knownFields);
+    if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/can'?t open photos/i.test(reply)) {
+      reply = `Thanks! I can't open photos or files, so I can only use the text you sent. ${reply}`;
+    }
 
     // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
     // time were captured and the reply reads like a confirmation.
