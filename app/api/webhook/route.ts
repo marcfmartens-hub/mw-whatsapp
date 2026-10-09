@@ -283,6 +283,23 @@ export async function POST(req: NextRequest) {
 
     const conversation = await getOrCreateConversation(phone);
 
+    // Stale-state guard: if step > 1 but no message history, the conversation
+    // is in a corrupt/leftover state. Silently reset before continuing.
+    if ((conversation.step ?? 0) > 1 && (!Array.isArray(conversation.messages) || conversation.messages.length === 0)) {
+      console.log(`[kaya] stale state detected for ${phone} at step ${conversation.step} with no history — resetting`);
+      await resetConversation(phone).catch(() => {});
+      conversation.step = 0;
+      conversation.name = null;
+      conversation.car = null;
+      conversation.make = null;
+      conversation.model = null;
+      conversation.year = null;
+      conversation.mileage = null;
+      conversation.specs = null;
+      conversation.loan = null;
+      conversation.messages = [];
+    }
+
     // Always save the sender's phone number — no need to ask for it
     if (!conversation.phone_number) {
       await updateConversation(phone, { phone_number: phone });
