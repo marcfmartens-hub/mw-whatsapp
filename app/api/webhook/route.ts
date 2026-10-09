@@ -159,7 +159,11 @@ async function pushLead(
     const aiSummary = await generateInquirySummary(history, latest as any).catch(() => "");
     const notesAll = String((latest as any).car_conditions ?? "");
     const otherCars = notesAll.split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
-    const buyerNote = /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "";
+    const buyerNote = [
+      /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "",
+      /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
+      notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
+    ].filter(Boolean).join("\n");
     const summary = [buyerNote, otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
     const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
     const ok = await createBiginContact({
@@ -1019,6 +1023,67 @@ export async function POST(req: NextRequest) {
                                   || conversation.specs === "Unknown");
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
 
+    // ── Expected price ("I want at least 180k") → notes for the team ─────────
+    {
+      const ep = messageText.match(/\b(want|expect|expecting|looking for|asking|need|at least|minimum|min|not less than|no less than)\b[^0-9]{0,20}(\d[\d,.]*\s*(k|thousand)?)\s*(aed|dhs|dirhams?)?/i);
+      if (ep) {
+        let raw = ep[2].replace(/,/g, "").trim();
+        let n = parseFloat(raw);
+        if (/k|thousand/i.test(raw)) n *= 1000;
+        if (n >= 1000) {
+          const note = `Customer expects: AED ${Math.round(n).toLocaleString("en-US")}`;
+          const ex = String((conversation as any).car_conditions ?? "").split(" | ").filter(x => !x.startsWith("Customer expects:"));
+          const upd = [...ex, note].filter(Boolean).join(" | ");
+          (conversation as any).car_conditions = upd;
+          await updateConversation(phone, { car_conditions: upd } as any).catch(() => {});
+        }
+      }
+    }
+
+    // ── Hiyaza only (ownership certificate, no plates / insurance) → no booking ──
+    // Collect name + UAE number, team contacts them.
+    {
+      const HIYAZA = /\b(hiyaza|hiyaaza|hyaza|hiyazah|hiazah|hiaza|heyaza|ownership certificate|possession certificate|no (license |number )?plates?|without (license |number )?plates?|plates? (removed|cancelled|surrendered))\b/i;
+      const HZ_LINE = "For cars under Hiyaza only, our team will contact you directly.";
+      const HZ_NAME_Q = "May I have your name?";
+      const HZ_PHONE_Q = "Which UAE number is best to reach you on?";
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const inHz = hist.some(m => m.role === "assistant" && m.content.includes(HZ_LINE));
+      if ((inHz || HIYAZA.test(messageText)) && currentStep < CLOSING_STEP) {
+        const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+        const upd: Record<string, unknown> = { ...vehicleDbFields(vehicleUpdates), last_msg_id: message.id, last_message_at: new Date().toISOString() };
+        let name = conversation.name;
+        if (inHz && lastA.includes(HZ_NAME_Q) && !name) {
+          const n = extractNameFromMessage(messageText);
+          if (n) { upd.name = n; name = n; }
+        }
+        if (inHz && lastA.includes(HZ_PHONE_Q)) {
+          const pm = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+          if (pm) {
+            const raw = pm[0].replace(/\D/g, "");
+            const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+            if (alt !== phone) upd.alternative_phone = alt;
+          }
+        }
+        if (!inHz) {
+          const ex = String((conversation as any).car_conditions ?? "");
+          const note = "HIYAZA: car under ownership certificate only (no plates/insurance) — no appointment";
+          if (!ex.includes("HIYAZA:")) upd.car_conditions = ex ? `${ex} | ${note}` : note;
+        }
+        const asked = (q: string) => hist.some(m => m.role === "assistant" && m.content.includes(q));
+        const nextQ = !name && !asked(HZ_NAME_Q) ? HZ_NAME_Q : !asked(HZ_PHONE_Q) ? HZ_PHONE_Q : null;
+        const reply = !inHz
+          ? `Thanks for letting me know. ${HZ_LINE} ${nextQ ?? ""}`.trim()
+          : nextQ ?? "Thanks! Our team will contact you shortly. Have a nice day!";
+        if (!nextQ && inHz) upd.step = CLOSING_STEP;
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, upd as any).catch(e => console.error("hiyaza save error:", e));
+        await appendHistory(phone, hist, messageText, reply);
+        if (!inHz || !nextQ) await pushLead(phone, !inHz ? "hiyaza handoff" : "hiyaza — details complete", { salesInquiry: "Other", inspectionBooked: false });
+        return NextResponse.json({ status: "hiyaza" }, { status: 200 });
+      }
+    }
+
     // ── Customer asks for a real person → push now, then collect details ─────
     // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
     {
@@ -1206,7 +1271,7 @@ export async function POST(req: NextRequest) {
     }
 
     const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
-    const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
+    const PRICE_PUSH      = /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
     const HUMAN_REQUEST   = /\b(call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?]))|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|staff|team)|real person|human agent)\b/i;
     const BOOKING_REFUSAL = /\b(no\s*,?\s*thanks?|no\s*,?\s*thank\s*you|not\s*interested|maybe\s*later|i'?ll\s*pass|don'?t\s*want\s*(to|it)|forget\s*it|not\s*for\s*me|leave\s*it|never\s*mind|nevermind|bye|goodbye)\b/i;
     const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
