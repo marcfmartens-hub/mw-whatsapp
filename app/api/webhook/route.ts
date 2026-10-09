@@ -195,6 +195,34 @@ function buildDirectResponse(
   }
 }
 
+// Opening hours (Dubai): Mon–Thu & Sat 10:00–19:00, Fri 12:00–19:00, Sun closed. Last slot 18:30.
+// Returns a plain-English hint telling Kaya which day to propose for the inspection.
+function getBookingSlot(): string {
+  const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const OPEN: Record<number, number | null> = { 0: null, 1: 10, 2: 10, 3: 10, 4: 10, 5: 12, 6: 10 };
+  const now = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const fmt = (d: Date) => {
+    const n = d.getUTCDate();
+    const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+    return `${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
+  };
+  // Today still possible if open and at least ~45 min before the last slot
+  if (OPEN[now.getUTCDay()] != null && mins <= 17 * 60 + 45) {
+    return `today (${fmt(now)}) — branch is open, last slot 18:30. Suggest coming in today.`;
+  }
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(now.getTime() + i * 86400000);
+    const open = OPEN[d.getUTCDay()];
+    if (open != null) {
+      const when = i === 1 ? `tomorrow, ${fmt(d)}` : fmt(d);
+      return `${when} (opens ${open}:00) — too late for today. Suggest this day. Do NOT hand off to the team.`;
+    }
+  }
+  return "the next opening day";
+}
+
 function getDubaiDateStr(): string {
   const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
   const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -345,8 +373,9 @@ export async function POST(req: NextRequest) {
     if (freshConversation) Object.assign(conversation, freshConversation);
 
     // ── Special inquiry detection (any step) ──────────────────────────────
-    // Home visit or trade-in inquiry → collect info, push to Bigin, hand off
-    const isHomeVisit = HOME_VISIT_PATTERN.test(messageText);
+    // Trade-in inquiry → collect info, push to Bigin, hand off.
+    // Home visits are NOT offered — Kaya answers those herself (see HOME VISITS in lib/claude.ts).
+    const isHomeVisit = false;
     const isTradeIn   = TRADE_IN_PATTERN.test(messageText);
     if ((isHomeVisit || isTradeIn) && (conversation.step ?? 0) > 0) {
       const inquiryType = isHomeVisit ? "Home Visit Inquiry" : "Trade-in Inquiry";
@@ -672,6 +701,7 @@ export async function POST(req: NextRequest) {
       dubai_hour:       getDubaiHour(),
       dubai_datetime:   getDubaiDateTime(),
       dubai_tomorrow:   getDubaiTomorrow(),
+      booking_slot:     getBookingSlot(),
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10,
       estimated_value:  valuation?.formatted ?? null,
