@@ -360,7 +360,8 @@ export async function POST(req: NextRequest) {
       mileage: conversation.mileage ?? undefined,
       specs:   conversation.specs   ?? undefined,
     };
-    const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
+    // Don't extract vehicle info at step 0 — it's the greeting step, ask for name first
+    const vehicleUpdates = currentStep === 0 ? {} : await extractVehicleInfo(messageText, alreadyKnown);
 
     if (!vehicleUpdates.model || vehicleUpdates.model === "Unknown") {
       const effectiveMake = vehicleUpdates.make ?? conversation.make;
