@@ -716,8 +716,13 @@ export async function POST(req: NextRequest) {
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(currentStep, history, messageText, knownFields);
 
-    const appointmentConfirmedEarly = currentStep === FINAL_STEP && !action &&
-      /team will be in touch on whatsapp/i.test(reply);
+    // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
+    // time were captured and the reply reads like a confirmation.
+    const hasApptDateTime = !!(apptDate || conversation.appointment_date) && !!(apptTime || conversation.appointment_time);
+    const appointmentConfirmedEarly = currentStep === FINAL_STEP && !action && (
+      /team will be in touch on whatsapp/i.test(reply) ||
+      (hasApptDateTime && /\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in|in touch)\b/i.test(reply))
+    );
 
     const replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
     if (appointmentConfirmedEarly && replyParts.length > 0) {

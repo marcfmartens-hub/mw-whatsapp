@@ -14,8 +14,9 @@ const SILENCE_MINUTES = 12;
 const TABLE = "mw_whatsapp";
 
 function getSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  // Same env vars as lib/supabase.ts — the NEXT_PUBLIC_ ones were never set, so this cron crashed silently
+  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   return createClient(url, key);
 }
 
@@ -77,7 +78,8 @@ export async function GET(req: NextRequest) {
         ...conv,
         phone_number: conv.phone_number || conv.phone,
         sales_inquiry: salesInquiry,
-        inspection_booked: false,
+        // If a date + time were captured, the customer did book — don't push as "not booked"
+        inspection_booked: !!(conv.appointment_date && conv.appointment_time),
         inquiry_summary: inquirySummary,
         owner_status: conv.owner_status,
         car_conditions: conv.car_conditions,
