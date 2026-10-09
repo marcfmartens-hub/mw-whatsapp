@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // It finds conversations that started but went silent, and pushes them to Bigin
 // with Sales_Inquiry = "No Communication yet" so the purchase team can follow up.
 
-const SILENCE_MINUTES = 5;
+const SILENCE_MINUTES = 12;
 const TABLE = "mw_whatsapp";
 
 function getSupabase() {
