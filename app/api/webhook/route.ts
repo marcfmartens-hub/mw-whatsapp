@@ -605,6 +605,10 @@ export async function POST(req: NextRequest) {
     {
       const BUY_INTENT = /\b(i\s*(want|need|would like|wanna|am looking|'?m looking|plan)\s+(to\s+)?(buy|purchase)\b|i\s*(want|need|would like|wanna)\s+(to\s+)?get\s+(a|an)\s+(new\s+|used\s+)?(car|vehicle|suv)\b|looking\s+to\s+buy|looking\s+for\s+a\s+(car|vehicle)\s+to\s+buy|do\s+you\s+(sell|have)\s+(any\s+)?cars|what\s+cars\s+do\s+you\s+have|your\s+(stock|inventory))/i;
       const BUY_Q = "Are you also looking to sell a car (as a trade-in), or only looking to buy?";
+      const BUYER_LINE    = "Our sales team will contact you.";
+      const BUYER_NAME_Q  = "May I have your name?";
+      const BUYER_PHONE_Q = "Which UAE number is best to reach you on?";
+      const BUYER_AVAIL_Q = "When is a good time for our sales team to call you?";
       const histB = (conversation.messages ?? []) as ConversationMessage[];
       const lastAB = [...histB].reverse().find(m => m.role === "assistant")?.content ?? "";
       const notesB: string = (conversation as any).car_conditions ?? "";
@@ -613,6 +617,37 @@ export async function POST(req: NextRequest) {
         (conversation as any).car_conditions = upd;
         await updateConversation(phone, { car_conditions: upd } as any).catch(() => {});
       };
+      // Buyer-only details: name → UAE number → availability → close
+      const inBuyerMode = histB.some(m => m.role === "assistant" && m.content.includes(BUYER_LINE)) && (conversation.step ?? 0) < CLOSING_STEP;
+      if (inBuyerMode) {
+        const upd: Record<string, unknown> = { last_message_at: new Date().toISOString() };
+        if (lastAB.includes(BUYER_NAME_Q) && !conversation.name) {
+          const n = extractNameFromMessage(messageText);
+          if (n) { upd.name = n; conversation.name = n; }
+        } else if (lastAB.includes(BUYER_PHONE_Q)) {
+          const pm = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+          if (pm) {
+            const raw = pm[0].replace(/\D/g, "");
+            const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+            if (alt !== phone) upd.alternative_phone = alt;
+          }
+        } else if (lastAB.includes(BUYER_AVAIL_Q)) {
+          await addNoteB(`Best time to call: ${messageText.trim()}`);
+        }
+        const asked = (q: string) => histB.some(m => m.role === "assistant" && m.content.includes(q));
+        const nextQ = !conversation.name && !asked(BUYER_NAME_Q) ? BUYER_NAME_Q
+          : !asked(BUYER_PHONE_Q) ? BUYER_PHONE_Q
+          : !asked(BUYER_AVAIL_Q) ? BUYER_AVAIL_Q
+          : null;
+        const reply = nextQ ?? "Thanks! Our sales team will contact you shortly. Have a nice day!";
+        if (!nextQ) upd.step = CLOSING_STEP;
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, upd as any).catch(() => {});
+        await appendHistory(phone, histB, messageText, reply);
+        if (!nextQ) await pushLead(phone, "buyer — details complete", { salesInquiry: "Other", inspectionBooked: false });
+        return NextResponse.json({ status: "buyer_details" }, { status: 200 });
+      }
+
       if (lastAB.includes(BUY_Q)) {
         const words = messageText.toLowerCase().split(/[^a-z0-9-]+/);
         const selling = /\b(sell|selling|trade|exchange|swap|both|yes|also|part)\b/i.test(messageText) && !/\b(only|just)\s+(buy|buying|looking)/i.test(messageText)
@@ -626,9 +661,10 @@ export async function POST(req: NextRequest) {
           // fall through → normal selling flow (asks the car if it's not in this message)
         } else {
           await addNoteB(`BUYER: wants to buy a car, not selling`);
-          const reply = "No problem! Our team will get back to you shortly. Have a nice day!";
+          const nextQ = conversation.name ? BUYER_PHONE_Q : BUYER_NAME_Q;
+          const reply = `No problem! ${BUYER_LINE} ${nextQ}`;
           await sendWhatsAppMessage(phone, reply);
-          await updateConversation(phone, { step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
+          await updateConversation(phone, { last_message_at: new Date().toISOString() } as any).catch(() => {});
           await appendHistory(phone, histB, messageText, reply);
           await pushLead(phone, "buyer", { salesInquiry: "Other", inspectionBooked: false });
           return NextResponse.json({ status: "buyer" }, { status: 200 });
