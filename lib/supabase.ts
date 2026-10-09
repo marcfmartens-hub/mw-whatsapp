@@ -14,6 +14,7 @@ export interface Conversation {
   step: number;
   name: string | null;
   phone_number: string | null;
+  alternative_phone?: string | null;
   car: string | null;
   make: string | null;
   model: string | null;
@@ -23,6 +24,7 @@ export interface Conversation {
   loan: string | null;
   mortgage_amount: string | null;
   sell_timeline: string | null;
+  sell_urgent?: boolean | null;
   appointment: string | null;
   appointment_date: string | null;
   appointment_time: string | null;
@@ -32,6 +34,15 @@ export interface Conversation {
   last_message_at: string | null;
   bigin_pushed_at: string | null;
   estimated_price?: string | null;
+  insult_count?: number | null;
+  non_gcc_handoff?: boolean | null;
+  owner_status?: string | null;
+  car_conditions?: string | null;
+  inquiry_summary?: string | null;
+  price_push_count?: number | null;
+  price_handoff_done?: boolean | null;
+  price_handoff_collecting?: boolean | null;
+  price_handoff_ready?: boolean | null;
   messages?: Array<{ role: "user" | "assistant"; content: string }> | null;
 }
 
