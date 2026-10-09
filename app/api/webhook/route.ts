@@ -196,8 +196,8 @@ function describeAction(a: NextAction): string {
     case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
     case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
     case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
-    case "SHOW_SUMMARY":      return `Show the car summary (plain, no emojis) then ask "When are you planning to sell the car?"`;
-    case "SHOW_FULL_SUMMARY": return `Show the car summary including mortgage (plain, no emojis) then ask "When are you planning to sell the car?"`;
+    case "SHOW_SUMMARY":      return `Ask: "When are you planning to sell the car?"`;
+    case "SHOW_FULL_SUMMARY": return `Ask: "When are you planning to sell the car?"`;
     case "OFFER_CALLBACK":   return "Tell the customer the purchasing team will call them back within the hour, and they're welcome to come in whenever.";
   }
 }
@@ -558,16 +558,29 @@ export async function POST(req: NextRequest) {
     if (alreadyKnown.specs   && vehicleUpdates.specs)   delete vehicleUpdates.specs;
 
     // Deterministic backup for specs + mileage — never re-ask something the customer already said
-    if (currentStep >= 2 && currentStep <= 4) {
+    if (currentStep >= 1 && currentStep <= 4) {
+      const NON_GCC = /\bnon[\s-]?gcc\b|\b(american|us|usa|japanese|japan|canadian|canada|european|korean)\s*(spec|specs|import|imported|version)\b|\bimport(ed)?\s+from\s+(the\s+)?(us|usa|america|canada|japan|korea|europe)\b/i;
+      const IN_MILES = /\d\s*k?\s*miles?\b/i.test(messageText);
       if (!alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
-        if (/\bnon[\s-]?gcc\b|\b(american|us|usa|japanese|japan|canadian|european|korean)\s*spec/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+        if (NON_GCC.test(messageText) || IN_MILES) vehicleUpdates.specs = "Non-GCC";
         else if (/\bgcc\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
+      } else if (vehicleUpdates.specs === "GCC" && NON_GCC.test(messageText)) {
+        vehicleUpdates.specs = "Non-GCC";
       }
       if (!alreadyKnown.mileage && !vehicleUpdates.mileage) {
         const mk = messageText.match(/\b(\d+(?:\.\d+)?)\s*k\s*(?:km|kms|kilomet\w*)?\b/i);
         const mf = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s*(?:km|kms|kilomet\w*)\b/i);
+        const mm = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?\s*k?)\s*miles?\b/i);
         if (mk) vehicleUpdates.mileage = String(Math.round(parseFloat(mk[1]) * 1000));
         else if (mf) vehicleUpdates.mileage = mf[1].replace(/[,.]/g, "");
+        else if (mm) {
+          const raw = mm[1].replace(/[,.](?=\d{3})/g, "").trim();
+          vehicleUpdates.mileage = String(/k$/i.test(raw) ? parseFloat(raw) * 1000 : parseFloat(raw));
+        }
+      }
+      // Miles → km (US imports): the extractor stores the number as-is
+      if (IN_MILES && vehicleUpdates.mileage && !alreadyKnown.mileage) {
+        vehicleUpdates.mileage = String(Math.round(parseFloat(vehicleUpdates.mileage) * 1.609));
       }
     }
 
@@ -606,8 +619,13 @@ export async function POST(req: NextRequest) {
     // Customer explicitly asks to book — from this message or earlier in the chat
     const BOOKING_INTENT = /\b(book|booking|appointment|inspection|inspect|schedule|come\s*(in|by|over)|bring\s*(the|my)?\s*car|visit\s*(you|your))\b/i;
     const priorUserMsgs = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content);
+    // A day + a time ("tomorrow 4pm", "today at 5", "monday morning") also means they want to come in
+    const DAY = "(today|tonight|tomorrow|tmrw|tmr|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat)";
+    const TIME = "(\\d{1,2}(:\\d{2})?\\s*(am|pm)|\\d{1,2}:\\d{2}|noon|morning|afternoon|evening|at\\s+\\d{1,2})";
+    const DAY_TIME = new RegExp(`\\b${DAY}\\b.{0,25}\\b${TIME}|\\b${TIME}\\b.{0,25}\\b${DAY}\\b`, "i");
+    const isBookingMsg = (t: string) => BOOKING_INTENT.test(t) || DAY_TIME.test(t);
     const wantsBooking = currentStep >= 1 && currentStep < FINAL_STEP &&
-      (BOOKING_INTENT.test(messageText) || priorUserMsgs.some(t => BOOKING_INTENT.test(t)));
+      (isBookingMsg(messageText) || priorUserMsgs.some(isBookingMsg));
 
     // ── After booking: cancel or reschedule ───────────────────────────
     const hasBooking = !!(conversation.appointment_date || conversation.appointment_time);
@@ -957,7 +975,11 @@ export async function POST(req: NextRequest) {
 
     console.log(`[kaya] step=${currentStep} action=${action?.type ?? "none"}`);
 
-    const reply = action
+    // Customer asked something during a hardcoded step → let Kaya answer it first, then ask the step question
+    const ASKED_QUESTION = /\?|\b(do|does|can|could|will|would|are|is)\s+(you|u|it|they|there|this)\b|\b(how|what|whats|what's|where|why|which|when)\b/i;
+    const customerAsked = !!action && action.type !== "OFFER_CALLBACK" && currentStep >= 1 && ASKED_QUESTION.test(messageText);
+    if (customerAsked) (knownFields as any).answer_question_first = true;
+    const reply = action && !customerAsked
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(jumpToBooking ? FINAL_STEP : currentStep, history, messageText, knownFields);
 
