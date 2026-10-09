@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
+import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
@@ -462,6 +462,72 @@ export async function POST(req: NextRequest) {
     const hasAllVehicleFields = !!carMileage && (!!carSpecs || specsExplicitlyUnknown
                                   || conversation.specs === "Unknown");
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
+
+    // ── Non-GCC / imported specs redirect ─────────────────────────────────────
+    // When specs are confirmed as Non-GCC, skip appointment booking and hand off
+    // to the purchase team. Collect remaining info then push to Bigin.
+    const isNonGcc = carSpecs === "Non-GCC";
+    const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
+    if (isNonGcc && !alreadyHandedOff && currentStep >= 4) {
+      // Save the non_gcc_handoff flag so this only fires once
+      await updateConversation(phone, { non_gcc_handoff: true } as any).catch(() => {});
+
+      // Check if we still need name / remaining vehicle info
+      const missingInfo: string[] = [];
+      const resolvedMake    = vehicleUpdates.make    ?? conversation.make;
+      const resolvedModel   = vehicleUpdates.model   ?? conversation.model;
+      const resolvedYear    = vehicleUpdates.year    ?? conversation.year;
+      const resolvedMileage = vehicleUpdates.mileage ?? conversation.mileage;
+      if (!resolvedMake)    missingInfo.push("make");
+      if (!resolvedModel)   missingInfo.push("model");
+      if (!resolvedYear)    missingInfo.push("year");
+      if (!resolvedMileage) missingInfo.push("mileage");
+
+      const nextQ = missingInfo.length > 0
+        ? `Could you also share the ${missingInfo[0]} of the car?`
+        : !conversation.name
+          ? "And may I know your name?"
+          : null;
+
+      const handoffMsg = nextQ
+        ? `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team reach out to you directly to discuss this. ${nextQ}`
+        : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks, I've got everything I need — our team will be in touch shortly.`;
+
+      await sendWhatsApp(phone, handoffMsg);
+
+      // Push to Bigin if we have enough info and haven't pushed yet
+      if (!conversation.bigin_pushed_at) {
+        try {
+          const latestConv = await getConversation(phone);
+          const latestHistory: ConversationMessage[] = Array.isArray(latestConv?.messages) ? latestConv.messages : [];
+          const inquirySummary = await generateInquirySummary(latestHistory, {
+            name: conversation.name, make: resolvedMake ?? undefined,
+            model: resolvedModel ?? undefined, year: resolvedYear ?? undefined,
+            mileage: resolvedMileage ?? undefined, specs: "Non-GCC",
+            sell_timeline: conversation.sell_timeline,
+            owner_status: (conversation as any).owner_status,
+            car_conditions: (conversation as any).car_conditions,
+          }).catch(() => "");
+          await createBiginContact({
+            ...conversation,
+            make: resolvedMake ?? conversation.make,
+            model: resolvedModel ?? conversation.model,
+            year: resolvedYear ?? conversation.year,
+            mileage: resolvedMileage ?? conversation.mileage,
+            specs: "Non-GCC",
+            phone_number: phone,
+            sales_inquiry: "Other",
+            inspection_booked: false,
+            inquiry_summary: inquirySummary,
+            owner_status: (conversation as any).owner_status,
+            car_conditions: (conversation as any).car_conditions,
+          } as any);
+          await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+        } catch (e) { console.error("non-GCC Bigin push error:", e); }
+      }
+
+      return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
+    }
 
     if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
       for (const tc of vehicleUpdates.typo_check) {
