@@ -1581,7 +1581,10 @@ export async function POST(req: NextRequest) {
     const stayAtAppointment  = (currentStep === FINAL_STEP || jumpToBooking) && !appointmentConfirmed;
     // At step 6 (sell method), only stay if they asked for explanation (not sure / explain)
     // — otherwise advance to appointment booking
-    const stayAtSellMethod   = currentStep === 6 && SELL_METHOD_NOT_SURE.test(messageText)
+    // Only stay on the sell-method step when they ask for an explanation.
+    // "Not sure" moves on to booking — the best way to sell is decided after the inspection.
+    const stayAtSellMethod   = currentStep === 6 && /\b(difference|explain|what'?s the|how does|which is better|options?)\b/i.test(messageText)
+      && !/\b(not sure|unsure|don'?t know|undecided|no idea|think about it|either)\b/i.test(messageText)
       && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
     const nextStep = currentStep >= CLOSING_STEP ? (isRebook && !appointmentConfirmed ? FINAL_STEP : CLOSING_STEP)
       : (jumpToBooking && appointmentConfirmed) ? CLOSING_STEP
