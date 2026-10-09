@@ -259,7 +259,9 @@ function getBookingSlot(): string {
     const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
     return `${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
   };
-  const todayOpen = OPEN[now.getUTCDay()] != null && mins <= 17 * 60 + 45;
+  // Before 15:00 → today only · 15:00–17:00 → today or next day · after 17:00 → next day only
+  const todayOpen = OPEN[now.getUTCDay()] != null && mins < 17 * 60;
+  const offerNextToo = mins >= 15 * 60;
   let nextLabel = "tomorrow", nextFull = "";
   for (let i = 1; i <= 7; i++) {
     const d = new Date(now.getTime() + i * 86400000);
@@ -270,9 +272,9 @@ function getBookingSlot(): string {
     }
   }
   const todayWord = now.getUTCHours() < 12 ? "today" : "this afternoon";
-  const question = todayOpen
-    ? `What time can you come in ${todayWord} or ${nextLabel}?`
-    : `What time can you come in ${nextLabel}?`;
+  const question = !todayOpen ? `What time can you come in ${nextLabel}?`
+    : offerNextToo ? `What time can you come in ${todayWord} or ${nextLabel}?`
+    : `What time can you come in ${todayWord}?`;
   return `Ask exactly: "${question}" — always ask for a TIME, never a yes/no question. ` +
     (todayOpen ? `Branch is open today until 19:00 (last slot 18:30). ` : `Too late for today. Do NOT hand off to the team. `) +
     `Next opening day: ${nextFull}.`;
