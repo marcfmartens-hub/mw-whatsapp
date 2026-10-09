@@ -261,7 +261,7 @@ export async function POST(req: NextRequest) {
         await sendWhatsAppMessage(phone, reply);
       } catch (e) {
         console.error("reset handler error:", e);
-        await sendWhatsAppMessage(phone, "Hi! Welcome to Mister Wheelz. What car are you looking to sell?").catch(() => {});
+        await sendWhatsAppMessage(phone, "Hi! I'm Kaya, the online assistant for Mister Wheelz 😊\n\nBefore we start, may I know your name please?").catch(() => {});
       }
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
