@@ -1144,12 +1144,13 @@ export async function POST(req: NextRequest) {
     // ── Customer asks for a real person → push now, then collect details ─────
     // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
     {
+      const NAMED_PERSON = /\b(speak|talk|chat)\s+(to|with)\s+(mr\.?\s+|mrs\.?\s+|ms\.?\s+)?(?!(you|u|me|him|her|them|us|someone|somebody|anyone|people|the|a|an|your|my|our|his|their|this|that|it|later|again|soon|family|wife|husband|brother|sister|friend|father|mother|dad|mom|bank)\b)[a-z]{3,}\b/i;
       const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b/i;
       const HUMAN_LINE = "I'll have someone from our team contact you shortly.";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE))
         || String((conversation as any).car_conditions ?? "").includes("Asked to speak to the team");
-      const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP && HUMAN_ASK.test(messageText);
+      const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText));
       if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
         const vDb = vehicleDbFields(vehicleUpdates);
         const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
@@ -1220,9 +1221,12 @@ export async function POST(req: NextRequest) {
       const hasMethod   = /sell_method:/.test(tl);
       const missingCar  = (["make", "model", "year", "mileage"] as const).find(k => !c[k] || c[k] === "Unknown");
 
+      // A question instead of an answer → purchasing team will discuss it; repeat the open question
+      const ngQuestion = !firstTime && /\?|\b(do|does|can|could|will|would)\s+(you|u)\b|\bhow much\b|\bprice\b|\boffer\b|\bhome\s*(visit|service)/i.test(messageText)
+        && !/\b(difference|explain|which is better)\b/i.test(messageText);
       // Save this message as the answer to the question we asked last time
       let explainMethod = false;
-      if (!firstTime && !missingCar) {
+      if (!firstTime && !missingCar && !ngQuestion) {
         if (!hasTimeline) {
           tl = messageText + (hasMethod ? ` | ${tl}` : "");
         } else if (!hasMethod && age <= 8) {
@@ -1261,6 +1265,7 @@ export async function POST(req: NextRequest) {
       else if (!phoneAskedBefore) nextQ = PHONE_Q;
 
       const parts: string[] = [];
+      if (ngQuestion) parts.push("That's something our purchasing team will discuss with you directly.");
       if (firstTime) parts.push("Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly.");
       parts.push(nextQ ?? "Thanks, I've got everything I need. Our team will be in touch shortly. Have a nice day!");
 
@@ -1407,7 +1412,6 @@ export async function POST(req: NextRequest) {
                       : isRebook ? `Customer is RESCHEDULING an existing booking (was: ${conversation.appointment_date ?? "?"} ${conversation.appointment_time ?? ""}). Confirm the new date/time and send the confirmation. Do NOT ask for name or number again.` : undefined,
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10,
-      estimated_value:  valuation?.formatted ?? null,
       next_action:      action ? describeAction(action) : undefined,
       appointment_date: apptDate || conversation.appointment_date || undefined,
       appointment_time: apptTime || conversation.appointment_time || undefined,
