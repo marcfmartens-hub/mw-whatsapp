@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, Conversation } from "@/lib/supabase";
-import { getKayaReply, extractVehicleInfo, extractAppointment, VehicleFields, ConversationMessage } from "@/lib/claude";
+import { getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact } from "@/lib/bigin";
 import { CAR_MODELS } from "@/lib/carData";
@@ -38,8 +38,8 @@ export async function GET(req: NextRequest) {
 const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   0: undefined,          // first contact — nothing to save
   1: "name",             // customer gives name
-  2: "phone_number",     // UAE contact number (only asked when sender is non-UAE)
-  3: "car",              // customer states car info
+  2: "car",              // customer states car info (phone always auto-saved from sender)
+  3: "car",              // car info (UAE skip phone step → goes straight here)
   4: undefined,          // mileage+specs collected via vehicle extraction only
   5: "loan",             // loan / mortgage status
   6: "sell_timeline",    // sell method: cash / consignment / not sure
@@ -56,6 +56,21 @@ const SELL_METHOD_NOT_SURE    = /\b(not sure|unsure|don.?t know|undecided|still 
 
 // Handoff detection — complex conversations that need a human
 const HANDOFF_SIGNALS = /\b(too many questions|complicated|confused|call me|speak to someone|talk to a person|human|agent|manager|more information|tell me more|how does it work|what happens|walk me through|i don.?t understand)\b/i;
+
+// Special inquiry types
+const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
+const TRADE_IN_PATTERN    = /\b(trade[\s-]?in|trade\s*my|swap|exchange|part[\s-]?exchange|replace\s*(my|the)|get\s*(a\s*)?new\s*car|upgrade\s*(my|the)|in\s*exchange\s*for)\b/i;
+const PRICE_OFFER_PATTERN = /\b(how\s*much|price|offer|estimate|valuation|value|worth|what\s*(will\s*you\s*pay|do\s*you\s*give|can\s*i\s*get)|give\s*me\s*(a\s*)?(price|number|figure|quote))\b/i;
+
+// Ownership detection
+const OWNER_PATTERN = /\b(my\s*car|i\s*(own|am\s*the\s*owner)|registered\s*(in\s*my\s*name|owner)|it.?s\s*mine)\b/i;
+const POA_PATTERN   = /\b(poa|power\s*of\s*attorney|selling\s*for|on\s*behalf|not\s*my\s*car|friend.?s\s*car|family.?s\s*car|brother.?s|sister.?s|father.?s|mother.?s|husband.?s|wife.?s)\b/i;
+
+// Car condition signals — extract when mentioned
+const CONDITION_PATTERN = /\b(accident|damage|damaged|dent|scratch|flood|fire|total\s*loss|write[\s-]?off|modified|modification|tuned|engine|gearbox|transmission|service|fine|fines|traffic\s*fine|salik|document|registration|mulkiya|expired|missing|lost|stolen|bank\s*loan|finance|mortgage)\b/i;
+
+// Insult detection
+const INSULT_PATTERN = /\b(stupid|idiot|dumb|useless|moron|asshole|ass hole|bastard|bitch|fuck|shit|scam|fraud|liar|pathetic|garbage|rubbish|trash|waste of time|terrible|horrible|disgusting)\b/i;
 
 const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
@@ -263,14 +278,62 @@ export async function POST(req: NextRequest) {
 
     const conversation = await getOrCreateConversation(phone);
 
+    // Always save the sender's phone number — no need to ask for it
     if (!conversation.phone_number) {
       await updateConversation(phone, { phone_number: phone });
       conversation.phone_number = phone;
     }
 
+    // Insult detection — track count and close after second insult
+    if (INSULT_PATTERN.test(messageText)) {
+      const insultCount = ((conversation as any).insult_count ?? 0) + 1;
+      await updateConversation(phone, { insult_count: insultCount } as any);
+      if (insultCount >= 2) {
+        // Second insult — close conversation and hand off
+        await sendWhatsAppMessage(phone, "I'm going to pass you on to one of our team members who can assist you better. Take care.");
+        try { await createBiginContact({ ...conversation, phone_number: phone } as any); } catch (_) {}
+        return NextResponse.json({ status: "closed_insult" }, { status: 200 });
+      } else {
+        // First insult — respond with empathy
+        await sendWhatsAppMessage(phone, "I understand, we all have frustrating moments sometimes. I'm here to help whenever you're ready.");
+        return NextResponse.json({ status: "insult_warned" }, { status: 200 });
+      }
+    }
+
     if (conversation.last_msg_id && conversation.last_msg_id === message.id) {
       return NextResponse.json({ status: "duplicate" }, { status: 200 });
     }
+
+    // ── Special inquiry detection (any step) ──────────────────────────────
+    // Home visit or trade-in inquiry → collect info, push to Bigin, hand off
+    const isHomeVisit = HOME_VISIT_PATTERN.test(messageText);
+    const isTradeIn   = TRADE_IN_PATTERN.test(messageText);
+    if ((isHomeVisit || isTradeIn) && (conversation.step ?? 0) > 0) {
+      const inquiryType = isHomeVisit ? "Home Visit Inquiry" : "Trade-in Inquiry";
+      const inquiryTag  = isHomeVisit ? "home_visit" : "trade_in";
+      await updateConversation(phone, { sell_timeline: `sell_method:${inquiryTag}` } as any);
+      const replyMsg = isHomeVisit
+        ? "Of course, we can look into that for you. Let me pass your details to our team and they'll be in touch with you shortly to arrange."
+        : "Happy to discuss that. Let me pass your details to our team and they'll reach out to you shortly to go over the options.";
+      await sendWhatsAppMessage(phone, replyMsg);
+      try {
+        const freshConv = await (await import("@/lib/supabase")).getConversation(phone);
+        const siHistory = ((freshConv as any)?.messages ?? []) as ConversationMessage[];
+        const siSummary = await generateInquirySummary(siHistory, { ...conversation, ...freshConv } as any).catch(() => "");
+        await createBiginContact({
+          ...(freshConv ?? conversation),
+          phone_number: phone,
+          sales_inquiry: inquiryType,
+          inspection_booked: false,
+          inquiry_summary: siSummary,
+          owner_status: (freshConv as any)?.owner_status,
+          car_conditions: (freshConv as any)?.car_conditions,
+        } as any);
+        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+      } catch (e) { console.error("special inquiry Bigin push error:", e); }
+      return NextResponse.json({ status: "special_inquiry" }, { status: 200 });
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     const currentStep = conversation.step ?? 0;
     const fieldToSave = FIELD_BY_STEP[currentStep];
@@ -320,6 +383,20 @@ export async function POST(req: NextRequest) {
     if (alreadyKnown.mileage && vehicleUpdates.mileage) delete vehicleUpdates.mileage;
     if (alreadyKnown.specs   && vehicleUpdates.specs)   delete vehicleUpdates.specs;
 
+    // Ownership detection — save once, don't overwrite
+    if (!conversation.owner_status) {
+      if (POA_PATTERN.test(messageText))   await updateConversation(phone, { owner_status: "POA" } as any).catch(() => {});
+      else if (OWNER_PATTERN.test(messageText)) await updateConversation(phone, { owner_status: "Owner" } as any).catch(() => {});
+    }
+
+    // Car conditions — append any new condition signals mentioned
+    if (CONDITION_PATTERN.test(messageText)) {
+      const existing = (conversation as any).car_conditions ?? "";
+      const newCondition = messageText.trim();
+      const updated = existing ? `${existing} | ${newCondition}` : newCondition;
+      await updateConversation(phone, { car_conditions: updated } as any).catch(() => {});
+    }
+
     const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
     const hasKnownSpecs = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
                           || (conversation.specs && conversation.specs !== "Unknown");
@@ -328,6 +405,8 @@ export async function POST(req: NextRequest) {
 
     let apptDate = conversation.appointment_date ?? "";
     let apptTime = conversation.appointment_time ?? "";
+    let altPhone: string | undefined;
+
     if (currentStep === FINAL_STEP && messageText) {
       try {
         const ea = await extractAppointment(messageText);
@@ -341,7 +420,21 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.error("early appointment extraction error:", e);
       }
+
+      // Capture alternative phone number if customer provides one at booking step
+      const phoneMatch = messageText.match(/(?:\+?971|0)?[5][0-9]\d{7}/);
+      if (phoneMatch) {
+        const rawPhone = phoneMatch[0].replace(/\D/g, "");
+        const normalised = rawPhone.startsWith("971") ? rawPhone : `971${rawPhone.replace(/^0/, "")}`;
+        if (normalised !== phone) {
+          altPhone = normalised;
+          try { await updateConversation(phone, { alternative_phone: altPhone } as any); } catch (_) {}
+        }
+      }
     }
+
+    // Track price-offer-only leads (pushed before price, then drops off)
+    const isPriceOnlySignal = PRICE_OFFER_PATTERN.test(messageText) && currentStep <= 3;
 
     const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
     const sellUrgent   = sellTimeline ? URGENT_KEYWORDS.test(sellTimeline) : undefined;
@@ -395,8 +488,6 @@ export async function POST(req: NextRequest) {
 
     if (currentStep === 1 && GREETING_ONLY.test(messageText)) {
       action = { type: "ASK_NAME" };
-    } else if (currentStep === 1 && !isUAE) {
-      action = { type: "ASK_UAE_PHONE" };
     } else if (currentStep === 2) {
       action = { type: "ASK_CAR_DETAILS" };
     } else if (currentStep === 3) {
@@ -513,11 +604,18 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       try {
+        const cbSummary = await generateInquirySummary(history, knownFields).catch(() => "");
         const callbackConv = {
           ...conversation,
+          phone_number: phone,
           appointment_date: getDubaiDateStr(),
           appointment_time: "08:00",
-        } as Conversation;
+          sales_inquiry: "No Communication yet",
+          inspection_booked: false,
+          inquiry_summary: cbSummary,
+          owner_status: (conversation as any).owner_status,
+          car_conditions: (conversation as any).car_conditions,
+        } as any;
         await createBiginContact(callbackConv);
         await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
       } catch (e) {
@@ -553,7 +651,6 @@ export async function POST(req: NextRequest) {
       : stayAtLoanAmount   ? 5
       : stayAtSellMethod   ? 6
       : stayAtAppointment  ? FINAL_STEP
-      : currentStep === 1 && isUAE ? 3
       : skipLoan           ? 6
       : currentStep + 1;
     coreUpdates.step = nextStep;
@@ -586,7 +683,22 @@ export async function POST(req: NextRequest) {
     if (currentStep === FINAL_STEP && appointmentConfirmed) {
       const { getConversation } = await import("@/lib/supabase");
       const latestConv = await getConversation(phone);
-      await createBiginContact((latestConv ?? updatedConversation) as Conversation);
+      const sellTl = (latestConv ?? updatedConversation as any)?.sell_timeline ?? "";
+      let salesInquiry = "Cash Deal";
+      if (sellTl.includes("consignment")) salesInquiry = "Consignment";
+      else if (sellTl.includes("not_sure")) salesInquiry = "Not Sure - Need Advise";
+      const latestHistory = ((latestConv as any)?.messages ?? history) as ConversationMessage[];
+      const inquirySummary = await generateInquirySummary(latestHistory, knownFields).catch(() => "");
+      await createBiginContact({
+        ...(latestConv ?? updatedConversation),
+        phone_number: phone,
+        alternative_phone: altPhone ?? (latestConv as any)?.alternative_phone,
+        owner_status: (latestConv as any)?.owner_status,
+        car_conditions: (latestConv as any)?.car_conditions,
+        sales_inquiry: salesInquiry,
+        inspection_booked: true,
+        inquiry_summary: inquirySummary,
+      } as any);
       try {
         await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
       } catch (e) {
