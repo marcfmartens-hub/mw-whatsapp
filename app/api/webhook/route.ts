@@ -626,8 +626,13 @@ export async function POST(req: NextRequest) {
       ? estimateCarValue(estMake, estModel, estYear, estMileage, estSpecs)
       : null;
 
+    // At step 0 (greeting), never pass stale vehicle data — customer is just saying hi
+    const conversationForFields = currentStep === 0
+      ? { ...conversation, make: null, model: null, year: null, mileage: null, specs: null, car: null, loan: null, mortgage_amount: null, sell_timeline: null }
+      : conversation;
+
     const knownFields = {
-      ...conversation,
+      ...conversationForFields,
       ...coreUpdates,
       ...vehicleUpdates,
       image_shared: isImageMessage || undefined,
