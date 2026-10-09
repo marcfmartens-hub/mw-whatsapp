@@ -542,7 +542,7 @@ export async function POST(req: NextRequest) {
       const ask = missing.length && (c.step ?? 0) <= 4
         ? `Could you type the ${missing.length > 1 ? missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1] : missing[0]}?`
         : /\?\s*$/.test(lastQ) && lastQ.length < 200 ? lastQ : "Could you type the details instead?";
-      const reply = `Thanks! I can't open photos or files, so I can't see what you sent. ${ask}`;
+      const reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can't see what you sent. ${ask}`;
       await sendWhatsAppMessage(phone, reply);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], "[sent photos/files]", reply);
       return NextResponse.json({ status: "media_only" }, { status: 200 });
@@ -1068,8 +1068,8 @@ export async function POST(req: NextRequest) {
     let reply = action && !customerAsked
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(jumpToBooking ? FINAL_STEP : currentStep, history, messageText, knownFields);
-    if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/can'?t open photos/i.test(reply)) {
-      reply = `Thanks! I can't open photos or files, so I can only use the text you sent. ${reply}`;
+    if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/not able to open|can'?t open photos/i.test(reply)) {
+      reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can only use the text you sent. ${reply}`;
     }
 
     // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
