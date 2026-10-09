@@ -284,6 +284,12 @@ export async function createBiginContact(
 
     const fields = await getContactFields(accessToken);
     const data = adaptRecord(record, fields);
+    if ((conversation as any).clear_appointment) {
+      for (const label of ["Appointment Date", "Appointment Time"]) {
+        const f = fields?.find(x => norm(x.field_label) === norm(label));
+        data[f?.api_name ?? label.replace(" ", "_")] = null;
+      }
+    }
     data["First_Name"] = null; // never used — clears leftovers like "Unknown" on existing contacts
 
     // If Bigin rejects a field (INVALID_DATA etc.), drop just that field and retry —

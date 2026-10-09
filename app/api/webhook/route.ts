@@ -130,7 +130,7 @@ function formatMileage(raw: string | null | undefined): string {
 async function pushLead(
   phone: string,
   reason: string,
-  opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string } = {}
+  opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string; clearAppointment?: boolean } = {}
 ): Promise<void> {
   try {
     const latest = await getConversation(phone);
@@ -145,6 +145,7 @@ async function pushLead(
       sales_inquiry: opts.salesInquiry,
       inspection_booked: booked,
       inquiry_summary: summary,
+      clear_appointment: opts.clearAppointment ?? false,
     } as any);
     if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
     console.log(`[bigin] push (${reason}) for ${phone}: ${ok ? "ok" : "FAILED"}`);
@@ -576,6 +577,14 @@ export async function POST(req: NextRequest) {
       else if (OWNER_PATTERN.test(messageText)) await updateConversation(phone, { owner_status: "Owner" } as any).catch(() => {});
     }
 
+    // Customer mentions another car to sell → note it for the team (Kaya acknowledges it)
+    if (/\b(second|another|other|2nd|one more)\s+(car|vehicle)\b|\b(two|2|three|3)\s+cars\b|\balso\s+(have|selling|want to sell)\b/i.test(messageText)) {
+      const existing = (conversation as any).car_conditions ?? "";
+      const note = `Also selling: ${messageText.trim()}`;
+      await updateConversation(phone, { car_conditions: existing ? `${existing} | ${note}` : note } as any).catch(() => {});
+      (conversation as any).car_conditions = existing ? `${existing} | ${note}` : note;
+    }
+
     // Car conditions — append any new condition signals mentioned
     if (CONDITION_PATTERN.test(messageText)) {
       const existing = (conversation as any).car_conditions ?? "";
@@ -600,7 +609,25 @@ export async function POST(req: NextRequest) {
     const wantsBooking = currentStep >= 1 && currentStep < FINAL_STEP &&
       (BOOKING_INTENT.test(messageText) || priorUserMsgs.some(t => BOOKING_INTENT.test(t)));
 
-    if ((currentStep === FINAL_STEP || wantsBooking) && messageText) {
+    // ── After booking: cancel or reschedule ───────────────────────────
+    const hasBooking = !!(conversation.appointment_date || conversation.appointment_time);
+    const CANCEL = /\b(cancel|already sold|sold it|sold the car|don'?t need (it|the appointment)|not coming|won'?t (be )?com\w*|can'?t (make it|come)|call (it )?off)\b/i;
+    const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can we make it|make it)\b/i;
+    const lastAssistantMsg = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText);
+    if (isCancel) {
+      const reply = `No problem${conversation.name ? ", " + conversation.name : ""}, I've cancelled your appointment. If anything changes, just message us here.`;
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { appointment_date: null, appointment_time: null, step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      await pushLead(phone, "appointment cancelled", { inspectionBooked: false, clearAppointment: true });
+      return NextResponse.json({ status: "cancelled" }, { status: 200 });
+    }
+    // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
+    const isRebook = currentStep >= CLOSING_STEP && hasBooking &&
+      (RESCHEDULE.test(messageText) || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg));
+
+    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
       try {
         const ea = await extractAppointment(messageText);
         // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
@@ -763,7 +790,7 @@ export async function POST(req: NextRequest) {
     const isCarStep     = currentStep === 2 || currentStep === 3;
     const step3Complete = isCarStep && hasModel && hasYear && !!carMileage && hasSpecs;
     // Booking requested and the car is identified → go straight to booking (step 7)
-    const jumpToBooking = wantsBooking && hasModel && hasYear;
+    const jumpToBooking = (wantsBooking && hasModel && hasYear) || isRebook;
     const step3OldCar   = step3Complete && carYear > 0 && (currentYear - carYear) >= 10;
 
     let action: NextAction | undefined;
@@ -867,6 +894,7 @@ export async function POST(req: NextRequest) {
       dubai_datetime:   getDubaiDateTime(),
       dubai_tomorrow:   getDubaiTomorrow(),
       booking_slot:     getBookingSlot(),
+      rebooking:        isRebook ? `Customer is RESCHEDULING an existing booking (was: ${conversation.appointment_date ?? "?"} ${conversation.appointment_time ?? ""}). Confirm the new date/time and send the confirmation. Do NOT ask for name or number again.` : undefined,
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10,
       estimated_value:  valuation?.formatted ?? null,
@@ -930,7 +958,7 @@ export async function POST(req: NextRequest) {
     // — otherwise advance to appointment booking
     const stayAtSellMethod   = currentStep === 6 && SELL_METHOD_NOT_SURE.test(messageText)
       && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
-    const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
+    const nextStep = currentStep >= CLOSING_STEP ? (isRebook && !appointmentConfirmed ? FINAL_STEP : CLOSING_STEP)
       : (jumpToBooking && appointmentConfirmed) ? CLOSING_STEP
       : stayAtStep1        ? 1
       : stayAtMileageSpecs ? 4
