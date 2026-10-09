@@ -3,7 +3,7 @@ import { getOrCreateConversation, updateConversation, resetConversation, getConv
 import { getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
 import { createBiginContact, toIsoDate } from "@/lib/bigin";
-import { CAR_MODELS } from "@/lib/carData";
+import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +57,7 @@ const SELL_METHOD_NOT_SURE    = /\b(not sure|unsure|don.?t know|undecided|still 
 
 // Handoff detection — complex conversations that need a human
 // Explicit asks for a person only. Questions like "how does it work?" are answered by Kaya.
-const HANDOFF_SIGNALS = /\b(too many questions|call me|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|team)|real person|human agent)\b/i;
+const HANDOFF_SIGNALS = /\b(too many questions|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?]))|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|team)|real person|human agent)\b/i;
 
 // Special inquiry types
 const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
@@ -74,7 +74,8 @@ const CONDITION_PATTERN = /\b(accident|damage|damaged|dent|scratch|flood|fire|to
 // Insult detection
 // Real abuse only. Objections ("is this a scam?", "rubbish prices", "terrible offers") are NOT insults —
 // Kaya handles those as normal objections.
-const INSULT_PATTERN = /\b(stupid|idiot|dumb|moron|asshole|ass hole|bastard|bitch|fuck(?:ing|er)?|f\*+k|motherfucker|son of a bitch|dickhead|retard)\b/i;
+// Abuse aimed at Kaya/us only — frustrated swearing ("this is f***ing slow") is not an insult.
+const INSULT_PATTERN = /\b(you(\s+are|'re|re|r)?\s+(an?\s+|so\s+|such\s+an?\s+)?(stupid|idiot|dumb|moron|useless|retard\w*|asshole|bastard|bitch|dickhead|clown)|(fuck|f\*+k|screw)\s*(you|u|off|ur)|stfu|shut\s*up|son of a bitch|motherfucker|(stupid|idiot|dumb|useless|retarded)\s+(bot|ai|assistant|girl|company|people)|^\s*(idiot|stupid|moron|asshole|bitch|bastard)\s*[!.]*\s*$)/i;
 
 const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
@@ -95,13 +96,32 @@ function getDubaiTomorrow(): string {
   return `${DAYS[d.getUTCDay()]} ${date}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
 }
 
+// Words that are never a name: car makes/models, greetings, common replies
+const CAR_WORDS = new Set<string>([
+  ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
+  "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
+].map(w => String(w).toLowerCase()));
+const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old)$/i;
+
+function looksLikeName(candidate: string): boolean {
+  const words = candidate.trim().split(/\s+/);
+  if (words.some(w => NOT_A_NAME.test(w) || CAR_WORDS.has(w.toLowerCase()) || /\d/.test(w))) return false;
+  if (CAR_WORDS.has(candidate.trim().toLowerCase())) return false;
+  return true;
+}
+
 function extractNameFromMessage(text: string): string | null {
   const m = text.match(
-    /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|it'?s\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)?)/i
+    /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)?)/i
   );
-  if (m) return m[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
+  if (m) {
+    // keep only the leading name-like words ("Omar selling" → "Omar")
+    const words = m[1].trim().split(/\s+/).filter((w, i, arr) => looksLikeName(arr.slice(0, i + 1).join(" ")));
+    const nm = words.join(" ");
+    return nm && looksLikeName(nm) ? nm.replace(/\b\w/g, (c) => c.toUpperCase()) : null;
+  }
   const trimmed = text.trim();
-  if (/^[A-Za-z]+(?:\s+[A-Za-z]+)?$/.test(trimmed) && trimmed.length <= 30)
+  if (/^[A-Za-z]+(?:\s+[A-Za-z]+)?$/.test(trimmed) && trimmed.length <= 30 && looksLikeName(trimmed))
     return trimmed.replace(/\b\w/g, (c) => c.toUpperCase());
   return null;
 }
@@ -397,7 +417,16 @@ export async function POST(req: NextRequest) {
     // ── Location trigger ───────────────────────────────────────────
     const isLocationMessage = message.type === "location";
     const isLocationRequest = LOCATION_KEYWORDS.test(messageText);
-    if (isLocationMessage || isLocationRequest) {
+    // Other parts of the message besides the location request ("where are you? and is there parking")
+    const otherParts = isLocationRequest
+      ? messageText.split(/[?.!\n]+|\band\b|,/i).map(p => p.trim()).filter(p => p.length > 3 && !LOCATION_KEYWORDS.test(p))
+      : [];
+    const hasOtherQuestion = otherParts.some(p => /\b(do|does|can|could|is|are|will|how|what|which|when|why|parking|open|hours)\b/i.test(p));
+    if ((isLocationMessage || isLocationRequest) && hasOtherQuestion) {
+      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      messageText = otherParts.join(". ") + " (location pin already sent — don't send it again)";
+    } else if (isLocationMessage || isLocationRequest) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const convForLocation = await getOrCreateConversation(phone);
@@ -632,7 +661,8 @@ export async function POST(req: NextRequest) {
     const CANCEL = /\b(cancel|already sold|sold it|sold the car|don'?t need (it|the appointment)|not coming|won'?t (be )?com\w*|can'?t (make it|come)|call (it )?off)\b/i;
     const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can we make it|make it)\b/i;
     const lastAssistantMsg = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
-    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText);
+    const mentionsDayOrTime = new RegExp(`\\b${DAY}\\b|\\b${TIME}`, "i").test(messageText);
+    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText) && !mentionsDayOrTime;
     if (isCancel) {
       const reply = `No problem${conversation.name ? ", " + conversation.name : ""}, I've cancelled your appointment. If anything changes, just message us here.`;
       await sendWhatsAppMessage(phone, reply);
@@ -643,7 +673,7 @@ export async function POST(req: NextRequest) {
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
     const isRebook = currentStep >= CLOSING_STEP && hasBooking &&
-      (RESCHEDULE.test(messageText) || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg));
+      (RESCHEDULE.test(messageText) || mentionsDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg));
 
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
       try {
@@ -661,7 +691,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Capture alternative phone number if customer provides one at booking step
-      const phoneMatch = messageText.match(/(?:\+?971|0)?[5][0-9]\d{7}/);
+      const phoneMatch = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
       if (phoneMatch) {
         const rawPhone = phoneMatch[0].replace(/\D/g, "");
         const normalised = rawPhone.startsWith("971") ? rawPhone : `971${rawPhone.replace(/^0/, "")}`;
@@ -712,7 +742,7 @@ export async function POST(req: NextRequest) {
     // ── Customer asks for a real person → push now, then collect details ─────
     // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
     {
-      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me)\b/i;
+      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b/i;
       const HUMAN_LINE = "I'll have someone from our team contact you shortly.";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE));
@@ -897,7 +927,7 @@ export async function POST(req: NextRequest) {
 
     const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
     const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
-    const HUMAN_REQUEST   = /\b(call me|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|staff|team)|real person|human agent)\b/i;
+    const HUMAN_REQUEST   = /\b(call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?]))|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|staff|team)|real person|human agent)\b/i;
     const BOOKING_REFUSAL = /\b(no\s*,?\s*thanks?|no\s*,?\s*thank\s*you|not\s*interested|maybe\s*later|i'?ll\s*pass|don'?t\s*want\s*(to|it)|forget\s*it|not\s*for\s*me|leave\s*it|never\s*mind|nevermind|bye|goodbye)\b/i;
     const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
     const alreadyExplainedOptions = history.some(
