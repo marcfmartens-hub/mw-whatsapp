@@ -173,7 +173,7 @@ function buildDirectResponse(
       return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
     }
     case "ASK_MILEAGE_SPECS":
-      return `Got it${n}! 👌 Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
+      return `Got it${n}. Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
     case "ASK_SPECS":
       return `Got it${n}! Is it GCC or non-GCC specs?`;
     case "ASK_MORTGAGE":
