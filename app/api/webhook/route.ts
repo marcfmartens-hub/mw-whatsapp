@@ -259,19 +259,23 @@ function getBookingSlot(): string {
     const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
     return `${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
   };
-  // Today still possible if open and at least ~45 min before the last slot
-  if (OPEN[now.getUTCDay()] != null && mins <= 17 * 60 + 45) {
-    return `today (${fmt(now)}) — branch is open, last slot 18:30. Suggest coming in today.`;
-  }
+  const todayOpen = OPEN[now.getUTCDay()] != null && mins <= 17 * 60 + 45;
+  let nextLabel = "tomorrow", nextFull = "";
   for (let i = 1; i <= 7; i++) {
     const d = new Date(now.getTime() + i * 86400000);
-    const open = OPEN[d.getUTCDay()];
-    if (open != null) {
-      const when = i === 1 ? `tomorrow, ${fmt(d)}` : fmt(d);
-      return `${when} (opens ${open}:00) — too late for today. Suggest this day. Do NOT hand off to the team.`;
+    if (OPEN[d.getUTCDay()] != null) {
+      nextLabel = i === 1 ? "tomorrow" : `on ${DAYS[d.getUTCDay()]}`;
+      nextFull = `${fmt(d)}, opens ${OPEN[d.getUTCDay()]}:00`;
+      break;
     }
   }
-  return "the next opening day";
+  const todayWord = now.getUTCHours() < 12 ? "today" : "this afternoon";
+  const question = todayOpen
+    ? `What time can you come in ${todayWord} or ${nextLabel}?`
+    : `What time can you come in ${nextLabel}?`;
+  return `Ask exactly: "${question}" — always ask for a TIME, never a yes/no question. ` +
+    (todayOpen ? `Branch is open today until 19:00 (last slot 18:30). ` : `Too late for today. Do NOT hand off to the team. `) +
+    `Next opening day: ${nextFull}.`;
 }
 
 function getDubaiDateStr(): string {
@@ -368,7 +372,8 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const convForLocation = await getOrCreateConversation(phone);
       if ((convForLocation.step ?? 0) >= FINAL_STEP - 1) {
-        await sendWhatsAppMessage(phone, "What time works best for you to bring the car in?");
+        const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
+        await sendWhatsAppMessage(phone, q);
       }
       return NextResponse.json({ status: "location_sent" }, { status: 200 });
     }
