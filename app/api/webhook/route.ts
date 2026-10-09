@@ -344,6 +344,21 @@ function teamWhen(): string {
   return "shortly";
 }
 
+// "Perfect, Ali - you're booked for\n\n*Saturday 10th of October*\nat *6:30 PM*\n\nThe Mister Wheelz team will be in touch to confirm the details."
+function formatBookingConfirmation(name: string | null | undefined, dateRaw: string, timeRaw: string): string | null {
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : toIsoDate(dateRaw);
+  const t24 = toTime24(timeRaw);
+  if (!iso || !t24) return null;
+  const d = new Date(iso + "T12:00:00Z");
+  const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const n = d.getUTCDate();
+  const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+  const [h, m] = t24.split(":").map(Number);
+  const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+  return `Perfect${name ? ", " + name : ""} - you're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details.`;
+}
+
 function getDubaiDateStr(): string {
   const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
   const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -1542,8 +1557,19 @@ export async function POST(req: NextRequest) {
       (hasApptDateTime && /\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in|in touch)\b/i.test(reply))
     );
 
-    const replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
-    if (appointmentConfirmedEarly && replyParts.length > 0) {
+    let replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
+    if (appointmentConfirmedEarly) {
+      // Fixed confirmation format (car summary from Kaya stays as the first message, if she sent one)
+      const conf = formatBookingConfirmation(
+        (coreUpdates as any).name ?? conversation.name,
+        String(apptDate || conversation.appointment_date || ""),
+        String(apptTime || conversation.appointment_time || ""),
+      );
+      if (conf) {
+        const summary = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
+        replyParts = [...(summary ? [summary] : []), conf];
+        reply = replyParts.join("\n[SPLIT]\n");
+      }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     for (const part of replyParts) {
