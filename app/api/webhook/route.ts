@@ -694,7 +694,7 @@ export async function POST(req: NextRequest) {
     // ── Customer asks for a real person → push now, then collect details ─────
     // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
     {
-      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+)?(real\s+)?(someone|somebody|person|human|agent|manager|staff|team|people)|real person|human agent|call me|actual person)\b/i;
+      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me)\b/i;
       const HUMAN_LINE = "I'll have someone from our team contact you shortly.";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE));
