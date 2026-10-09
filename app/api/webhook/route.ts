@@ -171,6 +171,7 @@ async function pushLead(
       /Prefers WhatsApp/.test(notesAll) ? "Prefers WhatsApp — no phone calls." : "",
       /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
       notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
+      notesAll.match(/Competitor offer \(customer says, unverified\): [^|]+/)?.[0]?.trim() ?? "",
     ].filter(Boolean).join("\n");
     const summary = [opts.topNote ?? "", buyerNote, otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
     const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
@@ -570,19 +571,18 @@ export async function POST(req: NextRequest) {
       conversation.phone_number = phone;
     }
 
-    // Insult detection — track count and close after second insult
+    // Insult detection — first insult = obvious frustration → team handoff (below); second → close
+    let frustratedByInsult = false;
     if (INSULT_PATTERN.test(messageText)) {
       const insultCount = ((conversation as any).insult_count ?? 0) + 1;
       await updateConversation(phone, { insult_count: insultCount } as any);
       if (insultCount >= 2) {
         // Second insult — close conversation and hand off
-        await sendWhatsAppMessage(phone, "I'm going to pass you on to one of our team members who can assist you better. Take care.");
+        await sendWhatsAppMessage(phone, `I'm going to pass you on to one of our team members — they'll call you ${teamWhen()}. Take care.`);
         await pushLead(phone, "insult close", { salesInquiry: "Other", milestone: "FOLLOW UP" });
         return NextResponse.json({ status: "closed_insult" }, { status: 200 });
       } else {
-        // First insult — respond with empathy
-        await sendWhatsAppMessage(phone, "I understand, we all have frustrating moments sometimes. I'm here to help whenever you're ready.");
-        return NextResponse.json({ status: "insult_warned" }, { status: 200 });
+        frustratedByInsult = true;
       }
     }
 
@@ -1182,6 +1182,36 @@ export async function POST(req: NextRequest) {
                                   || conversation.specs === "Unknown");
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
 
+    // ── Number given after a callback promise (chat closed) → save it ─────────
+    if (currentStep >= CLOSING_STEP) {
+      const lastA = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+      if (/best (number )?to reach you/i.test(lastA)) {
+        const pm = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+        if (pm) {
+          const raw = pm[0].replace(/\D/g, "");
+          const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+          if (alt !== phone) await updateConversation(phone, { alternative_phone: alt } as any).catch(() => {});
+        }
+      }
+    }
+
+    // ── Competitor offer ("Carswitch offered me 120k") → notes, marked unverified ──
+    {
+      const cm = messageText.match(/\b(carswitch|cars24|dubizzle|alba|emirates auction|cartrade|kavak|another (company|buyer|dealer|showroom)|other (companies|company|buyers|buyer|dealers|dealer|showrooms?)|they|someone|a dealer|a showroom)\b.{0,40}?\b(offered|offer|gave|quoted|pay|paying|said)\b.{0,20}?(\d[\d,.]*\s*(k|thousand)?)/i);
+      if (cm) {
+        const raw = cm[5].replace(/,/g, "").trim();
+        let n = parseFloat(raw); if (/k|thousand/i.test(raw)) n *= 1000;
+        const isYear = !/k|thousand/i.test(raw) && /^(19[89]\d|20[0-3]\d)$/.test(raw);
+        if (n >= 1000 && !isYear) {
+          const note = `Competitor offer (customer says, unverified): AED ${Math.round(n).toLocaleString("en-US")} — ${cm[1]}`;
+          const ex = String((conversation as any).car_conditions ?? "").split(" | ").filter(x => x && !x.startsWith("Competitor offer"));
+          const upd = [...ex, note].join(" | ");
+          (conversation as any).car_conditions = upd;
+          await updateConversation(phone, { car_conditions: upd } as any).catch(() => {});
+        }
+      }
+    }
+
     // ── Expected price ("I want at least 180k") → notes for the team ─────────
     {
       const ep = messageText.match(/\b(want|expect|expecting|looking for|asking|need|at least|minimum|min|not less than|no less than)\b[^0-9]{0,20}(\d[\d,.]*\s*(k|thousand)?)\s*(aed|dhs|dirhams?)?/i);
@@ -1256,7 +1286,16 @@ export async function POST(req: NextRequest) {
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE))
         || String((conversation as any).car_conditions ?? "").includes("Asked to speak to the team");
-      const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText));
+      // Obvious frustration → stop asking questions, hand over to the team
+      const PRICE_WORDS = /\b(price|number|offer|quote|how much|worth|value|amount|pay)\b/i;
+      const letters = messageText.replace(/[^A-Za-z]/g, "");
+      const shouting = letters.length >= 8 && letters.replace(/[^A-Z]/g, "").length / letters.length >= 0.7;
+      const FRUSTRATION_PHRASES = /(!!+|\?\?+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
+      const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
+      const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
+        || (PRICE_WORDS.test(messageText) && priorPriceAsks >= 2);
+      const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP
+        && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText) || frustrated);
       if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
         const vDb = vehicleDbFields(vehicleUpdates);
         const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
@@ -1284,11 +1323,17 @@ export async function POST(req: NextRequest) {
 
         let nextQ: string | null = null;
         if (missingCar) nextQ = missingCar === "make" ? "In the meantime, could you share the make, model and year of your car?" : `Could you share the ${missingCar} of the car?`;
-        else if (!topicDone) nextQ = "What would you like to discuss with the team?";
+        else if (!topicDone && !(firstAsk && frustrated)) nextQ = "What would you like to discuss with the team?";
         else if (!phoneAsked) nextQ = "Which UAE number is best to reach you on?";
 
         const parts: string[] = [];
-        if (firstAsk) {
+        if (firstAsk && frustrated) {
+          parts.push(`I understand${c.name ? ", " + c.name : ""}. ${HUMAN_LINE} ${teamWhen()}.`);
+          const topic = PRICE_WORDS.test(messageText) || priorPriceAsks > 0 ? "price — customer was frustrated (pushing for a price)" : "customer was frustrated";
+          if (!conditions.includes("Wants to discuss:")) conditions = conditions ? `${conditions} | Wants to discuss: ${topic}` : `Wants to discuss: ${topic}`;
+          if (!conditions.includes("Asked to speak to the team")) conditions = `${conditions} | Asked to speak to the team`;
+          updates.car_conditions = conditions;
+        } else if (firstAsk) {
           parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE} ${teamWhen()}.`);
           if (!conditions.includes("Asked to speak to the team")) {
             conditions = conditions ? `${conditions} | Asked to speak to the team` : "Asked to speak to the team";
@@ -1527,7 +1572,7 @@ export async function POST(req: NextRequest) {
     console.log(`[kaya] step=${currentStep} action=${action?.type ?? "none"}`);
 
     // Customer asked something during a hardcoded step → let Kaya answer it first, then ask the step question
-    const ASKED_QUESTION = /\?|\b(do|does|can|could|will|would|are|is)\s+(you|u|it|they|there|this)\b|\b(how|what|whats|what's|where|why|which|when)\b/i;
+    const ASKED_QUESTION = /\?|\b(do|does|can|could|will|would|are|is)\s+(you|u|it|they|there|this)\b|\b(how|what|whats|what's|where|why|which|when)\b|\b(price|number|offer|quote|how much|worth)\b/i;
     const customerAsked = !!action && action.type !== "OFFER_CALLBACK" && currentStep >= 1 && ASKED_QUESTION.test(messageText);
     if (customerAsked) (knownFields as any).answer_question_first = true;
     let reply = action && !customerAsked
@@ -1635,7 +1680,10 @@ export async function POST(req: NextRequest) {
     const stayAtSellMethod   = currentStep === 6 && /\b(difference|explain|what'?s the|how does|which is better|options?)\b/i.test(messageText)
       && !/\b(not sure|unsure|don'?t know|undecided|no idea|think about it|either)\b/i.test(messageText)
       && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
-    const nextStep = currentStep >= CLOSING_STEP ? (isRebook && !appointmentConfirmed ? FINAL_STEP : CLOSING_STEP)
+    const promisedCallback = !appointmentConfirmed && currentStep >= 5 &&
+      /\b(team|someone)\b[^.]{0,60}\b(be in touch|reach out|call you|contact you|get back to you)/i.test(reply);
+    const nextStep = promisedCallback ? CLOSING_STEP
+      : currentStep >= CLOSING_STEP ? (isRebook && !appointmentConfirmed ? FINAL_STEP : CLOSING_STEP)
       : (jumpToBooking && appointmentConfirmed) ? CLOSING_STEP
       : stayAtStep1        ? 1
       : stayAtMileageSpecs ? 4
