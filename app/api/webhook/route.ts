@@ -156,6 +156,18 @@ async function appendHistory(phone: string, history: ConversationMessage[], user
   } as any).catch(() => {});
 }
 
+// Only real table columns — extractor extras like typo_check made the whole save fail,
+// so make/model/year/mileage/specs never reached the DB (or Bigin).
+function vehicleDbFields(v: VehicleFields): Partial<Conversation> {
+  const out: Partial<Conversation> = {};
+  for (const k of ["make", "model", "year", "mileage", "specs"] as const) {
+    const val = v[k];
+    if (val && val !== "Unknown") (out as any)[k] = val;
+    else if (k === "specs" && val === "Unknown") out.specs = "Unknown";
+  }
+  return out;
+}
+
 type NextAction =
   | { type: "ASK_NAME" }
   | { type: "ASK_UAE_PHONE" }
@@ -608,7 +620,7 @@ export async function POST(req: NextRequest) {
         : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks, I've got everything I need — our team will be in touch shortly.`;
 
       await sendWhatsAppMessage(phone, handoffMsg);
-      if (Object.keys(vehicleUpdates).length > 0) await updateConversation(phone, vehicleUpdates as any).catch(() => {});
+      if (Object.keys(vehicleDbFields(vehicleUpdates)).length) await updateConversation(phone, vehicleDbFields(vehicleUpdates)).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, handoffMsg);
       await pushLead(phone, "non-GCC follow-up", { salesInquiry: "Other" });
       return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
@@ -816,9 +828,9 @@ export async function POST(req: NextRequest) {
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
 
-    if (Object.keys(vehicleUpdates).length > 0) {
+    if (Object.keys(vehicleDbFields(vehicleUpdates)).length > 0) {
       try {
-        await updateConversation(phone, vehicleUpdates as Partial<Conversation>);
+        await updateConversation(phone, vehicleDbFields(vehicleUpdates));
       } catch (e) {
         console.error("vehicleUpdates save error (non-fatal):", e);
       }
