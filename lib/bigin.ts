@@ -177,6 +177,29 @@ function adaptRecord(record: Record<string, string>, fields: FieldMeta[] | null)
   return out;
 }
 
+// ── Red tags for records that need attention (existing customer) ──
+const TAG_RED = "#F17574";
+const ensuredTags = new Set<string>();
+async function ensureRedTag(name: string, headers: Record<string, string>) {
+  if (ensuredTags.has(name)) return;
+  try {
+    const r = await fetch("https://www.zohoapis.com/bigin/v1/settings/tags?module=Contacts", {
+      method: "POST", headers, body: JSON.stringify({ tags: [{ name, color_code: TAG_RED }] }),
+    });
+    const t = await r.text();
+    if (!r.ok && !/DUPLICATE|already/i.test(t)) console.warn(`[Bigin] create tag ${name}:`, r.status, t);
+  } catch (e) { console.warn("[Bigin] create tag error:", e); }
+  ensuredTags.add(name);
+}
+async function tagRecord(id: string, name: string, headers: Record<string, string>) {
+  await ensureRedTag(name, headers);
+  try {
+    const r = await fetch(`https://www.zohoapis.com/bigin/v1/Contacts/${id}/actions/add_tags?tag_names=${encodeURIComponent(name)}&over_write=false`, { method: "POST", headers });
+    const t = await r.text();
+    console.log(`[Bigin] tag ${name} on ${id}:`, r.status, t.slice(0, 300));
+  } catch (e) { console.warn("[Bigin] add tag error:", e); }
+}
+
 // Valid Bigin Sales_Inquiry picklist values
 const VALID_SALES_INQUIRY = new Set([
   "Cash Deal",
@@ -271,19 +294,30 @@ export async function createBiginContact(
 
     // Upsert: find existing contact by the WhatsApp number, update it; otherwise create.
     // Lets us push at every milestone (follow-up, booking, timeout) without duplicates.
-    // force_new (reschedule / cancel): always a fresh record so it shows up in the pipeline.
-    // Otherwise update the NEWEST record for this number (so updates follow the latest copy).
+    // Milestones (booking, reschedule, cancel, follow-up) → always a NEW record so it shows up in
+    // the pipeline. If the customer already exists, the new record gets a red tag + a note on top.
+    // Other pushes (12-min silence, details completed) update the newest record for this number.
+    const milestone = (conversation as any).milestone_tag as string | undefined;
     let existingId: string | null = null;
-    if (conversationPhone && !(conversation as any).force_new) {
+    let applyTag: string | null = null;
+    let rows: any[] = [];
+    if (conversationPhone) {
       const sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(conversationPhone)}`, { headers });
       if (sr.status === 200) {
         const sj = await sr.json().catch(() => null);
-        const rows: any[] = Array.isArray(sj?.data) ? sj.data : [];
+        rows = Array.isArray(sj?.data) ? sj.data : [];
         rows.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
-        existingId = rows[0]?.id ?? null;
       } else if (sr.status !== 204) {
         console.warn("[Bigin] search failed:", sr.status, await sr.text().catch(() => ""));
       }
+    }
+    if (milestone) {
+      if (rows.length > 0) {
+        applyTag = milestone;
+        record["Inquiry_Summary"] = `[${milestone}] Existing customer — needs attention.\n\n${record["Inquiry_Summary"] ?? ""}`.trim();
+      }
+    } else {
+      existingId = rows[0]?.id ?? null;
     }
 
     const fields = await getContactFields(accessToken);
@@ -299,6 +333,7 @@ export async function createBiginContact(
     // If Bigin rejects a field (INVALID_DATA etc.), drop just that field and retry —
     // one bad value must never cost us the whole record.
     let text = "";
+    let savedId: string | null = null;
     for (let tries = 0; tries < 6; tries++) {
       const body = JSON.stringify({ data: [existingId ? { id: existingId, ...data } : data] });
       console.log(`[Bigin] ${existingId ? "updating " + existingId : "creating"}:`, body);
@@ -306,7 +341,7 @@ export async function createBiginContact(
       text = await res.text();
       const result = (() => { try { return JSON.parse(text); } catch { return null; } })();
       const row = result?.data?.[0];
-      if (res.ok && (!row?.status || row.status === "success")) break;
+      if (res.ok && (!row?.status || row.status === "success")) { savedId = row?.details?.id ?? existingId; break; }
       const bad = row?.details?.api_name as string | undefined;
       if (bad && bad in data) {
         console.warn(`[Bigin] field ${bad} rejected (${row?.code}: ${row?.message}) — retrying without it`);
@@ -316,6 +351,7 @@ export async function createBiginContact(
       throw new Error(`Bigin ${existingId ? "update" : "create"} failed: ${res.status} ${text}`);
     }
     console.log(`[Bigin] contact ${existingId ? "updated" : "created"}:`, text);
+    if (applyTag && savedId) await tagRecord(savedId, applyTag, headers);
     return true;
   } catch (error) {
     if (attempt < 3) {

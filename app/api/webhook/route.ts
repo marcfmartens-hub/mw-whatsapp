@@ -154,7 +154,9 @@ async function pushLead(
   phone: string,
   reason: string,
   opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string; clearAppointment?: boolean;
-          newCopy?: boolean; topNote?: string } = {}
+          topNote?: string;
+          // Milestone → new record in Bigin; red tag if the customer already exists there
+          milestone?: "DUPLICATE" | "RESCHEDULE" | "CANCEL" | "FOLLOW UP" } = {}
 ): Promise<void> {
   try {
     const latest = await getConversation(phone);
@@ -181,7 +183,7 @@ async function pushLead(
       inspection_booked: booked,
       inquiry_summary: summary,
       clear_appointment: opts.clearAppointment ?? false,
-      force_new: opts.newCopy ?? false,   // reschedule / cancel → new record so it shows up in the pipeline
+      milestone_tag: opts.milestone,
     } as any);
     if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
     if (summary) await updateConversation(phone, { inquiry_summary: summary } as any).catch(() => {});
@@ -575,7 +577,7 @@ export async function POST(req: NextRequest) {
       if (insultCount >= 2) {
         // Second insult — close conversation and hand off
         await sendWhatsAppMessage(phone, "I'm going to pass you on to one of our team members who can assist you better. Take care.");
-        await pushLead(phone, "insult close", { salesInquiry: "Other" });
+        await pushLead(phone, "insult close", { salesInquiry: "Other", milestone: "FOLLOW UP" });
         return NextResponse.json({ status: "closed_insult" }, { status: 200 });
       } else {
         // First insult — respond with empathy
@@ -778,7 +780,7 @@ export async function POST(req: NextRequest) {
           await sendWhatsAppMessage(phone, reply);
           await updateConversation(phone, { last_message_at: new Date().toISOString() } as any).catch(() => {});
           await appendHistory(phone, histB, messageText, reply);
-          await pushLead(phone, "buyer", { salesInquiry: "Other", inspectionBooked: false });
+          await pushLead(phone, "buyer", { salesInquiry: "Other", inspectionBooked: false, milestone: "FOLLOW UP" });
           return NextResponse.json({ status: "buyer" }, { status: 200 });
         }
       } else if (BUY_INTENT.test(messageText) && (conversation.step ?? 0) < CLOSING_STEP && !notesB.includes("Trade-in:")) {
@@ -1016,7 +1018,7 @@ export async function POST(req: NextRequest) {
         await updateConversation(phone, { step: updates.step, car_conditions: notes || null } as any).catch(() => {});
       });
       await appendHistory(phone, hist, messageText, reply);
-      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "multiple cars" : "multiple cars — details complete", { salesInquiry: "Other", inspectionBooked: false });
+      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "multiple cars" : "multiple cars — details complete", { salesInquiry: "Other", inspectionBooked: false, milestone: firstTime ? "FOLLOW UP" : undefined });
       return NextResponse.json({ status: "multi_cars" }, { status: 200 });
     }
 
@@ -1090,7 +1092,7 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, { appointment_date: null, appointment_time: null, step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
       await pushLead(phone, "appointment cancelled", {
-        inspectionBooked: false, clearAppointment: true, newCopy: true,
+        inspectionBooked: false, clearAppointment: true, milestone: "CANCEL",
         topNote: `CANCELLED — appointment on ${apptLabel(conversation.appointment_date, conversation.appointment_time)} was cancelled by the customer.`,
       });
       return NextResponse.json({ status: "cancelled" }, { status: 200 });
@@ -1240,7 +1242,7 @@ export async function POST(req: NextRequest) {
         await sendWhatsAppMessage(phone, reply);
         await updateConversation(phone, upd as any).catch(e => console.error("hiyaza save error:", e));
         await appendHistory(phone, hist, messageText, reply);
-        if (!inHz || !nextQ) await pushLead(phone, !inHz ? "hiyaza handoff" : "hiyaza — details complete", { salesInquiry: "Other", inspectionBooked: false });
+        if (!inHz || !nextQ) await pushLead(phone, !inHz ? "hiyaza handoff" : "hiyaza — details complete", { salesInquiry: "Other", inspectionBooked: false, milestone: !inHz ? "FOLLOW UP" : undefined });
         return NextResponse.json({ status: "hiyaza" }, { status: 200 });
       }
     }
@@ -1300,7 +1302,7 @@ export async function POST(req: NextRequest) {
         await updateConversation(phone, updates as any).catch(e => console.error("human handoff save error:", e));
         await appendHistory(phone, hist, messageText, parts.join("\n\n"));
         // Push immediately on the request, and again once details are complete
-        if (firstAsk || !nextQ) await pushLead(phone, firstAsk ? "asked for a person" : "person request — details complete", { salesInquiry: "Other", inspectionBooked: false });
+        if (firstAsk || !nextQ) await pushLead(phone, firstAsk ? "asked for a person" : "person request — details complete", { salesInquiry: "Other", inspectionBooked: false, milestone: firstAsk ? "FOLLOW UP" : undefined });
         return NextResponse.json({ status: "human_handoff" }, { status: 200 });
       }
     }
@@ -1379,7 +1381,7 @@ export async function POST(req: NextRequest) {
       await appendHistory(phone, hist, messageText, parts.join("\n\n"));
 
       // Push at the handoff (so the team sees it right away) and again when complete
-      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "non-GCC handoff" : "non-GCC complete", { salesInquiry: nowHasMethod ? undefined : "Other", inspectionBooked: false });
+      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "non-GCC handoff" : "non-GCC complete", { salesInquiry: nowHasMethod ? undefined : "Other", inspectionBooked: false, milestone: firstTime ? "FOLLOW UP" : undefined });
       return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
     }
 
@@ -1685,13 +1687,18 @@ export async function POST(req: NextRequest) {
       const rescheduled = isRebook && hasBooking;
       await pushLead(phone, rescheduled ? "booking rescheduled" : "booking confirmed", {
         salesInquiry, inspectionBooked: true, altPhone,
+        milestone: rescheduled ? "RESCHEDULE" : "DUPLICATE",
         ...(rescheduled ? {
-          newCopy: true,
           topNote: `RESCHEDULED — was ${apptLabel(conversation.appointment_date, conversation.appointment_time)}, now ${apptLabel(apptDate, apptTime)}.`,
         } : {}),
       });
     } else if (teamFollowUp) {
-      await pushLead(phone, "team follow-up", { salesInquiry: pricePushCount > 0 || PRICE_PUSH.test(messageText) ? "Price Offer Inquiry" : undefined });
+      // Only the first follow-up promise in this chat is a new record; later ones update it
+      const priorFollowUp = history.some(m => m.role === "assistant" && TEAM_FOLLOWUP.test(m.content));
+      await pushLead(phone, "team follow-up", {
+        salesInquiry: pricePushCount > 0 || PRICE_PUSH.test(messageText) ? "Price Offer Inquiry" : undefined,
+        milestone: priorFollowUp ? undefined : "FOLLOW UP",
+      });
     }
 
     return NextResponse.json({ status: "ok" }, { status: 200 });
