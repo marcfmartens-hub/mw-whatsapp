@@ -599,40 +599,77 @@ export async function POST(req: NextRequest) {
                                   || conversation.specs === "Unknown");
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
 
-    // ── Non-GCC / imported specs redirect ─────────────────────────────────────
-    // When specs are confirmed as Non-GCC, skip appointment booking and hand off
-    // to the purchase team. Collect remaining info then push to Bigin.
+    // ── Non-GCC / imported specs → team handoff + collect the rest ────────────
+    // 1) Handoff message  2) one question at a time: missing car details →
+    //    "when are you planning to sell?" → cash vs consignment (cars ≤ 8 yrs)
+    // 3) close and push to Bigin. No appointment booking.
     const isNonGcc = carSpecs === "Non-GCC";
     const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
-    if (isNonGcc && !alreadyHandedOff && currentStep >= 4) {
-      // Save the non_gcc_handoff flag so this only fires once
-      await updateConversation(phone, { non_gcc_handoff: true } as any).catch(() => {});
+    if (((isNonGcc && currentStep >= 2) || alreadyHandedOff) && currentStep < CLOSING_STEP) {
+      const firstTime = !alreadyHandedOff;
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const vDb = vehicleDbFields(vehicleUpdates);
+      const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
+      if (firstTime) updates.non_gcc_handoff = true;
 
-      // Check if we still need name / remaining vehicle info
-      const missingInfo: string[] = [];
-      const resolvedMake    = vehicleUpdates.make    ?? conversation.make;
-      const resolvedModel   = vehicleUpdates.model   ?? conversation.model;
-      const resolvedYear    = vehicleUpdates.year    ?? conversation.year;
-      const resolvedMileage = vehicleUpdates.mileage ?? conversation.mileage;
-      if (!resolvedMake)    missingInfo.push("make");
-      if (!resolvedModel)   missingInfo.push("model");
-      if (!resolvedYear)    missingInfo.push("year");
-      if (!resolvedMileage) missingInfo.push("mileage");
+      const c = { ...conversation, ...vDb } as any;
+      const age = c.year ? currentYear - parseInt(c.year, 10) : 99;
+      let tl: string = c.sell_timeline ?? "";
+      const hasTimeline = !!tl.replace(/\s*\|?\s*sell_method:\w+/, "").trim();
+      const hasMethod   = /sell_method:/.test(tl);
+      const missingCar  = (["make", "model", "year", "mileage"] as const).find(k => !c[k] || c[k] === "Unknown");
 
-      const nextQ = missingInfo.length > 0
-        ? `Could you also share the ${missingInfo[0]} of the car?`
-        : !conversation.name
-          ? "And may I know your name?"
-          : null;
+      // Save this message as the answer to the question we asked last time
+      let explainMethod = false;
+      if (!firstTime && !missingCar) {
+        if (!hasTimeline) {
+          tl = messageText + (hasMethod ? ` | ${tl}` : "");
+        } else if (!hasMethod && age <= 8) {
+          if (/\b(difference|what.?s|explain|how does|which is better)\b/i.test(messageText) && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText)) {
+            explainMethod = true;
+          } else {
+            const m = SELL_METHOD_CASH.test(messageText) ? "cash"
+              : SELL_METHOD_CONSIGNMENT.test(messageText) ? "consignment" : "not_sure";
+            tl = `${tl} | sell_method:${m}`;
+          }
+        }
+        updates.sell_timeline = tl || null;
+      }
 
-      const handoffMsg = nextQ
-        ? `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team reach out to you directly to discuss this. ${nextQ}`
-        : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks, I've got everything I need — our team will be in touch shortly.`;
+      // Number confirmation is always the last question
+      const PHONE_Q = "Is this the best number to reach you on, or would you prefer a different one?";
+      const lastAssistant = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const phoneAskedBefore = hist.some(m => m.role === "assistant" && m.content.includes("best number to reach you"));
+      if (!firstTime && lastAssistant.includes("best number to reach you")) {
+        const pm = messageText.match(/(?:\+?971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+        if (pm) {
+          const raw = pm[0].replace(/\D/g, "");
+          const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+          if (alt !== phone) updates.alternative_phone = alt;
+        }
+      }
 
-      await sendWhatsAppMessage(phone, handoffMsg);
-      if (Object.keys(vehicleDbFields(vehicleUpdates)).length) await updateConversation(phone, vehicleDbFields(vehicleUpdates)).catch(() => {});
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, handoffMsg);
-      await pushLead(phone, "non-GCC follow-up", { salesInquiry: "Other" });
+      // Decide the next question
+      const nowHasTimeline = !!tl.replace(/\s*\|?\s*sell_method:\w+/, "").trim();
+      const nowHasMethod   = /sell_method:/.test(tl);
+      let nextQ: string | null = null;
+      if (missingCar) nextQ = `Just to have your information complete — could you share the ${missingCar} of the car?`;
+      else if (!nowHasTimeline) nextQ = "Just to have your information complete — when are you planning to sell it?";
+      else if (explainMethod) nextQ = "With a direct cash sale we buy it and pay you on the spot. With consignment we sell it on your behalf at market price — usually a better return, but it takes 2–4 weeks. Which would you prefer?";
+      else if (!nowHasMethod && age <= 8) nextQ = "Would you like to sell it for direct cash, or with consignment?";
+      else if (!phoneAskedBefore) nextQ = PHONE_Q;
+
+      const parts: string[] = [];
+      if (firstTime) parts.push("Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly.");
+      parts.push(nextQ ?? "Thanks, I've got everything I need. Our team will be in touch shortly. Have a nice day!");
+
+      for (const part of parts) await sendWhatsAppMessage(phone, part);
+      if (!nextQ) updates.step = CLOSING_STEP;
+      await updateConversation(phone, updates as any).catch(e => console.error("non-GCC save error:", e));
+      await appendHistory(phone, hist, messageText, parts.join("\n\n"));
+
+      // Push at the handoff (so the team sees it right away) and again when complete
+      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "non-GCC handoff" : "non-GCC complete", { salesInquiry: nowHasMethod ? undefined : "Other", inspectionBooked: false });
       return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
     }
 
