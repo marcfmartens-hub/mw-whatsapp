@@ -197,7 +197,7 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   // so the model doesn't have to cross-reference context sections
   if (known.next_action) {
     instruction = known.answer_question_first
-      ? `The customer asked a question. First answer it in ONE short sentence using the knowledge base. If it's about price: never give a number — if the WHY hasn't been said yet in this chat, say "We need the inspection report with the full condition of the car to give you the final price, and the inspection only takes 10–15 minutes."; if it has, just say they get the final price at the inspection. Then: ${known.next_action}
+      ? `The customer asked a question. First answer it in ONE short sentence using the knowledge base. If it's about price: never give a number — if the WHY hasn't been said yet in this chat, say EXACTLY: "We buy cars to resell locally and for export, so to give you the final price we really need an inspection report with the full condition of the car. The inspection only takes 10–15 minutes."; if it has, just say they get the final price at the inspection. Then: ${known.next_action}
 
 Keep the whole reply to 2–3 sentences. Do NOT ask anything else.`
       : `Your ONLY task right now: ${known.next_action}
@@ -332,6 +332,7 @@ First time they ask:
 
 Second time they push (still asking for price / refusing to come in):
   - Do NOT repeat the appointment redirect.
+  - Start with ONE short line recalling the reason: "As mentioned, our final price depends on the full inspection report, because we resell locally and for export."
   - Pivot to consignment BEFORE they lose interest: "I get it — there's actually another option that might suit you better. With consignment, we sell the car on your behalf at the price you want. You're not forced to accept a cash offer on the spot."
   - Ask: "Would that work for you, or are you set on a cash sale only?"
 
