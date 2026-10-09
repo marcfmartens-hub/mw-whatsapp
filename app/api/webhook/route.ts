@@ -691,6 +691,58 @@ export async function POST(req: NextRequest) {
                                   || conversation.specs === "Unknown");
     const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
 
+    // ── Customer asks for a real person → push now, then collect details ─────
+    // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
+    {
+      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+)?(real\s+)?(someone|somebody|person|human|agent|manager|staff|team|people)|real person|human agent|call me|actual person)\b/i;
+      const HUMAN_LINE = "I'll have someone from our team contact you shortly.";
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE));
+      const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP && HUMAN_ASK.test(messageText);
+      if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
+        const vDb = vehicleDbFields(vehicleUpdates);
+        const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
+        const c = { ...conversation, ...vDb } as any;
+        let conditions: string = c.car_conditions ?? "";
+        const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+
+        // Save answers to the questions asked last time
+        if (!firstAsk && /what would you like to discuss/i.test(lastA)) {
+          conditions = conditions ? `${conditions} | Wants to discuss: ${messageText}` : `Wants to discuss: ${messageText}`;
+          updates.car_conditions = conditions;
+        }
+        if (!firstAsk && /best (number )?to reach you/i.test(lastA)) {
+          const pm = messageText.match(/(?:\+?971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+          if (pm) {
+            const raw = pm[0].replace(/\D/g, "");
+            const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+            if (alt !== phone) updates.alternative_phone = alt;
+          }
+        }
+
+        const missingCar = (["make", "model", "year"] as const).find(k => !c[k] || c[k] === "Unknown");
+        const topicDone  = /Wants to discuss:/.test(conditions);
+        const phoneAsked = hist.some(m => m.role === "assistant" && /best (number )?to reach you/i.test(m.content));
+
+        let nextQ: string | null = null;
+        if (missingCar) nextQ = missingCar === "make" ? "In the meantime, could you share the make, model and year of your car?" : `Could you share the ${missingCar} of the car?`;
+        else if (!topicDone) nextQ = "What would you like to discuss with the team?";
+        else if (!phoneAsked) nextQ = "Which UAE number is best to reach you on?";
+
+        const parts: string[] = [];
+        if (firstAsk) parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE}`);
+        parts.push(nextQ ?? "Thanks, I've passed everything on. Our team will be in touch shortly. Have a nice day!");
+
+        for (const part of parts) await sendWhatsAppMessage(phone, part);
+        if (!nextQ) updates.step = CLOSING_STEP;
+        await updateConversation(phone, updates as any).catch(e => console.error("human handoff save error:", e));
+        await appendHistory(phone, hist, messageText, parts.join("\n\n"));
+        // Push immediately on the request, and again once details are complete
+        if (firstAsk || !nextQ) await pushLead(phone, firstAsk ? "asked for a person" : "person request — details complete", { salesInquiry: "Other", inspectionBooked: false });
+        return NextResponse.json({ status: "human_handoff" }, { status: 200 });
+      }
+    }
+
     // ── Non-GCC / imported specs → team handoff + collect the rest ────────────
     // 1) Handoff message  2) one question at a time: missing car details →
     //    "when are you planning to sell?" → cash vs consignment (cars ≤ 8 yrs)
