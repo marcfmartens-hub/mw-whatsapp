@@ -331,7 +331,7 @@ function teamWhen(): string {
   const now = new Date(Date.now() + 4 * 60 * 60 * 1000);
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
   const todayOpen = OPEN[now.getUTCDay()];
-  if (todayOpen != null && mins >= todayOpen * 60 && mins < 19 * 60) return "shortly";
+  if (todayOpen != null && mins >= todayOpen * 60 && mins < 18 * 60 + 30) return "shortly";
   if (todayOpen != null && mins < todayOpen * 60) return todayOpen === 12 ? "today from 12:00" : "this morning";
   for (let i = 1; i <= 7; i++) {
     const d = new Date(now.getTime() + i * 86400000);
@@ -512,7 +512,7 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, {
         step: carDesc ? CLOSING_STEP : 2,            // CLOSING + the question above = waiting for same/different
         car_conditions: String(c.car_conditions ?? "").split(" | ")
-          .filter((n: string) => n && !/^(Multiple cars:|HIYAZA:|BUYER:|Asked to speak to the team|Wants to buy:|Wants to discuss:|Best time to call:)/.test(n)).join(" | ") || null,
+          .filter((n: string) => n && !/^(OPTED OUT:|Multiple cars:|HIYAZA:|BUYER:|Asked to speak to the team|Wants to buy:|Wants to discuss:|Best time to call:)/.test(n)).join(" | ") || null,
         ...(c.appointment_date && String(c.appointment_date) < new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10)
           ? { appointment_date: null, appointment_time: null, appointment: null } : {}),
         bigin_pushed_at: null, last_msg_id: message.id, last_message_at: new Date().toISOString(),
@@ -816,6 +816,10 @@ export async function POST(req: NextRequest) {
 
     // Name given later in the chat ("my name is Louise") — save it if we don't have one yet.
     // Only explicit phrases here; bare words would catch things like "Cash" or "Tomorrow".
+    if (conversation.name && /\b(actually|sorry|correction|not)\b/i.test(messageText) && /\b(my\s+name|name\s+is|name'?s|call\s+me)\b/i.test(messageText)) {
+      const n = extractNameFromMessage(messageText.replace(/\b(actually|sorry|correction)\b,?\s*/gi, ""));
+      if (n && n.toLowerCase() !== String(conversation.name).toLowerCase()) (coreUpdates as any).name = n;
+    }
     if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
       const lastAskedName = [...((conversation.messages ?? []) as ConversationMessage[])].reverse()
         .find(m => m.role === "assistant")?.content ?? "";
@@ -860,8 +864,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (alreadyKnown.mileage && vehicleUpdates.mileage) delete vehicleUpdates.mileage;
-    if (alreadyKnown.specs   && vehicleUpdates.specs)   delete vehicleUpdates.specs;
+    // Saved mileage/specs are only overwritten when the customer is correcting them
+    const CORRECTION = /\b(sorry|actually|correction|correct (one|is)|i mean|i meant|my mistake|mistake|wrong|typo|instead|not\s+\d)/i;
+    const isCorrection = CORRECTION.test(messageText);
+    if (alreadyKnown.mileage && vehicleUpdates.mileage && !isCorrection) delete vehicleUpdates.mileage;
+    if (alreadyKnown.specs   && vehicleUpdates.specs   && !isCorrection) delete vehicleUpdates.specs;
+    if (isCorrection) {
+      // "the mileage is 45k not 25k" → the first figure is the new one
+      const mc = messageText.match(/\b(\d+(?:\.\d+)?)\s*k\b|\b(\d{1,3}(?:[,.]\d{3})+|\d{4,7})\s*(?:km|kms|kilomet\w*)\b/i);
+      if (mc && /\b(mileage|km|kms|kilomet|driven|odometer|k)\b/i.test(messageText) && !/\b(loan|bank|mortgage|price|aed|dhs)\b/i.test(messageText)) {
+        vehicleUpdates.mileage = mc[1] ? String(Math.round(parseFloat(mc[1]) * 1000)) : mc[2].replace(/[,.]/g, "");
+      }
+      if (/\bnon[\s-]?gcc\b|\b(american|us|usa|japanese|canadian|european|korean)\s*spec/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+      else if (/\b(it'?s|is)\s+gcc\b|\bgcc\s+not\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
+    }
 
     // Deterministic backup for specs + mileage — never re-ask something the customer already said
     if (currentStep >= 1 && currentStep <= 4) {

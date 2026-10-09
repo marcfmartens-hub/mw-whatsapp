@@ -493,6 +493,10 @@ export function containsPrice(text: string): boolean {
 }
 
 function sanitizeReply(text: string): string {
+  // House style: no emojis after the first greeting
+  if (!/Hi! I'm Kaya, the online assistant/i.test(text)) {
+    text = text.replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\uFE0F\u200D]/gu, "").replace(/[ \t]{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+  }
   if (/ABSOLUTE RULES|KNOWLEDGE BASE|What you already know|next_action|system prompt|my instructions|I was instructed|I('| a)m programmed/i.test(text)) {
     console.warn("[Kaya] blocked reply that leaked instructions:", text);
     return SAFE_LEAK_REPLY;
