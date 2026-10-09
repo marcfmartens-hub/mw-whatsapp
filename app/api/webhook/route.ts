@@ -32,48 +32,41 @@ export async function GET(req: NextRequest) {
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-// Which raw field to save at each step (the customer's plain text answer).
-// Vehicle details (make/model/year/mileage/specs) are extracted separately
-// from every message and saved on top of this.
-const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
-  0: undefined,          // first contact — nothing to save
-  1: "name",             // customer gives name
-  2: "car",              // customer states car info (phone always auto-saved from sender)
-  3: "car",              // car info (UAE skip phone step → goes straight here)
-  4: undefined,          // mileage+specs collected via vehicle extraction only
-  5: "loan",             // loan / mortgage status
-  6: "sell_timeline",    // sell method: cash / consignment / not sure
-  7: "appointment",      // appointment day/time — Bigin fires after this
-};
+// ─── Step definitions (new 3-touchpoint flow) ────────────────────────────────
+// Step 0: Greeting + name
+// Step 1: What car? → push for appointment as soon as make+model+year known
+// Step 2: Book appointment day + time
+// Step 3: UAE phone number → confirm booking → Bigin push
+// Step 4: Closing (booking complete)
 
-const FINAL_STEP  = 7;
-const CLOSING_STEP = 8;
+const FINAL_STEP   = 3; // step at which booking is confirmed + Bigin fires
+const CLOSING_STEP = 4; // post-booking, no more logic
 
-// Sell method detection
+// ─── Passive data patterns (never hard gates — just save when mentioned) ─────
 const SELL_METHOD_CASH        = /\b(cash|direct|buy now|sell now|sell fast|quick sale|immediately|instant)\b/i;
 const SELL_METHOD_CONSIGNMENT = /\b(consign|consignment|list|listing|display|market|higher price|best price)\b/i;
-const SELL_METHOD_NOT_SURE    = /\b(not sure|unsure|don.?t know|undecided|still deciding|what.?s better|which is better|explain|difference|options?)\b/i;
 
-// Handoff detection — complex conversations that need a human
-const HANDOFF_SIGNALS = /\b(too many questions|complicated|confused|call me|speak to someone|talk to a person|human|agent|manager|more information|tell me more|how does it work|what happens|walk me through|i don.?t understand)\b/i;
+// Price/selling push detection — track how many times they've pushed so we know when to hand off
+const PRICE_PUSH_PATTERN = /\b(how\s*much|price|offer|estimate|range|valuation|value|worth|what.*(worth|pay|give)|give me.*price|tell me.*price|want to know|how does.*work|selling.*options?|consignment|direct.*sale|which.*better|what.*difference)\b/i;
 
 // Special inquiry types
 const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
 const TRADE_IN_PATTERN    = /\b(trade[\s-]?in|trade\s*my|swap|exchange|part[\s-]?exchange|replace\s*(my|the)|get\s*(a\s*)?new\s*car|upgrade\s*(my|the)|in\s*exchange\s*for)\b/i;
-const PRICE_OFFER_PATTERN = /\b(how\s*much|price|offer|estimate|valuation|value|worth|what\s*(will\s*you\s*pay|do\s*you\s*give|can\s*i\s*get)|give\s*me\s*(a\s*)?(price|number|figure|quote))\b/i;
 
-// Ownership detection
+// Ownership & condition signals — capture passively at any step
 const OWNER_PATTERN = /\b(my\s*car|i\s*(own|am\s*the\s*owner)|registered\s*(in\s*my\s*name|owner)|it.?s\s*mine)\b/i;
 const POA_PATTERN   = /\b(poa|power\s*of\s*attorney|selling\s*for|on\s*behalf|not\s*my\s*car|friend.?s\s*car|family.?s\s*car|brother.?s|sister.?s|father.?s|mother.?s|husband.?s|wife.?s)\b/i;
-
-// Car condition signals — extract when mentioned
 const CONDITION_PATTERN = /\b(accident|damage|damaged|dent|scratch|flood|fire|total\s*loss|write[\s-]?off|modified|modification|tuned|engine|gearbox|transmission|service|fine|fines|traffic\s*fine|salik|document|registration|mulkiya|expired|missing|lost|stolen|bank\s*loan|finance|mortgage)\b/i;
+
+// Human handoff request
+const HUMAN_REQUEST = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
 
 // Insult detection
 const INSULT_PATTERN = /\b(stupid|idiot|dumb|useless|moron|asshole|ass hole|bastard|bitch|fuck|shit|scam|fraud|liar|pathetic|garbage|rubbish|trash|waste of time|terrible|horrible|disgusting)\b/i;
 
-const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
-const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
+const GREETING_ONLY = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getDubaiHour(): number {
   return new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
@@ -89,6 +82,22 @@ function getDubaiTomorrow(): string {
                  : date % 10 === 2 ? "nd"
                  : date % 10 === 3 ? "rd" : "th";
   return `${DAYS[d.getUTCDay()]} ${date}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
+}
+
+function getDubaiDateStr(): string {
+  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+function getDubaiDateTime(): string {
+  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()} ${d.getUTCFullYear()}, ${hh}:${mm}`;
 }
 
 function extractNameFromMessage(text: string): string | null {
@@ -113,99 +122,6 @@ function quickModelMatch(text: string, make: string): string | undefined {
   return undefined;
 }
 
-function formatMileage(raw: string | null | undefined): string {
-  if (!raw) return "Unknown";
-  const n = parseInt(raw, 10);
-  if (isNaN(n)) return `${raw} km`;
-  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " km";
-}
-
-type NextAction =
-  | { type: "ASK_NAME" }
-  | { type: "ASK_UAE_PHONE" }
-  | { type: "ASK_CAR_DETAILS" }
-  | { type: "ASK_MILEAGE_SPECS" }
-  | { type: "ASK_SPECS" }
-  | { type: "ASK_MORTGAGE" }
-  | { type: "ASK_AMOUNT" }
-  | { type: "CLARIFY_MODEL" }
-  | { type: "SHOW_SUMMARY" }
-  | { type: "SHOW_FULL_SUMMARY" }
-  | { type: "OFFER_CALLBACK" };
-
-function describeAction(a: NextAction): string {
-  switch (a.type) {
-    case "ASK_NAME":         return `Reply with exactly: "And what's your name? 😊"`;
-    case "ASK_UAE_PHONE":    return "Ask: \"On which UAE number can we reach you on?\"";
-    case "ASK_CAR_DETAILS":  return "Ask for the car make, model and year.";
-    case "ASK_MILEAGE_SPECS":return "Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.";
-    case "ASK_SPECS":        return `Ask ONLY: "Is it GCC or non-GCC specs?"`;
-    case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
-    case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
-    case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
-    case "SHOW_SUMMARY":      return `Show the car summary (plain, no emojis) then ask "When are you planning to sell the car?"`;
-    case "SHOW_FULL_SUMMARY": return `Show the car summary including mortgage (plain, no emojis) then ask "When are you planning to sell the car?"`;
-    case "OFFER_CALLBACK":   return "Tell the customer the purchasing team will call them back within the hour, and they're welcome to come in whenever.";
-  }
-}
-
-function buildDirectResponse(
-  action: NextAction,
-  name: string | null | undefined,
-  known: { make?: string | null; model?: string | null; year?: string | null;
-           mileage?: string | null; specs?: string | null;
-           loan?: string | null; mortgage_amount?: string | null }
-): string {
-  const n = name ? `, ${name}` : "";
-  switch (action.type) {
-    case "ASK_NAME":
-      return "And what's your name? 😊";
-    case "ASK_UAE_PHONE":
-      return `Hi${n}! 😊 On which UAE number can we reach you on?`;
-    case "ASK_CAR_DETAILS": {
-      const hasMake  = !!(known.make  && known.make  !== "Unknown");
-      const hasModel = !!(known.model && known.model !== "Unknown");
-      if (hasMake && hasModel) {
-        return `Alright, nice ${known.make} ${known.model}! Which year is it?`;
-      } else if (hasMake) {
-        return `Got it — ${known.make}! What's the model and year?`;
-      }
-      return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
-    }
-    case "ASK_MILEAGE_SPECS":
-      return `Got it${n}! 👌 Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
-    case "ASK_SPECS":
-      return `Got it${n}! Is it GCC or non-GCC specs?`;
-    case "ASK_MORTGAGE":
-      return "Is there any outstanding mortgage on the car?";
-    case "ASK_AMOUNT":
-      return "How much is the outstanding balance?";
-    case "CLARIFY_MODEL":
-      return `Could you confirm the car model and year${n}?`;
-    case "SHOW_SUMMARY":
-    case "SHOW_FULL_SUMMARY":
-      return "When are you planning to sell the car?";
-    case "OFFER_CALLBACK":
-      return "No worries — I'll have someone from our team call you back within the hour. Whenever you're ready to come in, we're here for you.";
-  }
-}
-
-function getDubaiDateStr(): string {
-  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
-  const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-}
-
-function getDubaiDateTime(): string {
-  const d = new Date(Date.now() + 4 * 60 * 60 * 1000);
-  const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const hh = String(d.getUTCHours()).padStart(2, "0");
-  const mm = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()} ${d.getUTCFullYear()}, ${hh}:${mm}`;
-}
-
 interface IncomingMessage {
   from: string;
   id: string;
@@ -225,6 +141,35 @@ function extractMessage(body: any): IncomingMessage | null {
   } catch (error) {
     console.error("extractMessage parse error:", error);
     return null;
+  }
+}
+
+// ─── Push lead to Bigin (fire-and-forget, non-fatal) ─────────────────────────
+async function pushToBigin(
+  conversation: any,
+  phone: string,
+  history: ConversationMessage[],
+  knownFields: any,
+  salesInquiry: string,
+  inspectionBooked: boolean
+): Promise<void> {
+  try {
+    const latestConv = await getConversation(phone);
+    const latestHistory: ConversationMessage[] = Array.isArray(latestConv?.messages)
+      ? latestConv.messages : history;
+    const inquirySummary = await generateInquirySummary(latestHistory, knownFields).catch(() => "");
+    await createBiginContact({
+      ...(latestConv ?? conversation),
+      phone_number: phone,
+      sales_inquiry: salesInquiry,
+      inspection_booked: inspectionBooked,
+      inquiry_summary: inquirySummary,
+      owner_status: (latestConv as any)?.owner_status ?? (conversation as any)?.owner_status,
+      car_conditions: (latestConv as any)?.car_conditions ?? (conversation as any)?.car_conditions,
+    } as any);
+    await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+  } catch (e) {
+    console.error("[pushToBigin] error:", e);
   }
 }
 
@@ -249,112 +194,72 @@ export async function POST(req: NextRequest) {
     }
 
     const phone   = message.from;
-    const isUAE   = phone.startsWith("971");
     const isImageMessage = message.type === "image";
     const messageText = message.text?.body?.trim() ?? message.image?.caption?.trim() ?? "";
 
-    // ── Reset trigger ──────────────────────────────────────────────
+    // ── Reset trigger ──────────────────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       await resetConversation(phone);
       const reply = await getKayaReply(0, [], "", {});
       await sendWhatsAppMessage(phone, reply);
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
-    // ──────────────────────────────────────────────────────────────
 
-    // ── Location trigger ───────────────────────────────────────────
+    // ── Location trigger ───────────────────────────────────────────────────────
     const isLocationMessage = message.type === "location";
     const isLocationRequest = LOCATION_KEYWORDS.test(messageText);
     if (isLocationMessage || isLocationRequest) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const convForLocation = await getOrCreateConversation(phone);
-      if ((convForLocation.step ?? 0) >= FINAL_STEP - 1) {
+      if ((convForLocation.step ?? 0) >= FINAL_STEP) {
         await sendWhatsAppMessage(phone, "What time works best for you to bring the car in?");
       }
       return NextResponse.json({ status: "location_sent" }, { status: 200 });
     }
-    // ──────────────────────────────────────────────────────────────
 
     const conversation = await getOrCreateConversation(phone);
 
-    // Always save the sender's phone number — no need to ask for it
+    // Always persist sender's phone number
     if (!conversation.phone_number) {
       await updateConversation(phone, { phone_number: phone });
       conversation.phone_number = phone;
     }
 
-    // Insult detection — track count and close after second insult
+    // ── Duplicate message guard ────────────────────────────────────────────────
+    if (conversation.last_msg_id && conversation.last_msg_id === message.id) {
+      return NextResponse.json({ status: "duplicate" }, { status: 200 });
+    }
+
+    // ── Insult detection ───────────────────────────────────────────────────────
     if (INSULT_PATTERN.test(messageText)) {
       const insultCount = ((conversation as any).insult_count ?? 0) + 1;
       await updateConversation(phone, { insult_count: insultCount } as any);
       if (insultCount >= 2) {
-        // Second insult — close conversation and hand off
         await sendWhatsAppMessage(phone, "I'm going to pass you on to one of our team members who can assist you better. Take care.");
         try { await createBiginContact({ ...conversation, phone_number: phone } as any); } catch (_) {}
         return NextResponse.json({ status: "closed_insult" }, { status: 200 });
       } else {
-        // First insult — respond with empathy
         await sendWhatsAppMessage(phone, "I understand, we all have frustrating moments sometimes. I'm here to help whenever you're ready.");
         return NextResponse.json({ status: "insult_warned" }, { status: 200 });
       }
     }
 
-    if (conversation.last_msg_id && conversation.last_msg_id === message.id) {
-      return NextResponse.json({ status: "duplicate" }, { status: 200 });
-    }
-
-    // ── Special inquiry detection (any step) ──────────────────────────────
-    // Home visit or trade-in inquiry → collect info, push to Bigin, hand off
-    const isHomeVisit = HOME_VISIT_PATTERN.test(messageText);
-    const isTradeIn   = TRADE_IN_PATTERN.test(messageText);
-    if ((isHomeVisit || isTradeIn) && (conversation.step ?? 0) > 0) {
-      const inquiryType = isHomeVisit ? "Home Visit Inquiry" : "Trade-in Inquiry";
-      const inquiryTag  = isHomeVisit ? "home_visit" : "trade_in";
-      await updateConversation(phone, { sell_timeline: `sell_method:${inquiryTag}` } as any);
-      const replyMsg = isHomeVisit
-        ? "Of course, we can look into that for you. Let me pass your details to our team and they'll be in touch with you shortly to arrange."
-        : "Happy to discuss that. Let me pass your details to our team and they'll reach out to you shortly to go over the options.";
-      await sendWhatsAppMessage(phone, replyMsg);
-      try {
-        const freshConv = await (await import("@/lib/supabase")).getConversation(phone);
-        const siHistory = ((freshConv as any)?.messages ?? []) as ConversationMessage[];
-        const siSummary = await generateInquirySummary(siHistory, { ...conversation, ...freshConv } as any).catch(() => "");
-        await createBiginContact({
-          ...(freshConv ?? conversation),
-          phone_number: phone,
-          sales_inquiry: inquiryType,
-          inspection_booked: false,
-          inquiry_summary: siSummary,
-          owner_status: (freshConv as any)?.owner_status,
-          car_conditions: (freshConv as any)?.car_conditions,
-        } as any);
-        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-      } catch (e) { console.error("special inquiry Bigin push error:", e); }
-      return NextResponse.json({ status: "special_inquiry" }, { status: 200 });
-    }
-    // ─────────────────────────────────────────────────────────────────────
-
     const currentStep = conversation.step ?? 0;
-    const fieldToSave = FIELD_BY_STEP[currentStep];
+    const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
 
     const coreUpdates: Partial<Conversation> = {
       last_msg_id: message.id,
       last_message_at: new Date().toISOString(),
     };
-    if (fieldToSave && messageText) {
-      const isLoanAmountFollowUp = fieldToSave === "loan" && !!conversation.loan;
-      const isGreetingOnly = fieldToSave === "name" && GREETING_ONLY.test(messageText);
-      if (!isLoanAmountFollowUp && !isGreetingOnly) {
-        const valueToSave = fieldToSave === "name"
-          ? extractNameFromMessage(messageText)
-          : messageText;
-        if (valueToSave !== null) {
-          (coreUpdates as any)[fieldToSave] = valueToSave;
-        }
-      }
+
+    // ── Passive: extract name at step 1 (if not already known) ────────────────
+    if (currentStep === 1 && !conversation.name && messageText) {
+      const extractedName = extractNameFromMessage(messageText);
+      if (extractedName) (coreUpdates as any).name = extractedName;
     }
 
+    // ── Passive: vehicle info extraction (every message, every step) ──────────
     const alreadyKnown: VehicleFields = {
       make:    (conversation.make    && conversation.make    !== "Unknown") ? conversation.make    : undefined,
       model:   (conversation.model   && conversation.model   !== "Unknown") ? conversation.model   : undefined,
@@ -364,6 +269,7 @@ export async function POST(req: NextRequest) {
     };
     const vehicleUpdates = await extractVehicleInfo(messageText, alreadyKnown);
 
+    // Quick regex model match as fallback
     if (!vehicleUpdates.model || vehicleUpdates.model === "Unknown") {
       const effectiveMake = vehicleUpdates.make ?? conversation.make;
       if (effectiveMake && effectiveMake !== "Unknown") {
@@ -371,116 +277,74 @@ export async function POST(req: NextRequest) {
         if (found) {
           vehicleUpdates.model = found;
           if (vehicleUpdates.typo_check) {
-            vehicleUpdates.typo_check = vehicleUpdates.typo_check.filter(
-              (t) => t.field !== "model"
-            );
+            vehicleUpdates.typo_check = vehicleUpdates.typo_check.filter(t => t.field !== "model");
             if (vehicleUpdates.typo_check.length === 0) delete vehicleUpdates.typo_check;
           }
         }
       }
     }
 
+    // Don't overwrite already-confirmed fields
     if (alreadyKnown.mileage && vehicleUpdates.mileage) delete vehicleUpdates.mileage;
     if (alreadyKnown.specs   && vehicleUpdates.specs)   delete vehicleUpdates.specs;
 
-    // Ownership detection — save once, don't overwrite
-    if (!conversation.owner_status) {
-      if (POA_PATTERN.test(messageText))   await updateConversation(phone, { owner_status: "POA" } as any).catch(() => {});
+    // Typo auto-correct
+    if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
+      for (const tc of vehicleUpdates.typo_check) {
+        if (tc.field === "model" && (!vehicleUpdates.model || vehicleUpdates.model === "Unknown")) {
+          vehicleUpdates.model = tc.suggestion;
+        }
+        if (tc.field === "make" && (!vehicleUpdates.make || vehicleUpdates.make === "Unknown")) {
+          vehicleUpdates.make = tc.suggestion;
+        }
+      }
+      vehicleUpdates.typo_check = [];
+    }
+
+    // ── Passive: ownership ─────────────────────────────────────────────────────
+    if (!(conversation as any).owner_status) {
+      if (POA_PATTERN.test(messageText))        await updateConversation(phone, { owner_status: "POA" } as any).catch(() => {});
       else if (OWNER_PATTERN.test(messageText)) await updateConversation(phone, { owner_status: "Owner" } as any).catch(() => {});
     }
 
-    // Car conditions — append any new condition signals mentioned
+    // ── Passive: car condition signals ─────────────────────────────────────────
     if (CONDITION_PATTERN.test(messageText)) {
       const existing = (conversation as any).car_conditions ?? "";
-      const newCondition = messageText.trim();
-      const updated = existing ? `${existing} | ${newCondition}` : newCondition;
+      const updated  = existing ? `${existing} | ${messageText.trim()}` : messageText.trim();
       await updateConversation(phone, { car_conditions: updated } as any).catch(() => {});
     }
 
-    const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
-    const hasKnownSpecs = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
-                          || (conversation.specs && conversation.specs !== "Unknown");
-    const specsExplicitlyUnknown = currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
-    if (specsExplicitlyUnknown) vehicleUpdates.specs = "Unknown";
-
-    let apptDate = conversation.appointment_date ?? "";
-    let apptTime = conversation.appointment_time ?? "";
-    let altPhone: string | undefined;
-
-    if (currentStep === FINAL_STEP && messageText) {
-      try {
-        const ea = await extractAppointment(messageText);
-        if (ea.appointment_date) apptDate = ea.appointment_date;
-        if (ea.appointment_time) apptTime  = ea.appointment_time;
-        const apptSave: Partial<Conversation> = {};
-        if (ea.appointment_date) apptSave.appointment_date = ea.appointment_date;
-        if (ea.appointment_time) apptSave.appointment_time  = ea.appointment_time;
-        if (Object.keys(apptSave).length > 0)
-          await updateConversation(phone, apptSave);
-      } catch (e) {
-        console.error("early appointment extraction error:", e);
-      }
-
-      // Capture alternative phone number if customer provides one at booking step
-      const phoneMatch = messageText.match(/(?:\+?971|0)?[5][0-9]\d{7}/);
-      if (phoneMatch) {
-        const rawPhone = phoneMatch[0].replace(/\D/g, "");
-        const normalised = rawPhone.startsWith("971") ? rawPhone : `971${rawPhone.replace(/^0/, "")}`;
-        if (normalised !== phone) {
-          altPhone = normalised;
-          try { await updateConversation(phone, { alternative_phone: altPhone } as any); } catch (_) {}
-        }
-      }
+    // ── Passive: sell method ───────────────────────────────────────────────────
+    if (!conversation.sell_timeline) {
+      if (SELL_METHOD_CASH.test(messageText))
+        await updateConversation(phone, { sell_timeline: "sell_method:cash" } as any).catch(() => {});
+      else if (SELL_METHOD_CONSIGNMENT.test(messageText))
+        await updateConversation(phone, { sell_timeline: "sell_method:consignment" } as any).catch(() => {});
     }
 
-    // Track price-offer-only leads (pushed before price, then drops off)
-    const isPriceOnlySignal = PRICE_OFFER_PATTERN.test(messageText) && currentStep <= 3;
+    // ── Resolve resolved vehicle fields ───────────────────────────────────────
+    const resolvedMake    = vehicleUpdates.make    ?? conversation.make;
+    const resolvedModel   = vehicleUpdates.model   ?? conversation.model;
+    const resolvedYear    = vehicleUpdates.year    ?? conversation.year;
+    const resolvedMileage = vehicleUpdates.mileage ?? conversation.mileage;
+    const resolvedSpecs   = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
+                              ? vehicleUpdates.specs
+                              : (conversation.specs && conversation.specs !== "Unknown" ? conversation.specs : null);
 
-    const sellTimeline = fieldToSave === "sell_timeline" ? messageText : (conversation.sell_timeline ?? undefined);
-    const sellUrgent   = sellTimeline ? URGENT_KEYWORDS.test(sellTimeline) : undefined;
+    const hasFullCar = !!(resolvedMake && resolvedMake !== "Unknown")
+                    && !!(resolvedModel && resolvedModel !== "Unknown")
+                    && !!resolvedYear;
 
-    let mortgageAmount: string | undefined;
-    const isLoanFollowUp = fieldToSave === "loan" && !!conversation.loan;
-    const loanAnswer = isLoanFollowUp ? (conversation.loan ?? "") : (fieldToSave === "loan" ? messageText : (conversation.loan ?? ""));
-    const loanIsYes  = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(loanAnswer);
-    if (currentStep === 5 && loanIsYes && messageText) {
-      const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
-      if (amountMatch) {
-        const raw = amountMatch[0].replace(/,/g, "").trim();
-        mortgageAmount = /k$/i.test(raw)
-          ? String(parseFloat(raw) * 1000)
-          : raw;
-      }
-    }
-
-    const carYear    = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
-    const carMileage = vehicleUpdates.mileage ?? conversation.mileage;
-    const carSpecs   = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
-                         ? vehicleUpdates.specs
-                         : (conversation.specs && conversation.specs !== "Unknown" ? conversation.specs : null);
-    const currentYear = new Date().getFullYear();
-    const hasAllVehicleFields = !!carMileage && (!!carSpecs || specsExplicitlyUnknown
-                                  || conversation.specs === "Unknown");
-    const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
-
-    // ── Non-GCC / imported specs redirect ─────────────────────────────────────
-    // When specs are confirmed as Non-GCC, skip appointment booking and hand off
-    // to the purchase team. Collect remaining info then push to Bigin.
-    const isNonGcc = carSpecs === "Non-GCC";
+    // ── Non-GCC detection (intercept before normal flow) ──────────────────────
+    const isNonGcc = resolvedSpecs === "Non-GCC";
     const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
-    if (isNonGcc && !alreadyHandedOff && currentStep >= 4) {
-      // Save the non_gcc_handoff flag so this only fires once
+    if (isNonGcc && !alreadyHandedOff) {
       await updateConversation(phone, { non_gcc_handoff: true } as any).catch(() => {});
 
-      // Check if we still need name / remaining vehicle info
       const missingInfo: string[] = [];
-      const resolvedMake    = vehicleUpdates.make    ?? conversation.make;
-      const resolvedModel   = vehicleUpdates.model   ?? conversation.model;
-      const resolvedYear    = vehicleUpdates.year    ?? conversation.year;
-      const resolvedMileage = vehicleUpdates.mileage ?? conversation.mileage;
-      if (!resolvedMake)    missingInfo.push("make");
-      if (!resolvedModel)   missingInfo.push("model");
-      if (!resolvedYear)    missingInfo.push("year");
+      if (!resolvedMake  || resolvedMake  === "Unknown") missingInfo.push("make");
+      if (!resolvedModel || resolvedModel === "Unknown") missingInfo.push("model");
+      if (!resolvedYear)  missingInfo.push("year");
       if (!resolvedMileage) missingInfo.push("mileage");
 
       const nextQ = missingInfo.length > 0
@@ -490,205 +354,178 @@ export async function POST(req: NextRequest) {
           : null;
 
       const handoffMsg = nextQ
-        ? `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team reach out to you directly to discuss this. ${nextQ}`
-        : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks, I've got everything I need — our team will be in touch shortly.`;
+        ? `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team reach out to you directly. ${nextQ}`
+        : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks — our team will be in touch shortly.`;
 
-      await sendWhatsApp(phone, handoffMsg);
+      await sendWhatsAppMessage(phone, handoffMsg);
 
-      // Push to Bigin if we have enough info and haven't pushed yet
       if (!conversation.bigin_pushed_at) {
-        try {
-          const latestConv = await getConversation(phone);
-          const latestHistory: ConversationMessage[] = Array.isArray(latestConv?.messages) ? latestConv.messages : [];
-          const inquirySummary = await generateInquirySummary(latestHistory, {
-            name: conversation.name, make: resolvedMake ?? undefined,
-            model: resolvedModel ?? undefined, year: resolvedYear ?? undefined,
-            mileage: resolvedMileage ?? undefined, specs: "Non-GCC",
-            sell_timeline: conversation.sell_timeline,
-            owner_status: (conversation as any).owner_status,
-            car_conditions: (conversation as any).car_conditions,
-          }).catch(() => "");
-          await createBiginContact({
-            ...conversation,
-            make: resolvedMake ?? conversation.make,
-            model: resolvedModel ?? conversation.model,
-            year: resolvedYear ?? conversation.year,
-            mileage: resolvedMileage ?? conversation.mileage,
-            specs: "Non-GCC",
-            phone_number: phone,
-            sales_inquiry: "Other",
-            inspection_booked: false,
-            inquiry_summary: inquirySummary,
-            owner_status: (conversation as any).owner_status,
-            car_conditions: (conversation as any).car_conditions,
-          } as any);
-          await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-        } catch (e) { console.error("non-GCC Bigin push error:", e); }
+        const knownForSummary = {
+          name: conversation.name, make: resolvedMake ?? undefined,
+          model: resolvedModel ?? undefined, year: resolvedYear ?? undefined,
+          mileage: resolvedMileage ?? undefined, specs: "Non-GCC",
+          sell_timeline: conversation.sell_timeline,
+          owner_status: (conversation as any).owner_status,
+          car_conditions: (conversation as any).car_conditions,
+        };
+        await pushToBigin(conversation, phone, history, knownForSummary, "Other", false);
       }
 
       return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
     }
 
-    if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
-      for (const tc of vehicleUpdates.typo_check) {
-        if (tc.field === "model" && (!vehicleUpdates.model || vehicleUpdates.model === "Unknown")) {
-          vehicleUpdates.model = tc.suggestion;
-          console.log(`[kaya] typo auto-corrected: model "${tc.input}" → "${tc.suggestion}"`);
-        }
-        if (tc.field === "make" && (!vehicleUpdates.make || vehicleUpdates.make === "Unknown")) {
-          vehicleUpdates.make = tc.suggestion;
-          console.log(`[kaya] typo auto-corrected: make "${tc.input}" → "${tc.suggestion}"`);
-        }
+    // ── Special inquiry detection (home visit / trade-in) — any step ──────────
+    const isHomeVisit = HOME_VISIT_PATTERN.test(messageText);
+    const isTradeIn   = TRADE_IN_PATTERN.test(messageText);
+    if ((isHomeVisit || isTradeIn) && currentStep > 0) {
+      const inquiryType = isHomeVisit ? "Home Visit Inquiry" : "Trade-in Inquiry";
+      const inquiryTag  = isHomeVisit ? "home_visit" : "trade_in";
+      await updateConversation(phone, { sell_timeline: `sell_method:${inquiryTag}` } as any);
+      const replyMsg = isHomeVisit
+        ? "Of course, we can look into that for you. Let me pass your details to our team and they'll be in touch with you shortly to arrange."
+        : "Happy to discuss that. Let me pass your details to our team and they'll reach out to you shortly to go over the options.";
+      await sendWhatsAppMessage(phone, replyMsg);
+      if (!conversation.bigin_pushed_at) {
+        await pushToBigin(conversation, phone, history, {
+          ...conversation, make: resolvedMake ?? undefined,
+          model: resolvedModel ?? undefined, year: resolvedYear ?? undefined,
+          sales_inquiry: inquiryType,
+        }, inquiryType, false);
       }
-      vehicleUpdates.typo_check = [];
+      return NextResponse.json({ status: "special_inquiry" }, { status: 200 });
     }
 
-    const hasModel = !!(vehicleUpdates.make ?? conversation.make) && !!(
-      (vehicleUpdates.model && vehicleUpdates.model !== "Unknown") ||
-      (conversation.model   && conversation.model   !== "Unknown")
-    );
-    const hasYear  = !!(vehicleUpdates.year ?? conversation.year);
-    const hasSpecs = !!carSpecs || specsExplicitlyUnknown || conversation.specs === "Unknown";
-
-    let action: NextAction | undefined;
-
-    if (currentStep === 1 && GREETING_ONLY.test(messageText)) {
-      action = { type: "ASK_NAME" };
-    } else if (currentStep === 2) {
-      action = { type: "ASK_CAR_DETAILS" };
-    } else if (currentStep === 3) {
-      if (!hasModel || !hasYear) {
-        action = { type: "ASK_CAR_DETAILS" };
-      } else {
-        action = { type: "ASK_MILEAGE_SPECS" };
+    // ── Human handoff request ─────────────────────────────────────────────────
+    if (HUMAN_REQUEST.test(messageText) && currentStep > 0) {
+      await sendWhatsAppMessage(phone, "Of course — let me get someone from our team to reach out to you directly.");
+      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      if (!conversation.bigin_pushed_at) {
+        await pushToBigin(conversation, phone, history, {
+          ...conversation, make: resolvedMake ?? undefined,
+          model: resolvedModel ?? undefined, year: resolvedYear ?? undefined,
+        }, "No Communication yet", false);
       }
-    } else if (currentStep === 4) {
-      if (!hasModel || !hasYear) {
-        action = { type: "CLARIFY_MODEL" };
-      } else if (!carMileage) {
-        action = { type: "ASK_MILEAGE_SPECS" };
-      } else if (!hasSpecs) {
-        action = { type: "ASK_SPECS" };
-      } else if (skipLoan) {
-        action = { type: "SHOW_SUMMARY" };
-      } else {
-        action = { type: "ASK_MORTGAGE" };
-      }
-    } else if (currentStep === 5 && loanIsYes && !mortgageAmount && !conversation.mortgage_amount) {
-      action = { type: "ASK_AMOUNT" };
-    } else if (currentStep === 5) {
-      action = { type: "SHOW_FULL_SUMMARY" };
+      return NextResponse.json({ status: "human_handoff" }, { status: 200 });
     }
 
-    const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
-    const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
-    const HUMAN_REQUEST   = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
-    const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested)\b/i;
-    const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
-    const alreadyExplainedOptions = history.some(
-      m => m.role === "assistant" && OPTIONS_SENT.test(m.content)
-    );
+    // ── Price push tracking ────────────────────────────────────────────────────
+    // Track how many times they've pushed on price/method. On second push → handoff.
+    const isPricePush = PRICE_PUSH_PATTERN.test(messageText);
+    const pricePushCount = (conversation as any).price_push_count ?? 0;
 
-    // Save sell method at step 6
-    if (currentStep === 6 && messageText) {
-      let sellMethod: string | undefined;
-      if (SELL_METHOD_CASH.test(messageText))        sellMethod = "cash";
-      else if (SELL_METHOD_CONSIGNMENT.test(messageText)) sellMethod = "consignment";
-      else if (SELL_METHOD_NOT_SURE.test(messageText))    sellMethod = "not_sure";
-      if (sellMethod) {
-        try {
-          await updateConversation(phone, { sell_timeline: `sell_method:${sellMethod}` } as any);
-        } catch (e) {
-          console.error("sell method save error (non-fatal):", e);
+    if (isPricePush && currentStep > 0) {
+      const newCount = pricePushCount + 1;
+      await updateConversation(phone, { price_push_count: newCount } as any).catch(() => {});
+
+      if (newCount >= 2 && !(conversation as any).price_handoff_done) {
+        // Second push — empathetic handoff
+        await updateConversation(phone, { price_handoff_done: true } as any).catch(() => {});
+
+        const needsCar    = !hasFullCar;
+        const needsName   = !conversation.name;
+        const needsPhone  = !(conversation as any).alternative_phone && !(conversation.phone_number);
+
+        // Collect whatever's still missing, then close
+        // The AI will collect via normal flow — just flag handoff in context
+        // We let Claude handle the collection questions naturally via the system prompt,
+        // but we track when all is collected with price_handoff_collecting flag
+        if (needsCar || needsName || needsPhone) {
+          await updateConversation(phone, { price_handoff_collecting: true } as any).catch(() => {});
+        } else {
+          // Have everything — push and close
+          await sendWhatsAppMessage(phone, "Done — our team will be in touch with you shortly.");
+          if (!conversation.bigin_pushed_at) {
+            await pushToBigin(conversation, phone, history, {
+              ...conversation, make: resolvedMake ?? undefined,
+              model: resolvedModel ?? undefined, year: resolvedYear ?? undefined,
+            }, "Price Offer Inquiry", false);
+          }
+          return NextResponse.json({ status: "price_handoff" }, { status: 200 });
         }
       }
     }
 
-    // Handoff trigger — complex conversations get forwarded to purchase team
-    const handoffSignal =
-      HUMAN_REQUEST.test(messageText) ||
-      (currentStep >= 6 && HANDOFF_SIGNALS.test(messageText)) ||
-      (alreadyExplainedOptions && PRICE_PUSH.test(messageText)) ||
-      (alreadyExplainedOptions && BOOKING_REFUSAL.test(messageText));
+    // ── Appointment extraction (step 2) ────────────────────────────────────────
+    let apptDate = conversation.appointment_date ?? "";
+    let apptTime = conversation.appointment_time ?? "";
+    let altPhone: string | undefined;
 
-    const callbackSignal = handoffSignal;
-    if (!action && currentStep >= 5 && currentStep < CLOSING_STEP && callbackSignal) {
-      action = { type: "OFFER_CALLBACK" };
+    if (currentStep === 2 && messageText) {
+      try {
+        const ea = await extractAppointment(messageText);
+        if (ea.appointment_date) apptDate = ea.appointment_date;
+        if (ea.appointment_time) apptTime  = ea.appointment_time;
+        const apptSave: Partial<Conversation> = {};
+        if (ea.appointment_date) apptSave.appointment_date = ea.appointment_date;
+        if (ea.appointment_time) apptSave.appointment_time  = ea.appointment_time;
+        if (Object.keys(apptSave).length > 0) await updateConversation(phone, apptSave);
+      } catch (e) {
+        console.error("appointment extraction error:", e);
+      }
     }
 
-    const estMake    = (vehicleUpdates.make  ?? conversation.make)  ?? "";
-    const estModel   = (vehicleUpdates.model ?? conversation.model) ?? "";
-    const estYear    = (vehicleUpdates.year  ?? conversation.year)  ?? "";
-    const estMileage = vehicleUpdates.mileage ?? conversation.mileage;
-    const estSpecs   = vehicleUpdates.specs   ?? conversation.specs;
+    // ── Phone capture (step 3) ─────────────────────────────────────────────────
+    if (currentStep === FINAL_STEP && messageText) {
+      const phoneMatch = messageText.match(/(?:\+?971|0)?[5][0-9]\d{7}/);
+      if (phoneMatch) {
+        const rawPhone    = phoneMatch[0].replace(/\D/g, "");
+        const normalised  = rawPhone.startsWith("971") ? rawPhone : `971${rawPhone.replace(/^0/, "")}`;
+        if (normalised !== phone) {
+          altPhone = normalised;
+          try { await updateConversation(phone, { alternative_phone: altPhone } as any); } catch (_) {}
+        }
+      }
+    }
+
+    // ── Valuation (informational only, never shown to customer) ───────────────
+    const estMake    = resolvedMake    ?? "";
+    const estModel   = resolvedModel   ?? "";
+    const estYear    = resolvedYear    ?? "";
     const valuation  = (estMake && estModel && estModel !== "Unknown" && estYear)
-      ? estimateCarValue(estMake, estModel, estYear, estMileage, estSpecs)
+      ? estimateCarValue(estMake, estModel, estYear, resolvedMileage, resolvedSpecs ?? undefined)
       : null;
 
+    // ── Build context passed to Claude ────────────────────────────────────────
     const knownFields = {
       ...conversation,
       ...coreUpdates,
       ...vehicleUpdates,
-      image_shared: isImageMessage || undefined,
-      sell_timeline:    sellTimeline,
-      sell_urgent:      sellUrgent,
-      dubai_hour:       getDubaiHour(),
-      dubai_datetime:   getDubaiDateTime(),
-      dubai_tomorrow:   getDubaiTomorrow(),
-      mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
-      skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10,
-      estimated_value:  valuation?.formatted ?? null,
-      next_action:      action ? describeAction(action) : undefined,
-      appointment_date: apptDate || conversation.appointment_date || undefined,
-      appointment_time: apptTime || conversation.appointment_time || undefined,
+      image_shared:        isImageMessage || undefined,
+      dubai_hour:          getDubaiHour(),
+      dubai_datetime:      getDubaiDateTime(),
+      dubai_tomorrow:      getDubaiTomorrow(),
+      estimated_value:     valuation?.formatted ?? null,
+      appointment_date:    apptDate || conversation.appointment_date || undefined,
+      appointment_time:    apptTime || conversation.appointment_time || undefined,
+      // Expose price push context to Claude so it can handle naturally
+      price_push_count:    isPricePush ? (pricePushCount + 1) : pricePushCount,
+      price_handoff_collecting: (conversation as any).price_handoff_collecting ?? false,
     };
 
-    console.log(`[kaya] step=${currentStep} action=${action?.type ?? "none"}`);
+    console.log(`[kaya] step=${currentStep} hasCar=${hasFullCar} pricePush=${isPricePush} pricePushCount=${pricePushCount}`);
 
-    const reply = action
-      ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
-      : await getKayaReply(currentStep, history, messageText, knownFields);
+    // ── Get Claude reply ───────────────────────────────────────────────────────
+    const reply = await getKayaReply(currentStep, history, messageText, knownFields);
 
-    const appointmentConfirmedEarly = currentStep === FINAL_STEP && !action &&
-      /team will be in touch on whatsapp/i.test(reply);
+    // Detect booking confirmation in Claude's reply
+    const appointmentConfirmed = currentStep === FINAL_STEP
+      && /team will be in touch on whatsapp/i.test(reply);
 
+    // ── Send reply ─────────────────────────────────────────────────────────────
     const replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
-    if (appointmentConfirmedEarly && replyParts.length > 0) {
+    if (appointmentConfirmed && replyParts.length > 0) {
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     for (const part of replyParts) {
       await sendWhatsAppMessage(phone, part);
     }
-
-    if (appointmentConfirmedEarly) {
+    if (appointmentConfirmed) {
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
     }
 
-    if (action?.type === "OFFER_CALLBACK") {
-      await sendWhatsAppMessage(phone, "Our purchase team will be in touch with you shortly. You're also welcome to walk in whenever — here's where to find us.");
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
-      await sendWhatsAppMessage(phone, LOCATION_TEXT);
-      try {
-        const cbSummary = await generateInquirySummary(history, knownFields).catch(() => "");
-        const callbackConv = {
-          ...conversation,
-          phone_number: phone,
-          appointment_date: getDubaiDateStr(),
-          appointment_time: "08:00",
-          sales_inquiry: "No Communication yet",
-          inspection_booked: false,
-          inquiry_summary: cbSummary,
-          owner_status: (conversation as any).owner_status,
-          car_conditions: (conversation as any).car_conditions,
-        } as any;
-        await createBiginContact(callbackConv);
-        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-      } catch (e) {
-        console.error("callback Bigin push error (non-fatal):", e);
-      }
-    }
-
+    // ── Save message history ───────────────────────────────────────────────────
     try {
       const updatedHistory: ConversationMessage[] = [
         ...history,
@@ -700,76 +537,56 @@ export async function POST(req: NextRequest) {
       console.error("history save error (non-fatal):", e);
     }
 
-    const appointmentConfirmed = appointmentConfirmedEarly;
+    // ── Step advancement ───────────────────────────────────────────────────────
+    // Step 0 → 1: always on first reply
+    // Step 1 → 2: as soon as make+model+year are all known
+    // Step 2 → 3: when appointment date + time are both captured
+    // Step 3 → 4 (closing): when booking is confirmed
 
-    const stayAtStep1        = currentStep === 1 && GREETING_ONLY.test(messageText);
-    const stayAtMileageSpecs = currentStep === 4 && !hasAllVehicleFields;
-    const stayAtLoanAmount   = currentStep === 5 && loanIsYes
-      && !mortgageAmount && !conversation.mortgage_amount;
-    const stayAtAppointment  = currentStep === FINAL_STEP && !appointmentConfirmed;
-    // At step 6 (sell method), only stay if they asked for explanation (not sure / explain)
-    // — otherwise advance to appointment booking
-    const stayAtSellMethod   = currentStep === 6 && SELL_METHOD_NOT_SURE.test(messageText)
-      && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
-    const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
-      : stayAtStep1        ? 1
-      : stayAtMileageSpecs ? 4
-      : stayAtLoanAmount   ? 5
-      : stayAtSellMethod   ? 6
-      : stayAtAppointment  ? FINAL_STEP
-      : skipLoan           ? 6
-      : currentStep + 1;
-    coreUpdates.step = nextStep;
-    const updatedConversation = await updateConversation(phone, coreUpdates);
+    const hasAppt = !!(apptDate || conversation.appointment_date)
+                 && !!(apptTime || conversation.appointment_time);
 
+    // Step advancement rules (explicit per-step):
+    // 0 → 1 always (greeting complete)
+    // 1 → 2 when make + model + year are all resolved
+    // 1 stays at 1 if car still incomplete
+    // 2 → 3 when both appointment date and time are captured
+    // 2 stays at 2 while appointment is still incomplete
+    // 3 → 4 (closing) when booking confirmed by Claude's reply
+    // 3 stays at 3 while waiting for phone confirmation
+    if (currentStep === 0) coreUpdates.step = 1;
+    else if (currentStep === 1) coreUpdates.step = hasFullCar ? 2 : 1;
+    else if (currentStep === 2) coreUpdates.step = hasAppt ? 3 : 2;
+    else if (currentStep === FINAL_STEP) coreUpdates.step = appointmentConfirmed ? CLOSING_STEP : FINAL_STEP;
+    else coreUpdates.step = currentStep;
+
+    await updateConversation(phone, coreUpdates);
+
+    // Save vehicle updates
     if (Object.keys(vehicleUpdates).length > 0) {
-      try {
-        await updateConversation(phone, vehicleUpdates as Partial<Conversation>);
-      } catch (e) {
-        console.error("vehicleUpdates save error (non-fatal):", e);
-      }
+      try { await updateConversation(phone, vehicleUpdates as Partial<Conversation>); }
+      catch (e) { console.error("vehicleUpdates save error (non-fatal):", e); }
     }
 
+    // Save valuation
     if (valuation?.formatted) {
-      try {
-        await updateConversation(phone, { estimated_price: valuation.formatted } as any);
-      } catch (e) {
-        console.error("estimated_price save error (non-fatal):", e);
-      }
+      try { await updateConversation(phone, { estimated_price: valuation.formatted } as any); }
+      catch (e) { console.error("estimated_price save error (non-fatal):", e); }
     }
 
-    if (mortgageAmount) {
-      try {
-        await updateConversation(phone, { mortgage_amount: mortgageAmount });
-      } catch (e) {
-        console.error("mortgageAmount save error (non-fatal):", e);
-      }
-    }
-
-    if (currentStep === FINAL_STEP && appointmentConfirmed) {
-      const { getConversation } = await import("@/lib/supabase");
-      const latestConv = await getConversation(phone);
-      const sellTl = (latestConv ?? updatedConversation as any)?.sell_timeline ?? "";
+    // ── Bigin push on booking confirmation ────────────────────────────────────
+    if (appointmentConfirmed) {
+      const freshConv = await getConversation(phone);
+      const sellTl = (freshConv as any)?.sell_timeline ?? "";
       let salesInquiry = "Cash Deal";
       if (sellTl.includes("consignment")) salesInquiry = "Consignment";
       else if (sellTl.includes("not_sure")) salesInquiry = "Not Sure - Need Advise";
-      const latestHistory = ((latestConv as any)?.messages ?? history) as ConversationMessage[];
-      const inquirySummary = await generateInquirySummary(latestHistory, knownFields).catch(() => "");
-      await createBiginContact({
-        ...(latestConv ?? updatedConversation),
-        phone_number: phone,
-        alternative_phone: altPhone ?? (latestConv as any)?.alternative_phone,
-        owner_status: (latestConv as any)?.owner_status,
-        car_conditions: (latestConv as any)?.car_conditions,
-        sales_inquiry: salesInquiry,
-        inspection_booked: true,
-        inquiry_summary: inquirySummary,
-      } as any);
-      try {
-        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-      } catch (e) {
-        console.error("bigin_pushed_at save error (non-fatal):", e);
-      }
+
+      await pushToBigin(freshConv ?? conversation, phone, history, {
+        ...knownFields,
+        ...(freshConv ?? {}),
+        alternative_phone: altPhone ?? (freshConv as any)?.alternative_phone,
+      }, salesInquiry, true);
     }
 
     return NextResponse.json({ status: "ok" }, { status: 200 });
