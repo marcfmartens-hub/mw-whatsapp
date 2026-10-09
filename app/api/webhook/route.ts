@@ -255,9 +255,14 @@ export async function POST(req: NextRequest) {
 
     // ── Reset trigger ──────────────────────────────────────────────
     if (messageText.toLowerCase() === RESET_KEYWORD) {
-      await resetConversation(phone);
-      const reply = await getKayaReply(0, [], "", {});
-      await sendWhatsAppMessage(phone, reply);
+      try {
+        await resetConversation(phone);
+        const reply = await getKayaReply(0, [], "", {});
+        await sendWhatsAppMessage(phone, reply);
+      } catch (e) {
+        console.error("reset handler error:", e);
+        await sendWhatsAppMessage(phone, "Hi! Welcome to Mister Wheelz. What car are you looking to sell?").catch(() => {});
+      }
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
     // ──────────────────────────────────────────────────────────────
@@ -307,7 +312,7 @@ export async function POST(req: NextRequest) {
     // Mark this message ID immediately to prevent duplicate processing during async Claude call
     // Re-fetch after stamp so we see any reset that completed between our initial fetch and now
     await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
-    const freshConversation = await getConversation(phone);
+    const freshConversation = await getConversation(phone).catch(() => null);
     if (freshConversation) Object.assign(conversation, freshConversation);
 
     // ── Special inquiry detection (any step) ──────────────────────────────
