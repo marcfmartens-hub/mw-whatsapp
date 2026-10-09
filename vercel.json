@@ -4,7 +4,7 @@
   "crons": [
     {
       "path": "/api/cron/push-inactive",
-      "schedule": "*/15 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }
