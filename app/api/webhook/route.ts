@@ -39,15 +39,23 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
   0: undefined,          // first contact — nothing to save
   1: "name",             // customer gives name
   2: "phone_number",     // UAE contact number (only asked when sender is non-UAE)
-  3: "car",              // customer states intent / car info
+  3: "car",              // customer states car info
   4: undefined,          // mileage+specs collected via vehicle extraction only
-  5: "loan",             // loan status (skipped for cars 5+ years old)
-  6: "sell_timeline",    // when do they want to sell? (summary no longer waits for confirmation)
+  5: "loan",             // loan / mortgage status
+  6: "sell_timeline",    // sell method: cash / consignment / not sure
   7: "appointment",      // appointment day/time — Bigin fires after this
 };
 
 const FINAL_STEP  = 7;
 const CLOSING_STEP = 8;
+
+// Sell method detection
+const SELL_METHOD_CASH        = /\b(cash|direct|buy now|sell now|sell fast|quick sale|immediately|instant)\b/i;
+const SELL_METHOD_CONSIGNMENT = /\b(consign|consignment|list|listing|display|market|higher price|best price)\b/i;
+const SELL_METHOD_NOT_SURE    = /\b(not sure|unsure|don.?t know|undecided|still deciding|what.?s better|which is better|explain|difference|options?)\b/i;
+
+// Handoff detection — complex conversations that need a human
+const HANDOFF_SIGNALS = /\b(too many questions|complicated|confused|call me|speak to someone|talk to a person|human|agent|manager|more information|tell me more|how does it work|what happens|walk me through|i don.?t understand)\b/i;
 
 const URGENT_KEYWORDS  = /\b(today|now|right now|asap|any\s*time|whenever|when the price is right|immediately|urgent)\b/i;
 const GREETING_ONLY   = /^(hi+|hey+|hello+|hiya|yo|howdy|good\s*(morning|afternoon|evening|day|evening))[\s!.,]*$/i;
@@ -419,14 +427,34 @@ export async function POST(req: NextRequest) {
     const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
     const HUMAN_REQUEST   = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
     const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested)\b/i;
-    const THREE_OPTIONS_SENT = /three ways to sell|direct cash sale|consignment.*private|we offer three/i;
+    const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
     const alreadyExplainedOptions = history.some(
-      m => m.role === "assistant" && THREE_OPTIONS_SENT.test(m.content)
+      m => m.role === "assistant" && OPTIONS_SENT.test(m.content)
     );
-    const callbackSignal =
+
+    // Save sell method at step 6
+    if (currentStep === 6 && messageText) {
+      let sellMethod: string | undefined;
+      if (SELL_METHOD_CASH.test(messageText))        sellMethod = "cash";
+      else if (SELL_METHOD_CONSIGNMENT.test(messageText)) sellMethod = "consignment";
+      else if (SELL_METHOD_NOT_SURE.test(messageText))    sellMethod = "not_sure";
+      if (sellMethod) {
+        try {
+          await updateConversation(phone, { sell_timeline: `sell_method:${sellMethod}` } as any);
+        } catch (e) {
+          console.error("sell method save error (non-fatal):", e);
+        }
+      }
+    }
+
+    // Handoff trigger — complex conversations get forwarded to purchase team
+    const handoffSignal =
       HUMAN_REQUEST.test(messageText) ||
-      (currentStep >= FINAL_STEP && currentStep < CLOSING_STEP && PRICE_PUSH.test(messageText)) ||
-      (alreadyExplainedOptions && (PRICE_PUSH.test(messageText) || BOOKING_REFUSAL.test(messageText)));
+      (currentStep >= 6 && HANDOFF_SIGNALS.test(messageText)) ||
+      (alreadyExplainedOptions && PRICE_PUSH.test(messageText)) ||
+      (alreadyExplainedOptions && BOOKING_REFUSAL.test(messageText));
+
+    const callbackSignal = handoffSignal;
     if (!action && currentStep >= 5 && currentStep < CLOSING_STEP && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
     }
@@ -481,7 +509,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action?.type === "OFFER_CALLBACK") {
-      await sendWhatsAppMessage(phone, "You're also welcome to walk in whenever — here's where to find us.");
+      await sendWhatsAppMessage(phone, "Our purchase team will be in touch with you shortly. You're also welcome to walk in whenever — here's where to find us.");
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       try {
@@ -515,10 +543,15 @@ export async function POST(req: NextRequest) {
     const stayAtLoanAmount   = currentStep === 5 && loanIsYes
       && !mortgageAmount && !conversation.mortgage_amount;
     const stayAtAppointment  = currentStep === FINAL_STEP && !appointmentConfirmed;
+    // At step 6 (sell method), only stay if they asked for explanation (not sure / explain)
+    // — otherwise advance to appointment booking
+    const stayAtSellMethod   = currentStep === 6 && SELL_METHOD_NOT_SURE.test(messageText)
+      && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
       : stayAtStep1        ? 1
       : stayAtMileageSpecs ? 4
       : stayAtLoanAmount   ? 5
+      : stayAtSellMethod   ? 6
       : stayAtAppointment  ? FINAL_STEP
       : currentStep === 1 && isUAE ? 3
       : skipLoan           ? 6
