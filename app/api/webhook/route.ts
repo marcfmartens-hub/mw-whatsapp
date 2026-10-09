@@ -449,6 +449,9 @@ export async function POST(req: NextRequest) {
         mortgageAmount = /k$/i.test(raw)
           ? String(parseFloat(raw) * 1000)
           : raw;
+      } else if (/\b(no|don'?t know|not sure|no idea|unknown|unsure|idk)\b/i.test(messageText)) {
+        // Customer doesn't know the amount — treat as "Unknown" so step advances
+        mortgageAmount = "Unknown";
       }
     }
 
