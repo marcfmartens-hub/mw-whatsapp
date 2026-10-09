@@ -726,21 +726,67 @@ export async function POST(req: NextRequest) {
     const multiMode = ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && m.content.includes(MULTI_ASK));
     const mentionsMulti = MULTI_CARS.test(messageText);
     const looksLikeCarDetails = !!(vehicleUpdates.make || vehicleUpdates.model || vehicleUpdates.year || vehicleUpdates.mileage);
-    if (mentionsMulti || (multiMode && looksLikeCarDetails && currentStep <= 4)) {
-      const existing = (conversation as any).car_conditions ?? "";
-      const note = `Cars: ${messageText.trim()}`;
-      if (!existing.includes(messageText.trim())) {
-        const updated = existing ? `${existing} | ${note}` : note;
-        await updateConversation(phone, { car_conditions: updated } as any).catch(() => {});
-        (conversation as any).car_conditions = updated;
+    // Several cars = team handoff: details of each car → owner? → personal/company? → number → close.
+    // No booking. Other questions (home visit etc.) → "discuss with the team", then repeat the open question.
+    if ((mentionsMulti || multiMode) && currentStep < CLOSING_STEP) {
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const asked = (q: string) => hist.some(m => m.role === "assistant" && m.content.includes(q));
+      const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const OWNER_Q = "Are you the registered owner of the cars?";
+      const REG_Q   = "Are they registered under your personal name or a company name?";
+      const PHONE_Q = "Which UAE number is best to reach you on?";
+      const DETAILS_Q = `Could you share the make, model, year, mileage and specs (GCC or non-GCC) ${MULTI_ASK}? One message is fine.`;
+      const firstTime = !multiMode;
+      const updates: Record<string, unknown> = { ...vehicleDbFields(vehicleUpdates), last_msg_id: message.id };
+      let notes: string = (conversation as any).car_conditions ?? "";
+      const addNote = (n: string) => { if (!notes.includes(n)) notes = notes ? `${notes} | ${n}` : n; };
+
+      // A question instead of an answer → team will discuss it; repeat the open question
+      const isOtherQuestion = !firstTime && /\?|\b(do|does|can|could|will|would)\s+(you|u)\b|\bhome\s*(visit|service|pick\s*up)|\bhow much\b|\bprice\b/i.test(messageText)
+        && !looksLikeCarDetails && !/^(yes|no|yeah|yep|nope|personal|company|private)\b/i.test(messageText.trim());
+
+      if (!isOtherQuestion && !firstTime) {
+        if (lastA.includes(MULTI_ASK)) addNote(`Cars: ${messageText.trim()}`);
+        else if (lastA.includes(OWNER_Q)) {
+          updates.owner_status = /\b(no|not|brother|sister|father|mother|wife|husband|friend|family|poa|attorney|company)\b/i.test(messageText) ? `Not owner: ${messageText.trim()}` : "Owner";
+          addNote(`Owner: ${messageText.trim()}`);
+        } else if (lastA.includes(REG_Q)) {
+          addNote(`Registered under: ${/company|business|corporate|llc|fze|establishment/i.test(messageText) ? "company" : /personal|my name|private|own name|individual/i.test(messageText) ? "personal name" : messageText.trim()}`);
+        } else if (lastA.includes(PHONE_Q)) {
+          const pm = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+          if (pm) {
+            const raw = pm[0].replace(/\D/g, "");
+            const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+            if (alt !== phone) updates.alternative_phone = alt;
+          }
+        }
       }
-    }
-    if (mentionsMulti && !multiMode && currentStep <= 4) {
-      const reply = `Happy to look at all of them! Could you share the make, model, year, mileage and specs (GCC or non-GCC) ${MULTI_ASK}? One message is fine.`;
+      if (firstTime) addNote(`Cars: ${messageText.trim()}`);
+      if (notes) updates.car_conditions = notes;
+
+      let nextQ: string | null;
+      if (isOtherQuestion) nextQ = [DETAILS_Q, OWNER_Q, REG_Q, PHONE_Q].find(q => lastA.includes(q) || (q === DETAILS_Q && lastA.includes(MULTI_ASK))) ?? PHONE_Q;
+      else if (firstTime || !asked(MULTI_ASK)) nextQ = DETAILS_Q;
+      else if (!asked(OWNER_Q)) nextQ = OWNER_Q;
+      else if (!asked(REG_Q)) nextQ = REG_Q;
+      else if (!asked(PHONE_Q)) nextQ = PHONE_Q;
+      else nextQ = null;
+
+      const reply = isOtherQuestion
+        ? `That's something our team can discuss with you directly. ${nextQ}`
+        : firstTime
+          ? `Happy to look at all of them! ${DETAILS_Q}`
+          : nextQ ?? "Thanks, I've got everything I need. Our team will get back to you shortly. Have a nice day!";
+
       await sendWhatsAppMessage(phone, reply);
-      if (Object.keys(vehicleDbFields(vehicleUpdates)).length) await updateConversation(phone, vehicleDbFields(vehicleUpdates)).catch(() => {});
-      await updateConversation(phone, { step: Math.max(currentStep, 2), last_message_at: new Date().toISOString() } as any).catch(() => {});
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      updates.step = nextQ ? Math.max(currentStep, 2) : CLOSING_STEP;
+      updates.last_message_at = new Date().toISOString();
+      await updateConversation(phone, updates as any).catch(async (e) => {
+        console.error("multi-car save error:", e);
+        await updateConversation(phone, { step: updates.step, car_conditions: notes || null } as any).catch(() => {});
+      });
+      await appendHistory(phone, hist, messageText, reply);
+      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "multiple cars" : "multiple cars — details complete", { salesInquiry: "Other", inspectionBooked: false });
       return NextResponse.json({ status: "multi_cars" }, { status: 200 });
     }
 
