@@ -554,11 +554,16 @@ export async function POST(req: NextRequest) {
     const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
     const PRICE_PUSH      = /\b(price|offer|estimate|range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
     const HUMAN_REQUEST   = /\b(speak to|talk to|call me|speak with|agent|human|person|manager|someone from|real person|staff)\b/i;
-    const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested)\b/i;
+    const BOOKING_REFUSAL = /\b(no[,.]?\s*(thanks|thank you|i|i'll)?|not\s*(now|yet|today|ready|going)|i'?ll\s*(think|let you|pass)|maybe later|don'?t\s*want|not\s*interested|forget it|not for me|bye|goodbye|leave it|never mind|nevermind)\b/i;
     const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
     const alreadyExplainedOptions = history.some(
       m => m.role === "assistant" && OPTIONS_SENT.test(m.content)
     );
+    // How many times has the customer pushed on price?
+    const pricePushCount = history.filter(
+      m => m.role === "user" && PRICE_PUSH.test(m.content)
+    ).length;
+    const customerWantsCashOnly = /\b(cash only|only cash|just cash|cash sale|direct.*buy)\b/i.test(messageText);
 
     // Save sell method at step 6
     if (currentStep === 6 && messageText) {
@@ -579,9 +584,12 @@ export async function POST(req: NextRequest) {
     const handoffSignal =
       HUMAN_REQUEST.test(messageText) ||
       (currentStep >= 6 && HANDOFF_SIGNALS.test(messageText)) ||
-      (alreadyExplainedOptions && PRICE_PUSH.test(messageText)) ||
-      (alreadyExplainedOptions && BOOKING_REFUSAL.test(messageText));
+      // Only callback if consignment was already suggested and they still refuse
+      (alreadyExplainedOptions && BOOKING_REFUSAL.test(messageText)) ||
+      (alreadyExplainedOptions && customerWantsCashOnly && BOOKING_REFUSAL.test(messageText));
 
+    // If customer pushes on price a second time (and consignment not yet explained) → let Claude pivot to consignment
+    // If customer gives up / not interested after consignment was explained → offer callback
     const callbackSignal = handoffSignal;
     if (!action && currentStep >= 5 && currentStep < CLOSING_STEP && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
