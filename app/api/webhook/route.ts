@@ -215,11 +215,11 @@ function buildDirectResponse(
       const hasModel = !!(known.model && known.model !== "Unknown");
       const hasYear  = !!known.year;
       if (hasMake && hasModel) {
-        return `Alright, nice ${known.make} ${known.model}! Which year is it?`;
+        return `Nice! Which year is it?`;
       } else if (hasMake && hasYear) {
-        return `Got it — ${known.year} ${known.make}. Which model is it?`;
+        return `Nice! Which model is it?`;
       } else if (hasMake) {
-        return `Got it — ${known.make}! What's the model and year?`;
+        return `Nice! What's the model and year?`;
       }
       return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
     }
