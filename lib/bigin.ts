@@ -58,7 +58,7 @@ async function getContactFields(accessToken: string): Promise<FieldMeta[] | null
 const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // "Saturday", "tomorrow", "10 October", "2026-10-10" → "YYYY-MM-DD" (Dubai time)
-function toIsoDate(raw: string): string | null {
+export function toIsoDate(raw: string): string | null {
   const v = raw.trim().toLowerCase();
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
   const now = new Date(Date.now() + 4 * 3600 * 1000);
@@ -105,11 +105,49 @@ function matchPicklist(value: string, opts: { display_value: string; actual_valu
   return null;
 }
 
+// "2pm", "2:30 pm", "14:00", "noon" → "14:00"
+function toTime24(raw: string): string | null {
+  const v = raw.trim().toLowerCase();
+  if (/\bnoon\b|\bmidday\b/.test(v)) return "12:00";
+  const m = v.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/);
+  if (!m) return null;
+  let h = +m[1]; const min = m[2] ?? "00"; const ap = m[3]?.replace(/\./g, "");
+  if (ap === "pm" && h < 12) h += 12;
+  if (ap === "am" && h === 12) h = 0;
+  if (!ap && h >= 1 && h <= 7) h += 12; // "come at 5" during business hours = 17:00
+  if (h > 23 || +min > 59) return null;
+  return `${String(h).padStart(2, "0")}:${min}`;
+}
+const to12h = (t: string) => { const [h, m] = t.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`; };
+const prettyDate = (iso: string) => new Date(iso + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+// Fit an appointment value to whatever type the Bigin field is
+function coerceAppointment(kind: "date" | "time", f: FieldMeta | null, dateRaw?: string, timeRaw?: string): unknown {
+  const iso = dateRaw ? toIsoDate(dateRaw) : null;
+  const t24 = timeRaw ? toTime24(timeRaw) : null;
+  const type = f?.data_type ?? (kind === "date" ? "date" : "text");
+  if (type === "datetime") return iso ? `${iso}T${t24 ?? "10:00"}:00+04:00` : null;
+  if (type === "date") return iso;
+  if (type === "picklist") {
+    const opts = f?.pick_list_values ?? [];
+    if (kind === "time" && t24) {
+      const hit = opts.find(o => toTime24(o.display_value) === t24);
+      return hit?.actual_value ?? null;
+    }
+    return matchPicklist(kind === "date" ? (dateRaw ?? "") : (timeRaw ?? ""), opts);
+  }
+  // text-like
+  if (kind === "date") return iso ? prettyDate(iso) : dateRaw ?? null;
+  return t24 ? to12h(t24) : timeRaw ?? null;
+}
+
 // Resolve our keys to Bigin api names (by api name, then by label) and coerce by type.
 function adaptRecord(record: Record<string, string>, fields: FieldMeta[] | null): Record<string, unknown> {
   if (!fields) {
     const out: Record<string, unknown> = { ...record };
-    if (out["Appointment_Date"]) { const d = toIsoDate(String(out["Appointment_Date"])); if (d) out["Appointment_Date"] = d; else delete out["Appointment_Date"]; }
+    const dr = record["Appointment_Date"], tr = record["Appointment_Time"];
+    if (dr) { const d = coerceAppointment("date", null, dr, tr); if (d) out["Appointment_Date"] = d; else delete out["Appointment_Date"]; }
+    if (tr) { const t = coerceAppointment("time", null, dr, tr); if (t) out["Appointment_Time"] = t; else delete out["Appointment_Time"]; }
     return out;
   }
   const byApi = new Map(fields.map(f => [f.api_name, f]));
@@ -120,6 +158,12 @@ function adaptRecord(record: Record<string, string>, fields: FieldMeta[] | null)
     const f = byApi.get(key) ?? byLabel.get(norm(key.replace(/_/g, " ")));
     if (!f) { console.warn(`[Bigin] no field for "${key}" — skipped`); continue; }
     let v: unknown = raw;
+    if (key === "Appointment_Date" || key === "Appointment_Time") {
+      v = coerceAppointment(key === "Appointment_Date" ? "date" : "time", f, record["Appointment_Date"], record["Appointment_Time"]);
+      if (v == null) { console.warn(`[Bigin] appointment "${raw}" doesn't fit ${f.api_name} (${f.data_type}) — skipped`); continue; }
+      out[f.api_name] = v;
+      continue;
+    }
     switch (f.data_type) {
       case "picklist": v = matchPicklist(String(raw), f.pick_list_values ?? []); break;
       case "integer": case "bigint": { const n = parseInt(String(raw).replace(/[^\d]/g, ""), 10); v = isNaN(n) ? null : n; break; }
@@ -210,7 +254,15 @@ export async function createBiginContact(
     if (conversation.estimated_price)  record["Estimated_Price"]  = conversation.estimated_price;
     if (conversation.owner_status)     record["Owner_Status"]     = conversation.owner_status;
     if (conversation.car_conditions)   record["Car_Conditions"]   = conversation.car_conditions;
-    if (conversation.inquiry_summary)  record["Inquiry_Summary"]  = conversation.inquiry_summary;
+    {
+      const iso = conversation.appointment_date ? toIsoDate(conversation.appointment_date) : null;
+      const t24 = conversation.appointment_time ? toTime24(conversation.appointment_time) : null;
+      const apptLine = (conversation.appointment_date || conversation.appointment_time)
+        ? `Appointment: ${iso ? prettyDate(iso) : conversation.appointment_date ?? "?"}${t24 ? ", " + to12h(t24) : conversation.appointment_time ? ", " + conversation.appointment_time : ""}`
+        : "";
+      const summary = [apptLine, conversation.inquiry_summary].filter(Boolean).join("\n\n");
+      if (summary) record["Inquiry_Summary"] = summary;
+    }
 
     const headers = {
       Authorization: `Zoho-oauthtoken ${accessToken}`,
@@ -232,6 +284,7 @@ export async function createBiginContact(
 
     const fields = await getContactFields(accessToken);
     const data = adaptRecord(record, fields);
+    data["First_Name"] = null; // never used — clears leftovers like "Unknown" on existing contacts
 
     // If Bigin rejects a field (INVALID_DATA etc.), drop just that field and retry —
     // one bad value must never cost us the whole record.

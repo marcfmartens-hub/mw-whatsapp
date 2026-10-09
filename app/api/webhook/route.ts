@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
-import { createBiginContact } from "@/lib/bigin";
+import { createBiginContact, toIsoDate } from "@/lib/bigin";
 import { CAR_MODELS } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
@@ -538,10 +538,11 @@ export async function POST(req: NextRequest) {
     if ((currentStep === FINAL_STEP || wantsBooking) && messageText) {
       try {
         const ea = await extractAppointment(messageText);
-        if (ea.appointment_date) apptDate = ea.appointment_date;
+        // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
+        if (ea.appointment_date) apptDate = toIsoDate(ea.appointment_date) ?? ea.appointment_date;
         if (ea.appointment_time) apptTime  = ea.appointment_time;
         const apptSave: Partial<Conversation> = {};
-        if (ea.appointment_date) apptSave.appointment_date = ea.appointment_date;
+        if (ea.appointment_date) apptSave.appointment_date = apptDate;
         if (ea.appointment_time) apptSave.appointment_time  = ea.appointment_time;
         if (Object.keys(apptSave).length > 0)
           await updateConversation(phone, apptSave);
