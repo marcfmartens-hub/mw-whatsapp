@@ -37,23 +37,73 @@ async function getAccessToken(): Promise<string> {
   return data.access_token as string;
 }
 
-export async function createBiginContact(conversation: Conversation, attempt = 1): Promise<void> {
+// Valid Bigin Sales_Inquiry picklist values
+const VALID_SALES_INQUIRY = new Set([
+  "Cash Deal",
+  "Consignment",
+  "Not Sure - Need Advise",
+  "No Communication yet",
+  "Price Offer Inquiry",
+  "Home Visit Inquiry",
+  "Trade-in Inquiry",
+  "Other",
+]);
+
+// Maps internal sell_timeline values to Bigin picklist labels
+function resolveSalesInquiry(conversation: Conversation & { sales_inquiry?: string }): string {
+  const explicit = (conversation as any).sales_inquiry;
+  if (explicit && VALID_SALES_INQUIRY.has(explicit)) return explicit;
+  const st = (conversation as any).sell_timeline ?? "";
+  if (st.includes("cash"))        return "Cash Deal";
+  if (st.includes("consignment")) return "Consignment";
+  if (st.includes("not_sure"))    return "Not Sure - Need Advise";
+  if (st.includes("home_visit"))  return "Home Visit Inquiry";
+  if (st.includes("trade_in"))    return "Trade-in Inquiry";
+  if (st.includes("price_offer")) return "Price Offer Inquiry";
+  // Explicit but unrecognised value → "Other"
+  if (explicit) return "Other";
+  return "No Communication yet";
+}
+
+export async function createBiginContact(
+  conversation: Conversation & {
+    sales_inquiry?: string;
+    alternative_phone?: string;
+    inquiry_summary?: string;
+    inspection_booked?: boolean;
+    owner_status?: string;
+    car_conditions?: string;
+  },
+  attempt = 1
+): Promise<void> {
   try {
     const accessToken = await getAccessToken();
 
-    const displayName = conversation.name ||
-      [conversation.make, conversation.model, conversation.year].filter(Boolean).join(" ") ||
-      "Unknown";
+    // Name: use customer name, fall back to car details, never leave empty
+    const carFallback = [conversation.make, conversation.model, conversation.year]
+      .filter(Boolean).join(" ");
+    const displayName = conversation.name || carFallback || "Unknown";
     const [firstName, ...rest] = displayName.trim().split(/\s+/);
     const lastName = rest.length > 0 ? rest.join(" ") : firstName;
+
+    // Phone: always use conversation phone (WhatsApp sender) as primary
+    const conversationPhone = (conversation as any).phone_number || (conversation as any).phone || "";
+    // Alternative phone: only if explicitly different from conversation phone
+    const altPhone = (conversation as any).alternative_phone ?? "";
+    const primaryPhone = altPhone && altPhone !== conversationPhone ? altPhone : conversationPhone;
 
     const record: Record<string, string> = {
       First_Name: firstName,
       Last_Name: lastName,
-      Phone: conversation.phone_number || conversation.phone,
+      Phone: primaryPhone || conversationPhone,
+      Conversation_Phone_Number: conversationPhone,
       Lead_Source: "WhatsApp Bot",
       Source_Url: "WhatsApp Bot",
+      Sales_Inquiry: resolveSalesInquiry(conversation as any),
     };
+
+    // Inspection_Booked: Yes if appointment confirmed, No otherwise
+    record["Inspection_Booked"] = conversation.inspection_booked ? "Yes" : "No";
 
     if (conversation.make)             record["Make"]             = conversation.make;
     if (conversation.model)            record["Model"]            = conversation.model;
@@ -63,6 +113,9 @@ export async function createBiginContact(conversation: Conversation, attempt = 1
     if (conversation.appointment_date) record["Appointment_Date"] = conversation.appointment_date;
     if (conversation.appointment_time) record["Appointment_Time"] = conversation.appointment_time;
     if (conversation.estimated_price)  record["Estimated_Price"]  = conversation.estimated_price;
+    if (conversation.owner_status)     record["Owner_Status"]     = conversation.owner_status;
+    if (conversation.car_conditions)   record["Car_Conditions"]   = conversation.car_conditions;
+    if (conversation.inquiry_summary)  record["Inquiry_Summary"]  = conversation.inquiry_summary;
 
     const payload = { data: [record] };
 
