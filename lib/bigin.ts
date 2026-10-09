@@ -215,7 +215,7 @@ export async function createBiginContact(
     car_conditions?: string;
   },
   attempt = 1
-): Promise<string | null> {  // Bigin contact id on success, null on failure
+): Promise<boolean> {
   try {
     const accessToken = await getAccessToken();
 
@@ -269,13 +269,10 @@ export async function createBiginContact(
       "Content-Type": "application/json",
     };
 
-    // One Bigin contact per CONVERSATION (not per phone number):
-    //  - conversation already has a bigin_contact_id → update that contact
-    //  - column exists but empty → new conversation → create a new contact
-    //  - column doesn't exist yet in Supabase → fall back to matching by phone
-    const hasIdColumn = "bigin_contact_id" in (conversation as any);
-    let existingId: string | null = (conversation as any).bigin_contact_id ?? null;
-    if (!hasIdColumn && conversationPhone) {
+    // Upsert: find existing contact by the WhatsApp number, update it; otherwise create.
+    // Lets us push at every milestone (follow-up, booking, timeout) without duplicates.
+    let existingId: string | null = null;
+    if (conversationPhone) {
       const sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(conversationPhone)}`, { headers });
       if (sr.status === 200) {
         const sj = await sr.json().catch(() => null);
@@ -292,7 +289,6 @@ export async function createBiginContact(
     // If Bigin rejects a field (INVALID_DATA etc.), drop just that field and retry —
     // one bad value must never cost us the whole record.
     let text = "";
-    let savedId: string | null = null;
     for (let tries = 0; tries < 6; tries++) {
       const body = JSON.stringify({ data: [existingId ? { id: existingId, ...data } : data] });
       console.log(`[Bigin] ${existingId ? "updating " + existingId : "creating"}:`, body);
@@ -300,13 +296,7 @@ export async function createBiginContact(
       text = await res.text();
       const result = (() => { try { return JSON.parse(text); } catch { return null; } })();
       const row = result?.data?.[0];
-      if (res.ok && (!row?.status || row.status === "success")) { savedId = row?.details?.id ?? existingId; break; }
-      // Contact was deleted in Bigin → create a fresh one instead
-      if (existingId && (res.status === 404 || /INVALID_DATA/.test(row?.code ?? "") && row?.details?.api_name === "id")) {
-        console.warn(`[Bigin] contact ${existingId} not found — creating new`);
-        existingId = null;
-        continue;
-      }
+      if (res.ok && (!row?.status || row.status === "success")) break;
       const bad = row?.details?.api_name as string | undefined;
       if (bad && bad in data) {
         console.warn(`[Bigin] field ${bad} rejected (${row?.code}: ${row?.message}) — retrying without it`);
@@ -316,7 +306,7 @@ export async function createBiginContact(
       throw new Error(`Bigin ${existingId ? "update" : "create"} failed: ${res.status} ${text}`);
     }
     console.log(`[Bigin] contact ${existingId ? "updated" : "created"}:`, text);
-    return savedId ?? existingId ?? "ok";
+    return true;
   } catch (error) {
     if (attempt < 3) {
       console.warn(`[Bigin] attempt ${attempt} failed, retrying in 3s...`);
@@ -324,6 +314,6 @@ export async function createBiginContact(
       return createBiginContact(conversation, attempt + 1);
     }
     console.error("Bigin contact creation error (all retries failed):", error);
-    return null;
+    return false;
   }
 }

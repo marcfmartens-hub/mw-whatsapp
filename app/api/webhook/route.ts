@@ -142,12 +142,7 @@ async function pushLead(
       inspection_booked: booked,
       inquiry_summary: summary,
     } as any);
-    if (ok) {
-      await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-      // Separate write: if the column doesn't exist yet this fails without blocking the above
-      if (ok !== "ok" && "bigin_contact_id" in latest && latest.bigin_contact_id !== ok)
-        await updateConversation(phone, { bigin_contact_id: ok } as any).catch(() => {});
-    }
+    if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
     console.log(`[bigin] push (${reason}) for ${phone}: ${ok ? "ok" : "FAILED"}`);
   } catch (e) {
     console.error(`[bigin] push (${reason}) error for ${phone}:`, e);
