@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
     try {
       // Determine Sales_Inquiry label based on what we know
       let salesInquiry = "No Communication yet";
+      const notesC = String(conv.car_conditions ?? "");
       const st = conv.sell_timeline ?? "";
       if (st.includes("cash"))        salesInquiry = "Cash Deal";
       else if (st.includes("consignment")) salesInquiry = "Consignment";
@@ -66,6 +67,8 @@ export async function GET(req: NextRequest) {
       else if (st.includes("home_visit"))  salesInquiry = "Home Visit Inquiry";
       else if (st.includes("trade_in"))    salesInquiry = "Trade-in Inquiry";
       else if (st.includes("price_offer")) salesInquiry = "Price Offer Inquiry";
+      if (notesC.includes("Trade-in:")) salesInquiry = "Trade-in Inquiry";
+      else if (notesC.includes("BUYER:")) salesInquiry = "Other";
 
       const history: ConversationMessage[] = Array.isArray(conv.messages) ? conv.messages : [];
       const inquirySummary = await generateInquirySummary(history, {

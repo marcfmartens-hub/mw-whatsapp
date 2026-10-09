@@ -106,7 +106,7 @@ function matchPicklist(value: string, opts: { display_value: string; actual_valu
 }
 
 // "2pm", "2:30 pm", "14:00", "noon" → "14:00"
-function toTime24(raw: string): string | null {
+export function toTime24(raw: string): string | null {
   const v = raw.trim().toLowerCase();
   if (/\bnoon\b|\bmidday\b/.test(v)) return "12:00";
   const m = v.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/);

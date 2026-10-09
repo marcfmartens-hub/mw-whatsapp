@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
-import { createBiginContact, toIsoDate } from "@/lib/bigin";
+import { createBiginContact, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
@@ -157,14 +157,17 @@ async function pushLead(
     if (!latest) return;
     const history: ConversationMessage[] = Array.isArray(latest.messages) ? latest.messages : [];
     const aiSummary = await generateInquirySummary(history, latest as any).catch(() => "");
-    const otherCars = String((latest as any).car_conditions ?? "").split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
-    const summary = [otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
+    const notesAll = String((latest as any).car_conditions ?? "");
+    const otherCars = notesAll.split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
+    const buyerNote = /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "";
+    const summary = [buyerNote, otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
     const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
     const ok = await createBiginContact({
       ...latest,
       phone_number: latest.phone_number || phone,
       alternative_phone: opts.altPhone ?? latest.alternative_phone ?? undefined,
-      sales_inquiry: opts.salesInquiry,
+      sales_inquiry: /Trade-in:/.test(notesAll) && (!opts.salesInquiry || ["Cash Deal", "Consignment", "Not Sure - Need Advise"].includes(opts.salesInquiry))
+        ? "Trade-in Inquiry" : opts.salesInquiry,
       inspection_booked: booked,
       inquiry_summary: summary,
       clear_appointment: opts.clearAppointment ?? false,
@@ -560,8 +563,19 @@ export async function POST(req: NextRequest) {
       if (mediaInBurst) messageText = burst.map(b => b.replace(MEDIA_TAG, "").trim()).filter(Boolean).join("\n");
     }
 
-    // Only photos/files, no text → say we can't see them and ask for the info as text
-    if (mediaInBurst && !messageText) {
+    // Links: Kaya can't open them. Keep the words from the link (ads often contain make/model/year).
+    let linkInMsg = false;
+    const URL_RE = /https?:\/\/\S+|www\.\S+/gi;
+    if (URL_RE.test(messageText)) {
+      linkInMsg = true;
+      messageText = messageText.replace(URL_RE, u => " " + u.replace(/^https?:\/\/(www\.)?/i, "").split(/[/?#]/).slice(1)
+        .join(" ").replace(/[-_+=%]/g, " ").replace(/\b\d{6,}\b/g, "").replace(/\b(used|cars?|motors|listing|ad|ads|en|ar|uae|dubai|for|sale)\b/gi, " ") + " ")
+        .replace(/\s+/g, " ").trim();
+    }
+    const LINK_NOTE = "Unfortunately I'm unable to open links, so please share the details with me here.";
+
+    // Only photos/files/links, no text → say we can't see them and ask for the info as text
+    if ((mediaInBurst || linkInMsg) && !messageText) {
       const c = conversation as any;
       const missing = ["make", "model", "year"].filter(k => !c[k] || c[k] === "Unknown");
       if (!c.mileage) missing.push("mileage");
@@ -570,30 +584,64 @@ export async function POST(req: NextRequest) {
       const ask = missing.length && (c.step ?? 0) <= 4
         ? `Could you type the ${missing.length > 1 ? missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1] : missing[0]}?`
         : /\?\s*$/.test(lastQ) && lastQ.length < 200 ? lastQ : "Could you type the details instead?";
-      const reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can't see what you sent. ${ask}`;
+      const reply = mediaInBurst
+        ? `Thanks! Unfortunately I'm not able to open photos or files, so I can't see what you sent. ${ask}`
+        : `${LINK_NOTE} ${ask}`;
       await sendWhatsAppMessage(phone, reply);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], "[sent photos/files]", reply);
       return NextResponse.json({ status: "media_only" }, { status: 200 });
     }
 
-    // ── Special inquiry detection (any step) ──────────────────────────────
-    // Trade-in inquiry → collect info, push to Bigin, hand off.
-    // Home visits are NOT offered — Kaya answers those herself (see HOME VISITS in lib/claude.ts).
-    const isHomeVisit = false;
-    const isTradeIn   = TRADE_IN_PATTERN.test(messageText);
-    if ((isHomeVisit || isTradeIn) && (conversation.step ?? 0) > 0) {
-      const inquiryType = isHomeVisit ? "Home Visit Inquiry" : "Trade-in Inquiry";
-      const inquiryTag  = isHomeVisit ? "home_visit" : "trade_in";
-      await updateConversation(phone, { sell_timeline: `sell_method:${inquiryTag}` } as any);
-      const replyMsg = isHomeVisit
-        ? "Of course, we can look into that for you. Let me pass your details to our team and they'll be in touch with you shortly to arrange."
-        : "Happy to discuss that. Let me pass your details to our team and they'll reach out to you shortly to go over the options.";
-      await sendWhatsAppMessage(phone, replyMsg);
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, replyMsg);
-      await pushLead(phone, "trade-in follow-up", { salesInquiry: "Trade-in Inquiry" });
-      return NextResponse.json({ status: "special_inquiry" }, { status: 200 });
+    // ── Trade-in: customer sells AND buys → normal selling flow, flagged for the team ──
+    if (TRADE_IN_PATTERN.test(messageText) && !String((conversation as any).car_conditions ?? "").includes("Trade-in:")) {
+      const note = "Trade-in: customer also wants to buy a car";
+      const ex = (conversation as any).car_conditions ?? "";
+      (conversation as any).car_conditions = ex ? `${ex} | ${note}` : note;
+      await updateConversation(phone, { car_conditions: (conversation as any).car_conditions } as any).catch(() => {});
     }
     // ─────────────────────────────────────────────────────────────────────
+
+    // ── Buyers ───────────────────────────────────────────────────────────────
+    {
+      const BUY_INTENT = /\b(i\s*(want|need|would like|wanna|am looking|'?m looking|plan)\s+(to\s+)?(buy|purchase)\b|i\s*(want|need|would like|wanna)\s+(to\s+)?get\s+(a|an)\s+(new\s+|used\s+)?(car|vehicle|suv)\b|looking\s+to\s+buy|looking\s+for\s+a\s+(car|vehicle)\s+to\s+buy|do\s+you\s+(sell|have)\s+(any\s+)?cars|what\s+cars\s+do\s+you\s+have|your\s+(stock|inventory))/i;
+      const BUY_Q = "Are you also looking to sell a car (as a trade-in), or only looking to buy?";
+      const histB = (conversation.messages ?? []) as ConversationMessage[];
+      const lastAB = [...histB].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const notesB: string = (conversation as any).car_conditions ?? "";
+      const addNoteB = async (n: string) => {
+        const upd = notesB.includes(n) ? notesB : (notesB ? `${notesB} | ${n}` : n);
+        (conversation as any).car_conditions = upd;
+        await updateConversation(phone, { car_conditions: upd } as any).catch(() => {});
+      };
+      if (lastAB.includes(BUY_Q)) {
+        const words = messageText.toLowerCase().split(/[^a-z0-9-]+/);
+        const selling = /\b(sell|selling|trade|exchange|swap|both|yes|also|part)\b/i.test(messageText) && !/\b(only|just)\s+(buy|buying|looking)/i.test(messageText)
+          || words.some(w => CAR_WORDS.has(w));
+        if (selling) {
+          await addNoteB("Trade-in: customer also wants to buy a car");
+          if ((conversation.step ?? 0) < 2) {
+            conversation.step = 2;
+            await updateConversation(phone, { step: 2 } as any).catch(() => {});
+          }
+          // fall through → normal selling flow (asks the car if it's not in this message)
+        } else {
+          await addNoteB(`BUYER: wants to buy a car, not selling`);
+          const reply = "No problem! Our team will get back to you shortly. Have a nice day!";
+          await sendWhatsAppMessage(phone, reply);
+          await updateConversation(phone, { step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
+          await appendHistory(phone, histB, messageText, reply);
+          await pushLead(phone, "buyer", { salesInquiry: "Other", inspectionBooked: false });
+          return NextResponse.json({ status: "buyer" }, { status: 200 });
+        }
+      } else if (BUY_INTENT.test(messageText) && (conversation.step ?? 0) < CLOSING_STEP && !notesB.includes("Trade-in:")) {
+        await addNoteB(`Wants to buy: ${messageText.trim()}`);
+        const reply = `Happy to help! ${BUY_Q}`;
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, { last_message_at: new Date().toISOString() } as any).catch(() => {});
+        await appendHistory(phone, histB, messageText, reply);
+        return NextResponse.json({ status: "buyer_question" }, { status: 200 });
+      }
+    }
 
     // ── Returning customer answered "same car, or a different one?" ─────────
     {
@@ -653,6 +701,14 @@ export async function POST(req: NextRequest) {
 
     // Name given later in the chat ("my name is Louise") — save it if we don't have one yet.
     // Only explicit phrases here; bare words would catch things like "Cash" or "Tomorrow".
+    if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
+      const lastAskedName = [...((conversation.messages ?? []) as ConversationMessage[])].reverse()
+        .find(m => m.role === "assistant")?.content ?? "";
+      if (/may i have your name|what'?s your name|your name\?/i.test(lastAskedName)) {
+        const n = extractNameFromMessage(messageText);
+        if (n) (coreUpdates as any).name = n;
+      }
+    }
     if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
       const nm = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is|call\s+me|name\s*:)\s+([A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){0,3})\b/i);
       const NOT_NAMES = /^(selling|looking|interested|not|ok|okay|fine|good|here|coming|ready|sure|busy|planning|going|thinking|in|at|from|the|a|an|out|done|happy|available|free|asking|trying)\b/i;
@@ -1200,8 +1256,35 @@ export async function POST(req: NextRequest) {
     let reply = action && !customerAsked
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
       : await getKayaReply(jumpToBooking ? FINAL_STEP : currentStep, history, messageText, knownFields);
-    if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/not able to open|can'?t open photos/i.test(reply)) {
+    if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/not able to open|unable to open|can'?t open photos/i.test(reply)) {
       reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can only use the text you sent. ${reply}`;
+    } else if (linkInMsg && currentStep <= 4 && /\?/.test(reply) && !/unable to open|not able to open/i.test(reply)) {
+      reply = `${LINK_NOTE} ${reply}`;
+    }
+
+    // Hard check: a booking can only be confirmed for a valid slot (not past, not Sunday, within hours)
+    {
+      const dIso = String(apptDate || conversation.appointment_date || "");
+      const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
+      const looksConfirmed = (currentStep === FINAL_STEP || jumpToBooking) && !action &&
+        /team will be in touch on whatsapp|\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in)\b/i.test(reply);
+      if (looksConfirmed && /^\d{4}-\d{2}-\d{2}$/.test(dIso)) {
+        const nowD = new Date(Date.now() + 4 * 3600e3);
+        const today = nowD.toISOString().slice(0, 10);
+        const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
+        const mins = t24 ? +t24.slice(0, 2) * 60 + +t24.slice(3) : null;
+        const openM = dow === 5 ? 12 * 60 : 10 * 60;
+        const invalid = dIso < today || dow === 0 ||
+          (mins != null && (mins < openM || mins > 18 * 60 + 30)) ||
+          (mins != null && dIso === today && mins < nowD.getUTCHours() * 60 + nowD.getUTCMinutes());
+        if (invalid) {
+          const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
+          reply = `Sorry, that time doesn't work. We're open Mon–Thu and Sat 10:00–19:00, Fri 12:00–19:00, and closed on Sunday (last inspection slot 18:30). ${q}`;
+          apptDate = ""; apptTime = "";
+          await updateConversation(phone, { appointment_date: null, appointment_time: null } as any).catch(() => {});
+          console.log(`[kaya] blocked invalid booking ${dIso} ${t24 ?? ""} for ${phone}`);
+        }
+      }
     }
 
     // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
