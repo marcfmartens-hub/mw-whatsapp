@@ -183,7 +183,7 @@ type NextAction =
 
 function describeAction(a: NextAction): string {
   switch (a.type) {
-    case "ASK_NAME":         return `Reply with exactly: "What car are you looking to sell?"`;
+    case "ASK_NAME":         return `Greet by time of day (Good morning/afternoon/evening), then ask: "What car are you looking to sell?"`;
     case "ASK_UAE_PHONE":    return "Ask: \"On which UAE number can we reach you on?\"";
     case "ASK_CAR_DETAILS":  return "Ask for the car make, model and year.";
     case "ASK_MILEAGE_SPECS":return "Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.";
@@ -208,7 +208,11 @@ function buildDirectResponse(
   switch (action.type) {
     case "ASK_NAME":
       // Customer didn't give a name — don't chase it, move on to the car
-      return "What car are you looking to sell?";
+      {
+        const h = getDubaiHour();
+        const greet = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+        return `${greet}! What car are you looking to sell?`;
+      }
     case "ASK_UAE_PHONE":
       return `Hi${n}! Which UAE number is best to reach you on?`;
     case "ASK_CAR_DETAILS": {
