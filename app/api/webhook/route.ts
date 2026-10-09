@@ -101,11 +101,11 @@ const CAR_WORDS = new Set<string>([
   ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
   "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
 ].map(w => String(w).toLowerCase()));
-const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging)$/i;
+const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending)$/i;
 
-function looksLikeName(candidate: string): boolean {
+function looksLikeName(candidate: string, explicit = false): boolean {
   const words = candidate.trim().split(/\s+/);
-  if (words.some(w => NOT_A_NAME.test(w) || CAR_WORDS.has(w.toLowerCase()) || /\d/.test(w))) return false;
+  if (words.some(w => NOT_A_NAME.test(w) || CAR_WORDS.has(w.toLowerCase()) || /\d/.test(w) || (!explicit && w.length > 4 && /ing$/i.test(w)))) return false;
   if (CAR_WORDS.has(candidate.trim().toLowerCase())) return false;
   return true;
 }
@@ -115,10 +115,13 @@ function extractNameFromMessage(text: string): string | null {
     /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*){0,3})/i
   );
   if (m) {
+    // "my name is / call me / name is" = explicit → trust names like "Sterling"
+    const explicit = /my\s+name|name\s+is|call\s+me/i.test(m[0]);
     // keep only the leading name-like words ("Omar selling" → "Omar")
-    const words = m[1].trim().split(/\s+/).filter((w, i, arr) => looksLikeName(arr.slice(0, i + 1).join(" ")));
-    const nm = words.join(" ");
-    return nm && looksLikeName(nm) ? nm.replace(/\b\w/g, (c) => c.toUpperCase()) : null;
+    const all = m[1].trim().split(/\s+/);
+    let k = 0; while (k < all.length && looksLikeName(all.slice(0, k + 1).join(" "), explicit)) k++;
+    const nm = all.slice(0, k).join(" ");
+    return nm ? nm.replace(/\b\w/g, (c) => c.toUpperCase()) : null;
   }
   const trimmed = text.trim();
   if (/^[A-Za-z]+(?:\s+[A-Za-z]+){0,3}$/.test(trimmed) && trimmed.length <= 40 && looksLikeName(trimmed))
@@ -927,7 +930,28 @@ export async function POST(req: NextRequest) {
     const DAY = "(today|tonight|tomorrow|tmrw|tmr|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat)";
     const TIME = "(\\d{1,2}(:\\d{2})?\\s*(am|pm)|\\d{1,2}:\\d{2}|noon|morning|afternoon|evening|at\\s+\\d{1,2})";
     const DAY_TIME = new RegExp(`\\b${DAY}\\b.{0,25}\\b${TIME}|\\b${TIME}\\b.{0,25}\\b${DAY}\\b`, "i");
-    const isBookingMsg = (t: string) => BOOKING_INTENT.test(t) || DAY_TIME.test(t);
+    const NOW_COME = /\b(come|coming|be there|drop by|pass by|visit|bring it)\b.{0,20}\b(now|right now|asap|in\s+(\d+|half an|an|one|a few)\s*(min|mins|minutes|hour|hours|hr|hrs))\b|\b(now|right now|asap)\b.{0,15}\b(come|coming|ok|fine)\b/i;
+    const isBookingMsg = (t: string) => BOOKING_INTENT.test(t) || DAY_TIME.test(t) || NOW_COME.test(t);
+
+    // "now" / "in 30 min" / "in an hour" → today at an actual time, if the branch is still open
+    let nowSlot: { date: string; time: string } | null = null;
+    {
+      const m = messageText.match(/\b(right now|now|asap|in\s+(\d+|half an|an|one|a few)\s*(min|mins|minutes|hour|hours|hr|hrs))\b/i);
+      if (m && (NOW_COME.test(messageText) || currentStep === FINAL_STEP)) {
+        let addMin = 30;
+        if (m[2]) {
+          const qty = /half/i.test(m[2]) ? 0.5 : /an|one/i.test(m[2]) ? 1 : /few/i.test(m[2]) ? 3 : parseFloat(m[2]);
+          addMin = /hour|hr/i.test(m[3]) ? qty * 60 : qty;
+        }
+        const d = new Date(Date.now() + 4 * 3600e3 + addMin * 60e3);
+        const mins = Math.ceil((d.getUTCHours() * 60 + d.getUTCMinutes()) / 15) * 15;
+        const dow = d.getUTCDay();
+        const openM = dow === 5 ? 12 * 60 : 10 * 60;
+        if (dow !== 0 && mins >= openM && mins <= 18 * 60 + 30) {
+          nowSlot = { date: d.toISOString().slice(0, 10), time: `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}` };
+        }
+      }
+    }
     const wantsBooking = currentStep >= 1 && currentStep < FINAL_STEP &&
       (isBookingMsg(messageText) || priorUserMsgs.some(isBookingMsg));
 
@@ -958,6 +982,7 @@ export async function POST(req: NextRequest) {
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
       try {
         const ea = await extractAppointment(messageText);
+        if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
         // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
         if (ea.appointment_date) apptDate = toIsoDate(ea.appointment_date) ?? ea.appointment_date;
         if (ea.appointment_time) apptTime  = ea.appointment_time;
@@ -1026,11 +1051,14 @@ export async function POST(req: NextRequest) {
     // ── Expected price ("I want at least 180k") → notes for the team ─────────
     {
       const ep = messageText.match(/\b(want|expect|expecting|looking for|asking|need|at least|minimum|min|not less than|no less than)\b[^0-9]{0,20}(\d[\d,.]*\s*(k|thousand)?)\s*(aed|dhs|dirhams?)?/i);
-      if (ep) {
+      const aboutLoan = /\b(bank|loan|owe|owing|mortgage|finance|financed|pay\s*off|payoff|outstanding|balance|installments?|emi)\b/i.test(messageText);
+      if (ep && !aboutLoan) {
         let raw = ep[2].replace(/,/g, "").trim();
         let n = parseFloat(raw);
+        const isMoneyMarked = /k|thousand/i.test(raw) || !!ep[4];
         if (/k|thousand/i.test(raw)) n *= 1000;
-        if (n >= 1000) {
+        const looksLikeYear = !isMoneyMarked && /^(19[89]\d|20[0-3]\d)$/.test(raw);
+        if (n >= 1000 && !looksLikeYear) {
           const note = `Customer expects: AED ${Math.round(n).toLocaleString("en-US")}`;
           const ex = String((conversation as any).car_conditions ?? "").split(" | ").filter(x => !x.startsWith("Customer expects:"));
           const upd = [...ex, note].filter(Boolean).join(" | ");
