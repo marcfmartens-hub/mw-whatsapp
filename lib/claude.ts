@@ -219,6 +219,7 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
   if (known.appointment_date) contextLines.push(`Appointment date (captured so far): ${known.appointment_date}`);
   if (known.appointment_time) contextLines.push(`Appointment time (captured so far): ${known.appointment_time}`);
   if (known.owner_status)     contextLines.push(`Ownership: ${known.owner_status}`);
+  if ((known as any).inquiry_summary) contextLines.push(`Notes from earlier conversations with this customer: ${(known as any).inquiry_summary}`);
   if (known.car_conditions)   contextLines.push(`Car conditions noted: ${known.car_conditions}`);
 
   // next_action — single directive computed by the webhook; model just executes it

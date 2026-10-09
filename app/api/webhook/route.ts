@@ -168,6 +168,7 @@ async function pushLead(
       clear_appointment: opts.clearAppointment ?? false,
     } as any);
     if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+    if (summary) await updateConversation(phone, { inquiry_summary: summary } as any).catch(() => {});
     console.log(`[bigin] push (${reason}) for ${phone}: ${ok ? "ok" : "FAILED"}`);
   } catch (e) {
     console.error(`[bigin] push (${reason}) error for ${phone}:`, e);
@@ -459,8 +460,28 @@ export async function POST(req: NextRequest) {
     const isRestart = ((conversation.step ?? 0) >= 3 && isReIntro && hoursSinceLast > 12)
       || ((conversation.step ?? 0) >= CLOSING_STEP && hoursSinceLast > 24);
 
-    if (isStaleNoHistory || isRestart) {
-      console.log(`[kaya] resetting for ${phone}: staleNoHistory=${isStaleNoHistory} reIntro=${isRestart} step=${conversation.step}`);
+    // Returning customer: keep name, car, history and summary — ask if it's the same car
+    if (isRestart && !isStaleNoHistory) {
+      const c = conversation as any;
+      const carDesc = [c.year, c.make, c.model].filter((v: any) => v && v !== "Unknown").join(" ");
+      const hi = `Welcome back${c.name ? ", " + c.name : ""}!`;
+      const reply = carDesc
+        ? `${hi} Last time we spoke about your ${carDesc}. Is this about the same car, or a different one?`
+        : `${hi} What car are you looking to sell?`;
+      await sendWhatsAppMessage(phone, reply);
+      const hist = (c.messages ?? []) as ConversationMessage[];
+      await updateConversation(phone, {
+        step: carDesc ? CLOSING_STEP : 2,            // CLOSING + the question above = waiting for same/different
+        appointment_date: null, appointment_time: null, appointment: null,
+        bigin_pushed_at: null, last_msg_id: message.id, last_message_at: new Date().toISOString(),
+        messages: [...hist, { role: "user", content: messageText }, { role: "assistant", content: reply }].slice(-40),
+      } as any).catch(e => console.error("returning customer save error:", e));
+      console.log(`[kaya] returning customer ${phone} (step was ${c.step}, ${Math.round(hoursSinceLast)}h ago)`);
+      return NextResponse.json({ status: "returning_customer" }, { status: 200 });
+    }
+
+    if (isStaleNoHistory) {
+      console.log(`[kaya] resetting for ${phone}: staleNoHistory=${isStaleNoHistory} step=${conversation.step}`);
       await resetConversation(phone);
       const fresh = await getOrCreateConversation(phone);
       for (const k of Object.keys(conversation)) delete (conversation as any)[k];
@@ -566,6 +587,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "special_inquiry" }, { status: 200 });
     }
     // ─────────────────────────────────────────────────────────────────────
+
+    // ── Returning customer answered "same car, or a different one?" ─────────
+    {
+      const lastA = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+      if (/same car, or a different one\?/i.test(lastA)) {
+        const different = /\b(different|another|new|other|second|no\b|not the same)/i.test(messageText);
+        if (!different) {
+          // Same car → details already known, go straight to booking
+          const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
+          const reply = `Great. The next step is a free 10–15 minute inspection at our branch in Al Quoz. ${q}`;
+          await sendWhatsAppMessage(phone, reply);
+          await updateConversation(phone, { step: FINAL_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
+          await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+          return NextResponse.json({ status: "returning_same_car" }, { status: 200 });
+        }
+        // Different car → clear the old car, keep the name, continue with the car questions
+        const cleared: Record<string, null> = {
+          car: null, make: null, model: null, year: null, mileage: null, specs: null, loan: null,
+          mortgage_amount: null, sell_timeline: null, estimated_price: null, car_conditions: null,
+          non_gcc_handoff: null, owner_status: null,
+        };
+        await updateConversation(phone, { ...cleared, step: 2 } as any).catch(async () => {
+          // some columns may not exist — retry with the core ones
+          await updateConversation(phone, { car: null, make: null, model: null, year: null, mileage: null, specs: null, loan: null, mortgage_amount: null, sell_timeline: null, step: 2 } as any).catch(() => {});
+        });
+        Object.assign(conversation, cleared, { step: 2 });
+      }
+    }
 
     const currentStep = conversation.step ?? 0;
     const fieldToSave = FIELD_BY_STEP[currentStep];
