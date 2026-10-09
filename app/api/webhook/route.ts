@@ -374,6 +374,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "ignored" }, { status: 200 });
   }
 
+  let claimedPhone: string | null = null;   // set while this request is writing a reply
   try {
     const message = extractMessage(body);
     if (!message) return NextResponse.json({ status: "ignored" }, { status: 200 });
@@ -489,6 +490,8 @@ export async function POST(req: NextRequest) {
       const hist = (c.messages ?? []) as ConversationMessage[];
       await updateConversation(phone, {
         step: carDesc ? CLOSING_STEP : 2,            // CLOSING + the question above = waiting for same/different
+        car_conditions: String(c.car_conditions ?? "").split(" | ")
+          .filter((n: string) => n && !/^(Multiple cars:|HIYAZA:|BUYER:|Asked to speak to the team|Wants to buy:|Wants to discuss:|Best time to call:)/.test(n)).join(" | ") || null,
         ...(c.appointment_date && String(c.appointment_date) < new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10)
           ? { appointment_date: null, appointment_time: null, appointment: null } : {}),
         bigin_pushed_at: null, last_msg_id: message.id, last_message_at: new Date().toISOString(),
@@ -551,16 +554,32 @@ export async function POST(req: NextRequest) {
         await updateConversation(phone, { messages: [...freshest, { role: "user", content: messageText }].slice(-40) } as any).catch(() => {});
       }
       await new Promise(r => setTimeout(r, isMedia ? 8000 : 4000));
-      const after = await getConversation(phone).catch(() => null);
+      let after = await getConversation(phone).catch(() => null);
       if (after && after.last_msg_id && after.last_msg_id !== message.id) {
         return NextResponse.json({ status: "superseded" }, { status: 200 });
       }
+      // Another reply still being written → wait for it, then answer only what's new
+      const busyUntil = (after as any)?.processing_until ? Date.parse((after as any).processing_until) : 0;
+      if (busyUntil > Date.now()) {
+        const deadline = Math.min(busyUntil, Date.now() + 25000);
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 1000));
+          const c2 = await getConversation(phone).catch(() => null);
+          if (c2?.last_msg_id && c2.last_msg_id !== message.id) return NextResponse.json({ status: "superseded" }, { status: 200 });
+          if (!(c2 as any)?.processing_until || Date.parse((c2 as any).processing_until) <= Date.now()) { after = c2; break; }
+        }
+        after = (await getConversation(phone).catch(() => null)) ?? after;
+      }
+      await updateConversation(phone, { processing_until: new Date(Date.now() + 30000).toISOString() } as any)
+        .then(() => { claimedPhone = phone; }).catch(() => {});
+      const ownText = messageText;
       // Combine the trailing customer messages (the burst) into one, history = everything before
       const msgs = ((after?.messages ?? [...prior, { role: "user", content: messageText }]) as ConversationMessage[]);
       let i = msgs.length;
       while (i > 0 && msgs[i - 1].role === "user") i--;
       const burst = msgs.slice(i).map(m => m.content).filter(Boolean);
       if (bareMedia) burst.push(messageText); // this photo itself (not stored)
+      else if (!burst.includes(ownText)) burst.push(ownText); // our message was overwritten by the previous reply's save
       if (after) Object.assign(conversation, after);
       conversation.messages = msgs.slice(0, i) as any;
       if (burst.length > 1) messageText = burst.join("\n");
@@ -625,7 +644,8 @@ export async function POST(req: NextRequest) {
         await updateConversation(phone, { car_conditions: upd } as any).catch(() => {});
       };
       // Buyer-only details: name → UAE number → availability → close
-      const inBuyerMode = histB.some(m => m.role === "assistant" && m.content.includes(BUYER_LINE)) && (conversation.step ?? 0) < CLOSING_STEP;
+      const inBuyerMode = (histB.some(m => m.role === "assistant" && m.content.includes(BUYER_LINE)) || notesB.includes("BUYER:"))
+        && (conversation.step ?? 0) < CLOSING_STEP;
       if (inBuyerMode) {
         const upd: Record<string, unknown> = { last_message_at: new Date().toISOString() };
         if (lastAB.includes(BUYER_NAME_Q) && !conversation.name) {
@@ -831,7 +851,8 @@ export async function POST(req: NextRequest) {
     // "bought another car so selling this one" are NOT multiple cars.
     const MULTI_CARS = /\b(two|2|three|3|four|4|five|5|few|several|multiple|both)\s+(of\s+(my|our|the)\s+)?(cars|vehicles)\b|\b(sell|selling|sale)\b.{0,40}\b(another|second|2nd|one more|other)\s+(car|vehicle)\b.{0,15}\b(too|as well|also)\b|\b(another|second|2nd|one more)\s+(car|vehicle)\s+(to sell|for sale|i want to sell|i'?m selling)\b|\balso\s+(selling|want to sell|wanna sell)\s+(a|an|my|another|the)\b|\bcars\s+(for sale|to sell)\b/i;
     const MULTI_ASK = "of each car";
-    const multiMode = ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && m.content.includes(MULTI_ASK));
+    const multiMode = ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && m.content.includes(MULTI_ASK))
+      || String((conversation as any).car_conditions ?? "").includes("Multiple cars:");
     const mentionsMulti = MULTI_CARS.test(messageText);
     const looksLikeCarDetails = !!(vehicleUpdates.make || vehicleUpdates.model || vehicleUpdates.year || vehicleUpdates.mileage);
     // Several cars = team handoff: details of each car → owner? → personal/company? → number → close.
@@ -869,7 +890,7 @@ export async function POST(req: NextRequest) {
           }
         }
       }
-      if (firstTime) addNote(`Cars: ${messageText.trim()}`);
+      if (firstTime) { addNote("Multiple cars: team handoff"); addNote(`Cars: ${messageText.trim()}`); }
       if (notes) updates.car_conditions = notes;
 
       let nextQ: string | null;
@@ -976,8 +997,15 @@ export async function POST(req: NextRequest) {
     const differentDay = !!dayWord && toIsoDate(dayWord) !== conversation.appointment_date;
     const GOODBYE = /\b(see you|thanks|thank you|great|perfect|cool|noted|got it)\b/i;
     const newDayOrTime = (timeInMsg || differentDay) && !GOODBYE.test(messageText);
-    const isRebook = currentStep >= CLOSING_STEP && hasBooking &&
-      (RESCHEDULE.test(messageText) || newDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg));
+    // Chat closed without a booking (e.g. after a team handoff) and they now want to come in → book it,
+    // except for cases that never get an appointment (Hiyaza, buyer-only, multiple cars, non-GCC)
+    const notesNow = String((conversation as any).car_conditions ?? "");
+    const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:)/.test(notesNow)
+      && (conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC";
+    const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
+    const isRebook = (currentStep >= CLOSING_STEP && hasBooking &&
+      (RESCHEDULE.test(messageText) || newDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg)))
+      || bookFromClosed;
 
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
       try {
@@ -1076,7 +1104,8 @@ export async function POST(req: NextRequest) {
       const HZ_NAME_Q = "May I have your name?";
       const HZ_PHONE_Q = "Which UAE number is best to reach you on?";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
-      const inHz = hist.some(m => m.role === "assistant" && m.content.includes(HZ_LINE));
+      const inHz = hist.some(m => m.role === "assistant" && m.content.includes(HZ_LINE))
+        || String((conversation as any).car_conditions ?? "").includes("HIYAZA:");
       if ((inHz || HIYAZA.test(messageText)) && currentStep < CLOSING_STEP) {
         const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
         const upd: Record<string, unknown> = { ...vehicleDbFields(vehicleUpdates), last_msg_id: message.id, last_message_at: new Date().toISOString() };
@@ -1118,7 +1147,8 @@ export async function POST(req: NextRequest) {
       const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b/i;
       const HUMAN_LINE = "I'll have someone from our team contact you shortly.";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
-      const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE));
+      const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE))
+        || String((conversation as any).car_conditions ?? "").includes("Asked to speak to the team");
       const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP && HUMAN_ASK.test(messageText);
       if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
         const vDb = vehicleDbFields(vehicleUpdates);
@@ -1151,7 +1181,13 @@ export async function POST(req: NextRequest) {
         else if (!phoneAsked) nextQ = "Which UAE number is best to reach you on?";
 
         const parts: string[] = [];
-        if (firstAsk) parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE}`);
+        if (firstAsk) {
+          parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE}`);
+          if (!conditions.includes("Asked to speak to the team")) {
+            conditions = conditions ? `${conditions} | Asked to speak to the team` : "Asked to speak to the team";
+            updates.car_conditions = conditions;
+          }
+        }
         parts.push(nextQ ?? "Thanks, I've passed everything on. Our team will be in touch shortly. Have a nice day!");
 
         for (const part of parts) await sendWhatsAppMessage(phone, part);
@@ -1367,7 +1403,8 @@ export async function POST(req: NextRequest) {
       dubai_datetime:   getDubaiDateTime(),
       dubai_tomorrow:   getDubaiTomorrow(),
       booking_slot:     getBookingSlot(),
-      rebooking:        isRebook ? `Customer is RESCHEDULING an existing booking (was: ${conversation.appointment_date ?? "?"} ${conversation.appointment_time ?? ""}). Confirm the new date/time and send the confirmation. Do NOT ask for name or number again.` : undefined,
+      rebooking:        isRebook && !hasBooking ? `Customer wants to book an inspection now (the chat was closed earlier without a booking). Confirm a valid date and time and send the confirmation. Ask for the name only if unknown; don't ask for the number again if it was already given.`
+                      : isRebook ? `Customer is RESCHEDULING an existing booking (was: ${conversation.appointment_date ?? "?"} ${conversation.appointment_time ?? ""}). Confirm the new date/time and send the confirmation. Do NOT ask for name or number again.` : undefined,
       mortgage_amount:  mortgageAmount ?? conversation.mortgage_amount,
       skip_mortgage:    hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10,
       estimated_value:  valuation?.formatted ?? null,
@@ -1397,13 +1434,15 @@ export async function POST(req: NextRequest) {
       const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
       const looksConfirmed = (currentStep === FINAL_STEP || jumpToBooking) && !action &&
         /team will be in touch on whatsapp|\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in)\b/i.test(reply);
-      if (looksConfirmed && /^\d{4}-\d{2}-\d{2}$/.test(dIso)) {
+      const rawT = String(apptTime || conversation.appointment_time || "");
+      const unreadableTime = !!rawT && !t24 && /\b(now|right now|asap|soon)\b/i.test(rawT);
+      if (looksConfirmed && (unreadableTime || /^\d{4}-\d{2}-\d{2}$/.test(dIso))) {
         const nowD = new Date(Date.now() + 4 * 3600e3);
         const today = nowD.toISOString().slice(0, 10);
         const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
         const mins = t24 ? +t24.slice(0, 2) * 60 + +t24.slice(3) : null;
         const openM = dow === 5 ? 12 * 60 : 10 * 60;
-        const invalid = dIso < today || dow === 0 ||
+        const invalid = unreadableTime || dIso < today || dow === 0 ||
           (mins != null && (mins < openM || mins > 18 * 60 + 30)) ||
           (mins != null && dIso === today && mins < nowD.getUTCHours() * 60 + nowD.getUTCMinutes());
         if (invalid) {
@@ -1523,5 +1562,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Webhook POST error:", error);
     return NextResponse.json({ status: "error" }, { status: 200 });
+  } finally {
+    if (claimedPhone) await updateConversation(claimedPhone, { processing_until: null } as any).catch(() => {});
   }
 }

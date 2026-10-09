@@ -170,7 +170,7 @@ If the customer asks about price during this step:
 };
 
 const CLOSING_INSTRUCTION =
-  `The booking is complete.
+  `The main conversation is complete — either an inspection is booked (see "Appointment date/time" in "What you already know") or the customer was handed to the team. Never say a booking is confirmed if no appointment date/time is known.
 - NEVER give a price or estimate — not even a rough one.
 - If the customer asks a question (documents, Mulkiya, location, payment, loan settlement, how long it takes), answer it briefly using the knowledge base.
 - Otherwise warmly confirm everything is set and the team will be in touch.
