@@ -259,9 +259,18 @@ export async function POST(req: NextRequest) {
         await resetConversation(phone);
         const reply = await getKayaReply(0, [], "", {});
         await sendWhatsAppMessage(phone, reply);
+        // Greeting sent → next message is the name (step 1)
+        await getOrCreateConversation(phone);
+        await updateConversation(phone, {
+          step: 1,
+          phone_number: phone,
+          last_message_at: new Date().toISOString(),
+          messages: [{ role: "assistant", content: reply }],
+        } as any);
       } catch (e) {
+        // Don't fake success — if the reset failed, say so, otherwise it looks like it worked
         console.error("reset handler error:", e);
-        await sendWhatsAppMessage(phone, "Hi! I'm Kaya, the online assistant for Mister Wheelz 😊\n\nBefore we start, may I know your name please?").catch(() => {});
+        await sendWhatsAppMessage(phone, `⚠️ Reset failed: ${(e as any)?.message ?? e}`).catch(() => {});
       }
       return NextResponse.json({ status: "reset" }, { status: 200 });
     }
@@ -292,17 +301,10 @@ export async function POST(req: NextRequest) {
 
     if (isStaleNoHistory || isRestart) {
       console.log(`[kaya] resetting for ${phone}: staleNoHistory=${isStaleNoHistory} reIntro=${isRestart} step=${conversation.step}`);
-      await resetConversation(phone).catch(() => {});
-      conversation.step = 0;
-      conversation.name = null;
-      conversation.car = null;
-      conversation.make = null;
-      conversation.model = null;
-      conversation.year = null;
-      conversation.mileage = null;
-      conversation.specs = null;
-      conversation.loan = null;
-      conversation.messages = [];
+      await resetConversation(phone);
+      const fresh = await getOrCreateConversation(phone);
+      for (const k of Object.keys(conversation)) delete (conversation as any)[k];
+      Object.assign(conversation, fresh);
     }
 
     // Always save the sender's phone number — no need to ask for it

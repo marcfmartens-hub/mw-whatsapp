@@ -103,10 +103,21 @@ export async function updateConversation(
   return data as Conversation;
 }
 
+// Reset must never fail silently. Strategy:
+//  1. Delete the row — next message recreates it clean via getOrCreateConversation.
+//  2. If delete is blocked (e.g. RLS), fall back to an update that nulls every field,
+//     automatically dropping any column the table doesn't have and retrying.
+//  3. Verify the row is actually at step 0 afterwards; throw if not.
 export async function resetConversation(phone: string): Promise<void> {
-  const { error } = await supabase
-    .from(TABLE)
-    .update({
+  const del = await supabase.from(TABLE).delete().eq("phone", phone).select("phone");
+  if (!del.error) {
+    const still = await getConversation(phone).catch(() => null);
+    if (!still) return;
+  } else {
+    console.error("resetConversation delete error (falling back to update):", del.error);
+  }
+
+  const fields: Record<string, unknown> = {
       step: 0,
       name: null,
       phone_number: null,
@@ -139,11 +150,24 @@ export async function resetConversation(phone: string): Promise<void> {
       price_handoff_collecting: null,
       price_handoff_ready: null,
       messages: [],
-    })
-    .eq("phone", phone);
+  };
 
-  if (error) {
-    console.error("resetConversation error:", error);
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const { error } = await supabase.from(TABLE).update(fields).eq("phone", phone);
+    if (!error) break;
+    // PostgREST: "Could not find the 'xyz' column of 'mw_whatsapp' in the schema cache"
+    const missing = error.message?.match(/'([a-z_]+)' column/i)?.[1];
+    if (missing && missing in fields && missing !== "step") {
+      console.warn(`resetConversation: column '${missing}' missing — retrying without it`);
+      delete fields[missing];
+      continue;
+    }
+    console.error("resetConversation update error:", error);
     throw error;
+  }
+
+  const after = await getConversation(phone);
+  if (after && (after.step ?? 0) !== 0) {
+    throw new Error(`resetConversation: row for ${phone} still at step ${after.step}`);
   }
 }
