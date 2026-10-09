@@ -183,7 +183,7 @@ type NextAction =
 
 function describeAction(a: NextAction): string {
   switch (a.type) {
-    case "ASK_NAME":         return `Reply with exactly: "And what's your name? 😊"`;
+    case "ASK_NAME":         return `Reply with exactly: "What car are you looking to sell?"`;
     case "ASK_UAE_PHONE":    return "Ask: \"On which UAE number can we reach you on?\"";
     case "ASK_CAR_DETAILS":  return "Ask for the car make, model and year.";
     case "ASK_MILEAGE_SPECS":return "Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.";
