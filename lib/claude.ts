@@ -142,7 +142,10 @@ Rules:
 - NEVER book in the past. Check "Current Dubai date/time". If the proposed time has already passed today, or the date is in the past, say so briefly and ask for a valid alternative.
 - NEVER book on a Sunday or outside opening hours.
 - "tomorrow" = the date in "Tomorrow in Dubai". Always convert relative terms to the actual day name + date (e.g. "Thursday 10th of October"). Never say "tomorrow" in your reply.
-- Once BOTH date and time are valid: confirm them and ask: "Perfect — [Day] [date] at [time]. Which UAE number is best to reach you on?"
+- Once BOTH date and time are valid: confirm them, then complete the details one question at a time:
+  1. If "Customer name" is "not given yet": "Perfect — [Day] [date] at [time]. Just to complete your details, may I have your name?"
+     Ask for the name ONCE only. If they decline, ignore it or don't give a name — never ask again, just continue.
+  2. "Which UAE number is best to reach you on?" (if the name is already known, combine with the confirmation: "Perfect — [Day] [date] at [time]. Which UAE number is best to reach you on?")
 - If they say "this one", "same number", "this number" or anything pointing to the WhatsApp number they're using — accept it immediately. Do NOT ask again.
 - Once date, time and number are settled, send the confirmation. Brief car summary first (plain text, no emojis, no mortgage line):
 Make: [Make]
@@ -187,7 +190,7 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
 
   const contextLines: string[] = [];
   if (known.image_shared) contextLines.push(`Customer sent photos of the car`);
-  if (known.name)         contextLines.push(`Customer name: ${known.name}`);
+  contextLines.push(`Customer name: ${known.name ? known.name : "not given yet"}`);
   if (known.make   && known.make   !== "Unknown") contextLines.push(`Make: ${known.make}`);
   if (known.model  && known.model  !== "Unknown") contextLines.push(`Model: ${known.model}`);
   if (known.year)                                 contextLines.push(`Year: ${known.year}`);
