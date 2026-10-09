@@ -92,6 +92,8 @@ export async function GET(req: NextRequest) {
         .from(TABLE)
         .update({ bigin_pushed_at: new Date().toISOString() })
         .eq("phone", conv.phone);
+      if (ok !== "ok" && "bigin_contact_id" in conv && conv.bigin_contact_id !== ok)
+        await supabase.from(TABLE).update({ bigin_contact_id: ok }).eq("phone", conv.phone);
 
       console.log(`[cron/timeout] pushed ${conv.phone} → ${salesInquiry}`);
       pushed++;

@@ -33,6 +33,7 @@ export interface Conversation {
   source_url: string | null;
   last_message_at: string | null;
   bigin_pushed_at: string | null;
+  bigin_contact_id?: string | null;
   estimated_price?: string | null;
   insult_count?: number | null;
   non_gcc_handoff?: boolean | null;
@@ -140,6 +141,7 @@ export async function resetConversation(phone: string): Promise<void> {
       nudged_at: null,
       last_message_at: null,
       bigin_pushed_at: null,
+      bigin_contact_id: null,
       insult_count: null,
       non_gcc_handoff: null,
       owner_status: null,
