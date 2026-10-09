@@ -172,8 +172,13 @@ function buildDirectResponse(
       }
       return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
     }
-    case "ASK_MILEAGE_SPECS":
+    case "ASK_MILEAGE_SPECS": {
+      const hasSpecs   = !!(known.specs && known.specs !== "Unknown");
+      const hasMileage = !!known.mileage;
+      if (hasSpecs && !hasMileage) return `Got it${n}. What's the mileage on it?`;
+      if (hasMileage && !hasSpecs) return `Got it${n}. Is it GCC or non-GCC specs?`;
       return `Got it${n}. Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
+    }
     case "ASK_SPECS":
       return `Got it${n}! Is it GCC or non-GCC specs?`;
     case "ASK_MORTGAGE":
@@ -406,6 +411,20 @@ export async function POST(req: NextRequest) {
     if (alreadyKnown.mileage && vehicleUpdates.mileage) delete vehicleUpdates.mileage;
     if (alreadyKnown.specs   && vehicleUpdates.specs)   delete vehicleUpdates.specs;
 
+    // Deterministic backup for specs + mileage — never re-ask something the customer already said
+    if (currentStep >= 2 && currentStep <= 4) {
+      if (!alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
+        if (/\bnon[\s-]?gcc\b|\b(american|us|usa|japanese|japan|canadian|european|korean)\s*spec/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+        else if (/\bgcc\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
+      }
+      if (!alreadyKnown.mileage && !vehicleUpdates.mileage) {
+        const mk = messageText.match(/\b(\d+(?:\.\d+)?)\s*k\s*(?:km|kms|kilomet\w*)?\b/i);
+        const mf = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s*(?:km|kms|kilomet\w*)\b/i);
+        if (mk) vehicleUpdates.mileage = String(Math.round(parseFloat(mk[1]) * 1000));
+        else if (mf) vehicleUpdates.mileage = mf[1].replace(/[,.]/g, "");
+      }
+    }
+
     // Ownership detection — save once, don't overwrite
     if (!conversation.owner_status) {
       if (POA_PATTERN.test(messageText))   await updateConversation(phone, { owner_status: "POA" } as any).catch(() => {});
@@ -467,12 +486,16 @@ export async function POST(req: NextRequest) {
     const loanAnswer = isLoanFollowUp ? (conversation.loan ?? "") : (fieldToSave === "loan" ? messageText : (conversation.loan ?? ""));
     const loanIsYes  = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(loanAnswer);
     if (currentStep === 5 && loanIsYes && messageText) {
-      const amountMatch = messageText.match(/[\d,]+(?:\.\d+)?(?:\s*k\b)?/i);
+      // Must start with a digit — the old [\d,]+ matched the lone comma in "yes, 200k"
+      // "200.000" (dot as thousands separator) → "200000"
+      const amountText = messageText.replace(/\b(\d{1,3})((?:\.\d{3})+)\b/g, (_, a, b) => a + b.replace(/\./g, ""));
+      const amountMatch = amountText.match(/\d[\d,]*(?:\.\d+)?\s*(?:k|m|million)?\b/i);
       if (amountMatch) {
         const raw = amountMatch[0].replace(/,/g, "").trim();
-        mortgageAmount = /k$/i.test(raw)
-          ? String(parseFloat(raw) * 1000)
-          : raw;
+        const num = parseFloat(raw);
+        mortgageAmount = /(m|million)$/i.test(raw) ? String(Math.round(num * 1_000_000))
+          : /k$/i.test(raw) ? String(Math.round(num * 1000))
+          : String(num);
       } else if (/\b(no|don'?t know|not sure|no idea|unknown|unsure|idk)\b/i.test(messageText)) {
         // Customer doesn't know the amount — treat as "Unknown" so step advances
         mortgageAmount = "Unknown";
@@ -545,6 +568,10 @@ export async function POST(req: NextRequest) {
     const hasYear  = !!(vehicleUpdates.year ?? conversation.year);
     const hasSpecs = !!carSpecs || specsExplicitlyUnknown || conversation.specs === "Unknown";
 
+    // Customer gave model, year, mileage AND specs at step 3 → skip the mileage step
+    const step3Complete = currentStep === 3 && hasModel && hasYear && !!carMileage && hasSpecs;
+    const step3OldCar   = step3Complete && carYear > 0 && (currentYear - carYear) >= 10;
+
     let action: NextAction | undefined;
 
     if (currentStep === 1 && GREETING_ONLY.test(messageText)) {
@@ -554,6 +581,8 @@ export async function POST(req: NextRequest) {
     } else if (currentStep === 3) {
       if (!hasModel || !hasYear) {
         action = { type: "ASK_CAR_DETAILS" };
+      } else if (step3Complete) {
+        action = step3OldCar ? { type: "SHOW_SUMMARY" } : { type: "ASK_MORTGAGE" };
       } else {
         action = { type: "ASK_MILEAGE_SPECS" };
       }
@@ -734,6 +763,8 @@ export async function POST(req: NextRequest) {
       : stayAtSellMethod   ? 6
       : stayAtAppointment  ? FINAL_STEP
       : skipLoan           ? 6
+      : step3OldCar        ? 6
+      : step3Complete      ? 5
       : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
