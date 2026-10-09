@@ -207,9 +207,10 @@ function buildDirectResponse(
   const n = name ? `, ${name}` : "";
   switch (action.type) {
     case "ASK_NAME":
-      return "And what's your name? 😊";
+      // Customer didn't give a name — don't chase it, move on to the car
+      return "What car are you looking to sell?";
     case "ASK_UAE_PHONE":
-      return `Hi${n}! 😊 On which UAE number can we reach you on?`;
+      return `Hi${n}! Which UAE number is best to reach you on?`;
     case "ASK_CAR_DETAILS": {
       const hasMake  = !!(known.make  && known.make  !== "Unknown");
       const hasModel = !!(known.model && known.model !== "Unknown");
@@ -221,7 +222,7 @@ function buildDirectResponse(
       } else if (hasMake) {
         return `Nice! What's the model and year?`;
       }
-      return `Sure${n}, I can help! 😊 Could you share the make, model and year of your car?`;
+      return `Sure${n}, I can help! Could you share the make, model and year of your car?`;
     }
     case "ASK_MILEAGE_SPECS": {
       const hasSpecs   = !!(known.specs && known.specs !== "Unknown");
@@ -863,7 +864,7 @@ export async function POST(req: NextRequest) {
 
     const appointmentConfirmed = appointmentConfirmedEarly;
 
-    const stayAtStep1        = currentStep === 1 && GREETING_ONLY.test(messageText);
+    const stayAtStep1        = false; // never wait for the name — move on to the car
     const stayAtMileageSpecs = currentStep === 4 && !hasAllVehicleFields;
     const stayAtLoanAmount   = currentStep === 5 && loanIsYes
       && !mortgageAmount && !conversation.mortgage_amount;
