@@ -101,7 +101,7 @@ const CAR_WORDS = new Set<string>([
   ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
   "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
 ].map(w => String(w).toLowerCase()));
-const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old)$/i;
+const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging)$/i;
 
 function looksLikeName(candidate: string): boolean {
   const words = candidate.trim().split(/\s+/);
@@ -112,7 +112,7 @@ function looksLikeName(candidate: string): boolean {
 
 function extractNameFromMessage(text: string): string | null {
   const m = text.match(
-    /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*)?)/i
+    /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*){0,3})/i
   );
   if (m) {
     // keep only the leading name-like words ("Omar selling" → "Omar")
@@ -121,7 +121,7 @@ function extractNameFromMessage(text: string): string | null {
     return nm && looksLikeName(nm) ? nm.replace(/\b\w/g, (c) => c.toUpperCase()) : null;
   }
   const trimmed = text.trim();
-  if (/^[A-Za-z]+(?:\s+[A-Za-z]+)?$/.test(trimmed) && trimmed.length <= 30 && looksLikeName(trimmed))
+  if (/^[A-Za-z]+(?:\s+[A-Za-z]+){0,3}$/.test(trimmed) && trimmed.length <= 40 && looksLikeName(trimmed))
     return trimmed.replace(/\b\w/g, (c) => c.toUpperCase());
   return null;
 }
@@ -460,9 +460,12 @@ export async function POST(req: NextRequest) {
     // Greeting + name after 12h+ silence (mid-flow), or ANY message 24h+ after a closed chat → new inquiry.
     // (Same Bigin contact — it's matched by phone.) A "hi there" during an active chat never resets.
     const hasCarOnFile = !!(conversation.make && conversation.make !== "Unknown");
-    const isRestart = (isStaleNoHistory && hasCarOnFile)
-      || ((conversation.step ?? 0) >= 3 && isReIntro && hoursSinceLast > 12)
-      || ((conversation.step ?? 0) >= CLOSING_STEP && hoursSinceLast > 24);
+    const todayIso = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+    const hasUpcomingAppt = !!conversation.appointment_date && /^\d{4}-\d{2}-\d{2}$/.test(String(conversation.appointment_date))
+      && String(conversation.appointment_date) >= todayIso;
+    const isRestart = !hasUpcomingAppt && (isStaleNoHistory && hasCarOnFile)
+      || (!hasUpcomingAppt && (conversation.step ?? 0) >= 3 && isReIntro && hoursSinceLast > 12)
+      || (!hasUpcomingAppt && (conversation.step ?? 0) >= CLOSING_STEP && hoursSinceLast > 24);
 
     // Returning customer: keep name, car, history and summary — ask if it's the same car
     if (isRestart) {
@@ -596,7 +599,9 @@ export async function POST(req: NextRequest) {
     {
       const lastA = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
       if (/same car, or a different one\?/i.test(lastA)) {
-        const different = /\b(different|another|new|other|second|no\b|not the same)/i.test(messageText);
+        const oldWords = [conversation.make, conversation.model].filter(Boolean).map(w => String(w).toLowerCase());
+        const mentionedOtherCar = messageText.toLowerCase().split(/[^a-z0-9-]+/).some(w => CAR_WORDS.has(w) && !oldWords.some(o => o.includes(w)));
+        const different = /\b(different|another|new|other|second|no\b|not the same|sold)/i.test(messageText) || mentionedOtherCar;
         if (!different) {
           // Same car → details already known, go straight to booking
           const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
@@ -649,10 +654,12 @@ export async function POST(req: NextRequest) {
     // Name given later in the chat ("my name is Louise") — save it if we don't have one yet.
     // Only explicit phrases here; bare words would catch things like "Cash" or "Tomorrow".
     if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
-      const nm = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is|call\s+me|name\s*:)\s+([A-Za-z]{2,}(?:\s+[A-Za-z]{2,})?)\b/i);
+      const nm = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is|call\s+me|name\s*:)\s+([A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){0,3})\b/i);
       const NOT_NAMES = /^(selling|looking|interested|not|ok|okay|fine|good|here|coming|ready|sure|busy|planning|going|thinking|in|at|from|the|a|an|out|done|happy|available|free|asking|trying)\b/i;
       if (nm && !NOT_NAMES.test(nm[1])) {
-        (coreUpdates as any).name = nm[1].trim().replace(/\b\w/g, c => c.toUpperCase());
+        const words = nm[1].trim().split(/\s+/);
+        let k = 0; while (k < words.length && looksLikeName(words.slice(0, k + 1).join(" "))) k++;
+        if (k > 0) (coreUpdates as any).name = words.slice(0, k).join(" ").replace(/\b\w/g, c => c.toUpperCase());
       }
     }
 
@@ -721,7 +728,9 @@ export async function POST(req: NextRequest) {
     // ── Several cars ──────────────────────────────────────────────────
     // First car → regular DB fields (normal flow). Everything the customer says about the
     // cars is also kept in the notes, so all other cars end up in the summary / Bigin.
-    const MULTI_CARS = /\b(second|another|other|2nd|one more)\s+(car|vehicle)\b|\b(two|2|three|3|four|4|few|several|multiple)\s+cars\b|\balso\s+(have|selling|want to sell)\b|\bcars\s+(for sale|to sell)\b/i;
+    // Only clear multi-car signals. "I also have the service history", "I also have a loan",
+    // "bought another car so selling this one" are NOT multiple cars.
+    const MULTI_CARS = /\b(two|2|three|3|four|4|five|5|few|several|multiple|both)\s+(of\s+(my|our|the)\s+)?(cars|vehicles)\b|\b(sell|selling|sale)\b.{0,40}\b(another|second|2nd|one more|other)\s+(car|vehicle)\b.{0,15}\b(too|as well|also)\b|\b(another|second|2nd|one more)\s+(car|vehicle)\s+(to sell|for sale|i want to sell|i'?m selling)\b|\balso\s+(selling|want to sell|wanna sell)\s+(a|an|my|another|the)\b|\bcars\s+(for sale|to sell)\b/i;
     const MULTI_ASK = "of each car";
     const multiMode = ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && m.content.includes(MULTI_ASK));
     const mentionsMulti = MULTI_CARS.test(messageText);

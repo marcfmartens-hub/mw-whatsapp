@@ -351,6 +351,14 @@ MULTIPLE CARS: handled automatically as a team handoff (details of each car, own
 DOCUMENTS TO BRING: "You only need to bring your Emirates ID and the Mulkiya."
 If they ask what a Mulkiya is: "It's the yellow/brown registration card of the car."
 
+LOST MULKIYA: "No problem — you can use the digital Mulkiya in the RTA app."
+
+CAR REGISTERED IN ANOTHER EMIRATE (Abu Dhabi, Sharjah, etc.): "No problem, we buy cars registered in any emirate."
+
+COMPANY CAR: "No problem. Company cars need a few additional documents and follow a slightly different transfer procedure, but our team handles it all and will support you with all the required documents."
+
+ON THE WAY / RUNNING LATE (appointment today): reassure briefly ("No problem, see you soon!"). If they'd arrive after 18:30, ask if they'd like to move it to the next opening day.
+
 LOAN / MORTGAGE SETTLEMENT (when asked if we can pay off / settle their bank loan):
 "Yes, we can help settle the outstanding amount with your bank, and we don't charge any extra fees for this."
 If they ask how long it takes: "It depends on the bank, but the loan is usually settled within 1–3 working days, and then RTA releases the mortgage. Once RTA has released it, we can transfer the car immediately."
