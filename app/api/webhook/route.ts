@@ -153,7 +153,8 @@ function formatMileage(raw: string | null | undefined): string {
 async function pushLead(
   phone: string,
   reason: string,
-  opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string; clearAppointment?: boolean } = {}
+  opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string; clearAppointment?: boolean;
+          newCopy?: boolean; topNote?: string } = {}
 ): Promise<void> {
   try {
     const latest = await getConversation(phone);
@@ -169,7 +170,7 @@ async function pushLead(
       /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
       notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
     ].filter(Boolean).join("\n");
-    const summary = [buyerNote, otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
+    const summary = [opts.topNote ?? "", buyerNote, otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
     const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
     const ok = await createBiginContact({
       ...latest,
@@ -180,6 +181,7 @@ async function pushLead(
       inspection_booked: booked,
       inquiry_summary: summary,
       clear_appointment: opts.clearAppointment ?? false,
+      force_new: opts.newCopy ?? false,   // reschedule / cancel → new record so it shows up in the pipeline
     } as any);
     if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
     if (summary) await updateConversation(phone, { inquiry_summary: summary } as any).catch(() => {});
@@ -357,6 +359,22 @@ function formatBookingConfirmation(name: string | null | undefined, dateRaw: str
   const [h, m] = t24.split(":").map(Number);
   const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
   return `Perfect${name ? ", " + name : ""} - you're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details.`;
+}
+
+function apptLabel(dateRaw?: string | null, timeRaw?: string | null): string {
+  const iso = dateRaw ? (/^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : toIsoDate(dateRaw)) : null;
+  const t24 = timeRaw ? toTime24(timeRaw) : null;
+  const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  let date = dateRaw ?? "";
+  if (iso) {
+    const d = new Date(iso + "T12:00:00Z"); const n = d.getUTCDate();
+    const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+    date = `${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}`;
+  }
+  let time = timeRaw ?? "";
+  if (t24) { const [h, m] = t24.split(":").map(Number); time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`; }
+  return [date, time].filter(Boolean).join(" ");
 }
 
 function getDubaiDateStr(): string {
@@ -1071,7 +1089,10 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, reply);
       await updateConversation(phone, { appointment_date: null, appointment_time: null, step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
-      await pushLead(phone, "appointment cancelled", { inspectionBooked: false, clearAppointment: true });
+      await pushLead(phone, "appointment cancelled", {
+        inspectionBooked: false, clearAppointment: true, newCopy: true,
+        topNote: `CANCELLED — appointment on ${apptLabel(conversation.appointment_date, conversation.appointment_time)} was cancelled by the customer.`,
+      });
       return NextResponse.json({ status: "cancelled" }, { status: 200 });
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
@@ -1661,7 +1682,14 @@ export async function POST(req: NextRequest) {
       const sellTl = (await getConversation(phone).catch(() => null))?.sell_timeline ?? "";
       const salesInquiry = sellTl.includes("consignment") ? "Consignment"
         : sellTl.includes("cash") ? "Cash Deal" : "Not Sure - Need Advise";
-      await pushLead(phone, "booking confirmed", { salesInquiry, inspectionBooked: true, altPhone });
+      const rescheduled = isRebook && hasBooking;
+      await pushLead(phone, rescheduled ? "booking rescheduled" : "booking confirmed", {
+        salesInquiry, inspectionBooked: true, altPhone,
+        ...(rescheduled ? {
+          newCopy: true,
+          topNote: `RESCHEDULED — was ${apptLabel(conversation.appointment_date, conversation.appointment_time)}, now ${apptLabel(apptDate, apptTime)}.`,
+        } : {}),
+      });
     } else if (teamFollowUp) {
       await pushLead(phone, "team follow-up", { salesInquiry: pricePushCount > 0 || PRICE_PUSH.test(messageText) ? "Price Offer Inquiry" : undefined });
     }

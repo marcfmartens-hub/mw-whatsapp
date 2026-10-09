@@ -271,12 +271,16 @@ export async function createBiginContact(
 
     // Upsert: find existing contact by the WhatsApp number, update it; otherwise create.
     // Lets us push at every milestone (follow-up, booking, timeout) without duplicates.
+    // force_new (reschedule / cancel): always a fresh record so it shows up in the pipeline.
+    // Otherwise update the NEWEST record for this number (so updates follow the latest copy).
     let existingId: string | null = null;
-    if (conversationPhone) {
+    if (conversationPhone && !(conversation as any).force_new) {
       const sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(conversationPhone)}`, { headers });
       if (sr.status === 200) {
         const sj = await sr.json().catch(() => null);
-        existingId = sj?.data?.[0]?.id ?? null;
+        const rows: any[] = Array.isArray(sj?.data) ? sj.data : [];
+        rows.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
+        existingId = rows[0]?.id ?? null;
       } else if (sr.status !== 204) {
         console.warn("[Bigin] search failed:", sr.status, await sr.text().catch(() => ""));
       }
