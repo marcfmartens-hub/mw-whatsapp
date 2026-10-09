@@ -305,7 +305,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Mark this message ID immediately to prevent duplicate processing during async Claude call
+    // Re-fetch after stamp so we see any reset that completed between our initial fetch and now
     await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
+    const freshConversation = await getConversation(phone);
+    if (freshConversation) Object.assign(conversation, freshConversation);
 
     // ── Special inquiry detection (any step) ──────────────────────────────
     // Home visit or trade-in inquiry → collect info, push to Bigin, hand off
