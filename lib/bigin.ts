@@ -75,7 +75,7 @@ export async function createBiginContact(
     car_conditions?: string;
   },
   attempt = 1
-): Promise<void> {
+): Promise<boolean> {
   try {
     const accessToken = await getAccessToken();
 
@@ -117,27 +117,37 @@ export async function createBiginContact(
     if (conversation.car_conditions)   record["Car_Conditions"]   = conversation.car_conditions;
     if (conversation.inquiry_summary)  record["Inquiry_Summary"]  = conversation.inquiry_summary;
 
-    const payload = { data: [record] };
+    const headers = {
+      Authorization: `Zoho-oauthtoken ${accessToken}`,
+      "Content-Type": "application/json",
+    };
 
-    console.log("[Bigin] sending payload:", JSON.stringify(payload));
-
-    const res = await fetch(BIGIN_CONTACTS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Zoho-oauthtoken ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("Bigin contact creation failed:", res.status, errText);
-      return;
+    // Upsert: find existing contact by the WhatsApp number, update it; otherwise create.
+    // Lets us push at every milestone (follow-up, booking, timeout) without duplicates.
+    let existingId: string | null = null;
+    if (conversationPhone) {
+      const sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(conversationPhone)}`, { headers });
+      if (sr.status === 200) {
+        const sj = await sr.json().catch(() => null);
+        existingId = sj?.data?.[0]?.id ?? null;
+      } else if (sr.status !== 204) {
+        console.warn("[Bigin] search failed:", sr.status, await sr.text().catch(() => ""));
+      }
     }
 
-    const result = await res.json();
-    console.log("Bigin contact created:", JSON.stringify(result));
+    const body = JSON.stringify({ data: [existingId ? { id: existingId, ...record } : record] });
+    console.log(`[Bigin] ${existingId ? "updating " + existingId : "creating"}:`, body);
+
+    const res = await fetch(BIGIN_CONTACTS_URL, { method: existingId ? "PUT" : "POST", headers, body });
+    const text = await res.text();
+    const result = (() => { try { return JSON.parse(text); } catch { return null; } })();
+    const rowStatus = result?.data?.[0]?.status;
+
+    if (!res.ok || (rowStatus && rowStatus !== "success")) {
+      throw new Error(`Bigin ${existingId ? "update" : "create"} failed: ${res.status} ${text}`);
+    }
+    console.log(`[Bigin] contact ${existingId ? "updated" : "created"}:`, text);
+    return true;
   } catch (error) {
     if (attempt < 3) {
       console.warn(`[Bigin] attempt ${attempt} failed, retrying in 3s...`);
@@ -145,5 +155,6 @@ export async function createBiginContact(
       return createBiginContact(conversation, attempt + 1);
     }
     console.error("Bigin contact creation error (all retries failed):", error);
+    return false;
   }
 }

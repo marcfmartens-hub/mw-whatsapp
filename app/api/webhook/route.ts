@@ -120,6 +120,42 @@ function formatMileage(raw: string | null | undefined): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " km";
 }
 
+// ── Bigin push — one path for every milestone ───────────────────────────────
+// Called on: booking confirmed, team follow-up / handoff, and (from the cron) 12-min silence.
+// Bigin upserts by phone, so pushing more than once just updates the same contact.
+async function pushLead(
+  phone: string,
+  reason: string,
+  opts: { salesInquiry?: string; inspectionBooked?: boolean; altPhone?: string } = {}
+): Promise<void> {
+  try {
+    const latest = await getConversation(phone);
+    if (!latest) return;
+    const history: ConversationMessage[] = Array.isArray(latest.messages) ? latest.messages : [];
+    const summary = await generateInquirySummary(history, latest as any).catch(() => "");
+    const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
+    const ok = await createBiginContact({
+      ...latest,
+      phone_number: latest.phone_number || phone,
+      alternative_phone: opts.altPhone ?? latest.alternative_phone ?? undefined,
+      sales_inquiry: opts.salesInquiry,
+      inspection_booked: booked,
+      inquiry_summary: summary,
+    } as any);
+    if (ok) await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
+    console.log(`[bigin] push (${reason}) for ${phone}: ${ok ? "ok" : "FAILED"}`);
+  } catch (e) {
+    console.error(`[bigin] push (${reason}) error for ${phone}:`, e);
+  }
+}
+
+async function appendHistory(phone: string, history: ConversationMessage[], user: string, assistant: string) {
+  await updateConversation(phone, {
+    messages: [...history, { role: "user", content: user }, { role: "assistant", content: assistant }].slice(-40),
+    last_message_at: new Date().toISOString(),
+  } as any).catch(() => {});
+}
+
 type NextAction =
   | { type: "ASK_NAME" }
   | { type: "ASK_UAE_PHONE" }
@@ -353,7 +389,7 @@ export async function POST(req: NextRequest) {
       if (insultCount >= 2) {
         // Second insult — close conversation and hand off
         await sendWhatsAppMessage(phone, "I'm going to pass you on to one of our team members who can assist you better. Take care.");
-        try { await createBiginContact({ ...conversation, phone_number: phone } as any); } catch (_) {}
+        await pushLead(phone, "insult close", { salesInquiry: "Other" });
         return NextResponse.json({ status: "closed_insult" }, { status: 200 });
       } else {
         // First insult — respond with empathy
@@ -385,8 +421,8 @@ export async function POST(req: NextRequest) {
         ? "Of course, we can look into that for you. Let me pass your details to our team and they'll be in touch with you shortly to arrange."
         : "Happy to discuss that. Let me pass your details to our team and they'll reach out to you shortly to go over the options.";
       await sendWhatsAppMessage(phone, replyMsg);
-      // Don't push to Bigin immediately — cron will pick up after 12 min silence
-      // or the goodbye detection below will fire if they reply and say goodbye
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, replyMsg);
+      await pushLead(phone, "trade-in follow-up", { salesInquiry: "Trade-in Inquiry" });
       return NextResponse.json({ status: "special_inquiry" }, { status: 200 });
     }
     // ─────────────────────────────────────────────────────────────────────
@@ -572,7 +608,9 @@ export async function POST(req: NextRequest) {
         : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks, I've got everything I need — our team will be in touch shortly.`;
 
       await sendWhatsAppMessage(phone, handoffMsg);
-      // Don't push to Bigin immediately — cron picks up after 12 min silence
+      if (Object.keys(vehicleUpdates).length > 0) await updateConversation(phone, vehicleUpdates as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, handoffMsg);
+      await pushLead(phone, "non-GCC follow-up", { salesInquiry: "Other" });
       return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
     }
 
@@ -741,32 +779,6 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, "Our purchase team will be in touch with you shortly. You're also welcome to walk in whenever — here's where to find us.");
       await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
-      // Don't push to Bigin immediately — push after goodbye or cron after 12 min silence
-    }
-
-    // Price handoff goodbye detection — push after full details collected and goodbye sent
-    const isPriceHandoffReady      = (conversation as any).price_handoff_ready === true;
-    const isPriceHandoffCollecting = (conversation as any).price_handoff_collecting === true;
-    const priceHandoffGoodbye      = /have a nice day|team will be in touch|our team will be in touch/i.test(reply);
-    if ((isPriceHandoffReady || isPriceHandoffCollecting) && priceHandoffGoodbye && !conversation.bigin_pushed_at) {
-      try {
-        const latestConv = await getConversation(phone);
-        const latestHistory: ConversationMessage[] = Array.isArray(latestConv?.messages) ? latestConv.messages : [];
-        const inquirySummary = await generateInquirySummary(latestHistory, knownFields).catch(() => "");
-        await createBiginContact({
-          ...(latestConv ?? conversation),
-          phone_number: phone,
-          sales_inquiry: "Price Offer Inquiry",
-          inspection_booked: false,
-          inquiry_summary: inquirySummary,
-          owner_status: (latestConv as any)?.owner_status ?? (conversation as any).owner_status,
-          car_conditions: (latestConv as any)?.car_conditions ?? (conversation as any).car_conditions,
-        } as any);
-        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-        console.log("[webhook] price handoff goodbye detected — pushed to Bigin");
-      } catch (e) {
-        console.error("price handoff Bigin push error (non-fatal):", e);
-      }
     }
 
     try {
@@ -828,30 +840,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (currentStep === FINAL_STEP && appointmentConfirmed) {
-      const { getConversation } = await import("@/lib/supabase");
-      const latestConv = await getConversation(phone);
-      const sellTl = (latestConv ?? updatedConversation as any)?.sell_timeline ?? "";
-      let salesInquiry = "Cash Deal";
-      if (sellTl.includes("consignment")) salesInquiry = "Consignment";
-      else if (sellTl.includes("not_sure")) salesInquiry = "Not Sure - Need Advise";
-      const latestHistory = ((latestConv as any)?.messages ?? history) as ConversationMessage[];
-      const inquirySummary = await generateInquirySummary(latestHistory, knownFields).catch(() => "");
-      await createBiginContact({
-        ...(latestConv ?? updatedConversation),
-        phone_number: phone,
-        alternative_phone: altPhone ?? (latestConv as any)?.alternative_phone,
-        owner_status: (latestConv as any)?.owner_status,
-        car_conditions: (latestConv as any)?.car_conditions,
-        sales_inquiry: salesInquiry,
-        inspection_booked: true,
-        inquiry_summary: inquirySummary,
-      } as any);
-      try {
-        await updateConversation(phone, { bigin_pushed_at: new Date().toISOString() } as any);
-      } catch (e) {
-        console.error("bigin_pushed_at save error (non-fatal):", e);
-      }
+    // ── Bigin milestones ──────────────────────────────────────────────
+    // a) booking confirmed  b) team follow-up promised (callback, cash-only, price handoff …)
+    const TEAM_FOLLOWUP = /\b(team|someone)\b[^.]{0,60}\b(be in touch|reach out|call you|contact you|get back to you|follow up)/i;
+    const teamFollowUp = !appointmentConfirmed &&
+      (action?.type === "OFFER_CALLBACK" || TEAM_FOLLOWUP.test(reply));
+
+    if (appointmentConfirmed) {
+      const sellTl = (await getConversation(phone).catch(() => null))?.sell_timeline ?? "";
+      const salesInquiry = sellTl.includes("consignment") ? "Consignment"
+        : sellTl.includes("not_sure") ? "Not Sure - Need Advise" : "Cash Deal";
+      await pushLead(phone, "booking confirmed", { salesInquiry, inspectionBooked: true, altPhone });
+    } else if (teamFollowUp) {
+      await pushLead(phone, "team follow-up", { salesInquiry: pricePushCount > 0 || PRICE_PUSH.test(messageText) ? "Price Offer Inquiry" : undefined });
     }
 
     return NextResponse.json({ status: "ok" }, { status: 200 });

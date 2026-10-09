@@ -31,17 +31,19 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabase();
   const cutoff = new Date(Date.now() - SILENCE_MINUTES * 60 * 1000).toISOString();
 
-  // Find conversations that:
-  // - started (step > 0, customer sent at least one message)
-  // - have been silent for 5+ minutes
-  // - have never been pushed to Bigin
-  const { data: stale, error } = await supabase
+  // Silent for 12+ min (but active in the last 3 days), and either never pushed
+  // or has new messages since the last push → push / update in Bigin.
+  const since = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: candidates, error } = await supabase
     .from(TABLE)
     .select("*")
     .gt("step", 0)
     .lt("last_message_at", cutoff)
-    .is("bigin_pushed_at", null)
-    .limit(50);
+    .gt("last_message_at", since)
+    .limit(200);
+  const stale = (candidates ?? []).filter((c: any) =>
+    !c.bigin_pushed_at || new Date(c.last_message_at) > new Date(c.bigin_pushed_at)
+  ).slice(0, 50);
 
   if (error) {
     console.error("[cron/timeout] Supabase query error:", error);
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
         car_conditions: conv.car_conditions,
       }).catch(() => "");
 
-      await createBiginContact({
+      const ok = await createBiginContact({
         ...conv,
         phone_number: conv.phone_number || conv.phone,
         sales_inquiry: salesInquiry,
@@ -85,6 +87,7 @@ export async function GET(req: NextRequest) {
         car_conditions: conv.car_conditions,
       } as any);
 
+      if (!ok) throw new Error("Bigin push failed");
       await supabase
         .from(TABLE)
         .update({ bigin_pushed_at: new Date().toISOString() })
