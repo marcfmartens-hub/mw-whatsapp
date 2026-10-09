@@ -213,8 +213,11 @@ function buildDirectResponse(
     case "ASK_CAR_DETAILS": {
       const hasMake  = !!(known.make  && known.make  !== "Unknown");
       const hasModel = !!(known.model && known.model !== "Unknown");
+      const hasYear  = !!known.year;
       if (hasMake && hasModel) {
         return `Alright, nice ${known.make} ${known.model}! Which year is it?`;
+      } else if (hasMake && hasYear) {
+        return `Got it — ${known.year} ${known.make}. Which model is it?`;
       } else if (hasMake) {
         return `Got it — ${known.make}! What's the model and year?`;
       }
@@ -526,7 +529,13 @@ export async function POST(req: NextRequest) {
     let apptTime = conversation.appointment_time ?? "";
     let altPhone: string | undefined;
 
-    if (currentStep === FINAL_STEP && messageText) {
+    // Customer explicitly asks to book — from this message or earlier in the chat
+    const BOOKING_INTENT = /\b(book|booking|appointment|inspection|inspect|schedule|come\s*(in|by|over)|bring\s*(the|my)?\s*car|visit\s*(you|your))\b/i;
+    const priorUserMsgs = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content);
+    const wantsBooking = currentStep >= 1 && currentStep < FINAL_STEP &&
+      (BOOKING_INTENT.test(messageText) || priorUserMsgs.some(t => BOOKING_INTENT.test(t)));
+
+    if ((currentStep === FINAL_STEP || wantsBooking) && messageText) {
       try {
         const ea = await extractAppointment(messageText);
         if (ea.appointment_date) apptDate = ea.appointment_date;
@@ -648,16 +657,19 @@ export async function POST(req: NextRequest) {
     const hasSpecs = !!carSpecs || specsExplicitlyUnknown || conversation.specs === "Unknown";
 
     // Customer gave model, year, mileage AND specs at step 3 → skip the mileage step
-    const step3Complete = currentStep === 3 && hasModel && hasYear && !!carMileage && hasSpecs;
+    const isCarStep     = currentStep === 2 || currentStep === 3;
+    const step3Complete = isCarStep && hasModel && hasYear && !!carMileage && hasSpecs;
+    // Booking requested and the car is identified → go straight to booking (step 7)
+    const jumpToBooking = wantsBooking && hasModel && hasYear;
     const step3OldCar   = step3Complete && carYear > 0 && (currentYear - carYear) >= 10;
 
     let action: NextAction | undefined;
 
     if (currentStep === 1 && GREETING_ONLY.test(messageText)) {
       action = { type: "ASK_NAME" };
-    } else if (currentStep === 2) {
-      action = { type: "ASK_CAR_DETAILS" };
-    } else if (currentStep === 3) {
+    } else if (jumpToBooking) {
+      action = undefined; // Kaya handles booking with the step-7 instruction
+    } else if (isCarStep) {
       if (!hasModel || !hasYear) {
         action = { type: "ASK_CAR_DETAILS" };
       } else if (step3Complete) {
@@ -764,12 +776,12 @@ export async function POST(req: NextRequest) {
 
     const reply = action
       ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
-      : await getKayaReply(currentStep, history, messageText, knownFields);
+      : await getKayaReply(jumpToBooking ? FINAL_STEP : currentStep, history, messageText, knownFields);
 
     // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
     // time were captured and the reply reads like a confirmation.
     const hasApptDateTime = !!(apptDate || conversation.appointment_date) && !!(apptTime || conversation.appointment_time);
-    const appointmentConfirmedEarly = currentStep === FINAL_STEP && !action && (
+    const appointmentConfirmedEarly = (currentStep === FINAL_STEP || jumpToBooking) && !action && (
       /team will be in touch on whatsapp/i.test(reply) ||
       (hasApptDateTime && /\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in|in touch)\b/i.test(reply))
     );
@@ -810,12 +822,13 @@ export async function POST(req: NextRequest) {
     const stayAtMileageSpecs = currentStep === 4 && !hasAllVehicleFields;
     const stayAtLoanAmount   = currentStep === 5 && loanIsYes
       && !mortgageAmount && !conversation.mortgage_amount;
-    const stayAtAppointment  = currentStep === FINAL_STEP && !appointmentConfirmed;
+    const stayAtAppointment  = (currentStep === FINAL_STEP || jumpToBooking) && !appointmentConfirmed;
     // At step 6 (sell method), only stay if they asked for explanation (not sure / explain)
     // — otherwise advance to appointment booking
     const stayAtSellMethod   = currentStep === 6 && SELL_METHOD_NOT_SURE.test(messageText)
       && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
     const nextStep = currentStep >= CLOSING_STEP ? CLOSING_STEP
+      : (jumpToBooking && appointmentConfirmed) ? CLOSING_STEP
       : stayAtStep1        ? 1
       : stayAtMileageSpecs ? 4
       : stayAtLoanAmount   ? 5
@@ -824,6 +837,7 @@ export async function POST(req: NextRequest) {
       : skipLoan           ? 6
       : step3OldCar        ? 6
       : step3Complete      ? 5
+      : (currentStep === 2 && hasModel && hasYear) ? 4
       : currentStep + 1;
     coreUpdates.step = nextStep;
     const updatedConversation = await updateConversation(phone, coreUpdates);
@@ -861,7 +875,7 @@ export async function POST(req: NextRequest) {
     if (appointmentConfirmed) {
       const sellTl = (await getConversation(phone).catch(() => null))?.sell_timeline ?? "";
       const salesInquiry = sellTl.includes("consignment") ? "Consignment"
-        : sellTl.includes("not_sure") ? "Not Sure - Need Advise" : "Cash Deal";
+        : sellTl.includes("cash") ? "Cash Deal" : "Not Sure - Need Advise";
       await pushLead(phone, "booking confirmed", { salesInquiry, inspectionBooked: true, altPhone });
     } else if (teamFollowUp) {
       await pushLead(phone, "team follow-up", { salesInquiry: pricePushCount > 0 || PRICE_PUSH.test(messageText) ? "Price Offer Inquiry" : undefined });
