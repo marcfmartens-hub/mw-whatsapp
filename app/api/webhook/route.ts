@@ -637,10 +637,10 @@ export async function POST(req: NextRequest) {
       }
 
       // Number confirmation is always the last question
-      const PHONE_Q = "Is this the best number to reach you on, or would you prefer a different one?";
+      const PHONE_Q = "Which UAE number is best to reach you on?";
       const lastAssistant = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
-      const phoneAskedBefore = hist.some(m => m.role === "assistant" && m.content.includes("best number to reach you"));
-      if (!firstTime && lastAssistant.includes("best number to reach you")) {
+      const phoneAskedBefore = hist.some(m => m.role === "assistant" && /best (number )?to reach you/i.test(m.content));
+      if (!firstTime && /best (number )?to reach you/i.test(lastAssistant)) {
         const pm = messageText.match(/(?:\+?971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
         if (pm) {
           const raw = pm[0].replace(/\D/g, "");
