@@ -480,7 +480,7 @@ export async function POST(req: NextRequest) {
         ? `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team reach out to you directly to discuss this. ${nextQ}`
         : `Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly. Thanks, I've got everything I need — our team will be in touch shortly.`;
 
-      await sendWhatsApp(phone, handoffMsg);
+      await sendWhatsAppMessage(phone, handoffMsg);
       // Don't push to Bigin immediately — cron picks up after 12 min silence
       return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
     }
