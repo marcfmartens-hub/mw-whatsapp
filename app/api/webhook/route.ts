@@ -156,7 +156,9 @@ async function pushLead(
     const latest = await getConversation(phone);
     if (!latest) return;
     const history: ConversationMessage[] = Array.isArray(latest.messages) ? latest.messages : [];
-    const summary = await generateInquirySummary(history, latest as any).catch(() => "");
+    const aiSummary = await generateInquirySummary(history, latest as any).catch(() => "");
+    const otherCars = String((latest as any).car_conditions ?? "").split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
+    const summary = [otherCars.length ? `Cars mentioned:\n${otherCars.map(n => "- " + n.replace(/^(Other car|Also selling|Cars):\s*/, "")).join("\n")}` : "", aiSummary].filter(Boolean).join("\n\n");
     const booked = opts.inspectionBooked ?? !!(latest.appointment_date && latest.appointment_time);
     const ok = await createBiginContact({
       ...latest,
@@ -457,11 +459,13 @@ export async function POST(req: NextRequest) {
     const hoursSinceLast = conversation.last_message_at ? (Date.now() - Date.parse(conversation.last_message_at)) / 3.6e6 : 0;
     // Greeting + name after 12h+ silence (mid-flow), or ANY message 24h+ after a closed chat → new inquiry.
     // (Same Bigin contact — it's matched by phone.) A "hi there" during an active chat never resets.
-    const isRestart = ((conversation.step ?? 0) >= 3 && isReIntro && hoursSinceLast > 12)
+    const hasCarOnFile = !!(conversation.make && conversation.make !== "Unknown");
+    const isRestart = (isStaleNoHistory && hasCarOnFile)
+      || ((conversation.step ?? 0) >= 3 && isReIntro && hoursSinceLast > 12)
       || ((conversation.step ?? 0) >= CLOSING_STEP && hoursSinceLast > 24);
 
     // Returning customer: keep name, car, history and summary — ask if it's the same car
-    if (isRestart && !isStaleNoHistory) {
+    if (isRestart) {
       const c = conversation as any;
       const carDesc = [c.year, c.make, c.model].filter((v: any) => v && v !== "Unknown").join(" ");
       const hi = `Welcome back${c.name ? ", " + c.name : ""}!`;
@@ -472,7 +476,8 @@ export async function POST(req: NextRequest) {
       const hist = (c.messages ?? []) as ConversationMessage[];
       await updateConversation(phone, {
         step: carDesc ? CLOSING_STEP : 2,            // CLOSING + the question above = waiting for same/different
-        appointment_date: null, appointment_time: null, appointment: null,
+        ...(c.appointment_date && String(c.appointment_date) < new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10)
+          ? { appointment_date: null, appointment_time: null, appointment: null } : {}),
         bigin_pushed_at: null, last_msg_id: message.id, last_message_at: new Date().toISOString(),
         messages: [...hist, { role: "user", content: messageText }, { role: "assistant", content: reply }].slice(-40),
       } as any).catch(e => console.error("returning customer save error:", e));
@@ -481,11 +486,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (isStaleNoHistory) {
-      console.log(`[kaya] resetting for ${phone}: staleNoHistory=${isStaleNoHistory} step=${conversation.step}`);
-      await resetConversation(phone);
-      const fresh = await getOrCreateConversation(phone);
-      for (const k of Object.keys(conversation)) delete (conversation as any)[k];
-      Object.assign(conversation, fresh);
+      // No history and no car on file → restart the steps, but never delete the record
+      console.log(`[kaya] no history for ${phone} at step ${conversation.step} — restarting steps (data kept)`);
+      await updateConversation(phone, { step: 0 } as any).catch(() => {});
+      conversation.step = 0;
     }
 
     // Always save the sender's phone number — no need to ask for it
@@ -602,17 +606,23 @@ export async function POST(req: NextRequest) {
           await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
           return NextResponse.json({ status: "returning_same_car" }, { status: 200 });
         }
-        // Different car → clear the old car, keep the name, continue with the car questions
+        // Different car → old car moves into the notes, name kept, car questions start
+        const oc = conversation as any;
+        const oldCar = [oc.year, oc.make, oc.model].filter((v: any) => v && v !== "Unknown").join(" ")
+          + (oc.mileage && oc.mileage !== "Unknown" ? `, ${oc.mileage} km` : "") + (oc.specs ? `, ${oc.specs}` : "")
+          + (oc.appointment_date ? `, inspection was booked ${oc.appointment_date} ${oc.appointment_time ?? ""}`.trimEnd() : "");
+        const keptNotes = String(oc.car_conditions ?? "").split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
+        const notes = [...keptNotes, oldCar ? `Other car: ${oldCar} (earlier inquiry)` : ""].filter(Boolean).join(" | ") || null;
         const cleared: Record<string, null> = {
           car: null, make: null, model: null, year: null, mileage: null, specs: null, loan: null,
           mortgage_amount: null, sell_timeline: null, estimated_price: null, car_conditions: null,
           non_gcc_handoff: null, owner_status: null,
         };
-        await updateConversation(phone, { ...cleared, step: 2 } as any).catch(async () => {
+        await updateConversation(phone, { ...cleared, car_conditions: notes, step: 2 } as any).catch(async () => {
           // some columns may not exist — retry with the core ones
           await updateConversation(phone, { car: null, make: null, model: null, year: null, mileage: null, specs: null, loan: null, mortgage_amount: null, sell_timeline: null, step: 2 } as any).catch(() => {});
         });
-        Object.assign(conversation, cleared, { step: 2 });
+        Object.assign(conversation, cleared, { car_conditions: notes, step: 2 });
       }
     }
 
@@ -708,12 +718,30 @@ export async function POST(req: NextRequest) {
       else if (OWNER_PATTERN.test(messageText)) await updateConversation(phone, { owner_status: "Owner" } as any).catch(() => {});
     }
 
-    // Customer mentions another car to sell → note it for the team (Kaya acknowledges it)
-    if (/\b(second|another|other|2nd|one more)\s+(car|vehicle)\b|\b(two|2|three|3)\s+cars\b|\balso\s+(have|selling|want to sell)\b/i.test(messageText)) {
+    // ── Several cars ──────────────────────────────────────────────────
+    // First car → regular DB fields (normal flow). Everything the customer says about the
+    // cars is also kept in the notes, so all other cars end up in the summary / Bigin.
+    const MULTI_CARS = /\b(second|another|other|2nd|one more)\s+(car|vehicle)\b|\b(two|2|three|3|four|4|few|several|multiple)\s+cars\b|\balso\s+(have|selling|want to sell)\b|\bcars\s+(for sale|to sell)\b/i;
+    const MULTI_ASK = "of each car";
+    const multiMode = ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && m.content.includes(MULTI_ASK));
+    const mentionsMulti = MULTI_CARS.test(messageText);
+    const looksLikeCarDetails = !!(vehicleUpdates.make || vehicleUpdates.model || vehicleUpdates.year || vehicleUpdates.mileage);
+    if (mentionsMulti || (multiMode && looksLikeCarDetails && currentStep <= 4)) {
       const existing = (conversation as any).car_conditions ?? "";
-      const note = `Also selling: ${messageText.trim()}`;
-      await updateConversation(phone, { car_conditions: existing ? `${existing} | ${note}` : note } as any).catch(() => {});
-      (conversation as any).car_conditions = existing ? `${existing} | ${note}` : note;
+      const note = `Cars: ${messageText.trim()}`;
+      if (!existing.includes(messageText.trim())) {
+        const updated = existing ? `${existing} | ${note}` : note;
+        await updateConversation(phone, { car_conditions: updated } as any).catch(() => {});
+        (conversation as any).car_conditions = updated;
+      }
+    }
+    if (mentionsMulti && !multiMode && currentStep <= 4) {
+      const reply = `Happy to look at all of them! Could you share the make, model, year, mileage and specs (GCC or non-GCC) ${MULTI_ASK}? One message is fine.`;
+      await sendWhatsAppMessage(phone, reply);
+      if (Object.keys(vehicleDbFields(vehicleUpdates)).length) await updateConversation(phone, vehicleDbFields(vehicleUpdates)).catch(() => {});
+      await updateConversation(phone, { step: Math.max(currentStep, 2), last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      return NextResponse.json({ status: "multi_cars" }, { status: 200 });
     }
 
     // Car conditions — append any new condition signals mentioned

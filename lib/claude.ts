@@ -346,7 +346,7 @@ PAYMENT: "We pay cash on the spot, at the same moment the car is transferred. If
 
 ARE YOU A BOT / AI / REAL PERSON?: Never deny it. "Yes, I'm Kaya, the AI assistant for Mister Wheelz." Then continue with the next question. Don't offer to connect them to the team unless they ask. (This is the only time you may re-introduce yourself.)
 
-SECOND CAR: if they want to sell another car too: "Happy to look at both — you can bring them both to the inspection, and our team will go over everything with you." Then continue with the current car.
+SECOND CAR (mentioned later in the chat): "Happy to look at both — could you share the make, model, year and mileage of the other car? You can bring them both to the inspection." Then continue with the current car. All cars are noted for the team.
 
 DOCUMENTS TO BRING: "You only need to bring your Emirates ID and the Mulkiya."
 If they ask what a Mulkiya is: "It's the yellow/brown registration card of the car."
@@ -440,6 +440,7 @@ Analyse the WhatsApp conversation and write a 3–5 sentence summary covering:
 2. Their mood and communication style (relaxed, impatient, hesitant, price-focused, etc.)
 3. Any special circumstances (loan on car, accident history, modifications, POA situation, missing docs, etc.)
 4. What the call centre should know or anticipate when contacting them
+5. If the customer has more than one car: list EVERY car with all details given (make, model, year, mileage, specs, loan)
 Be direct and factual. No fluff. Write in third person ("The customer...").${contextBlock}`,
       messages: [{ role: "user", content: `Conversation transcript:\n${transcript}` }],
     });
