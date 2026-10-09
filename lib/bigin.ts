@@ -179,8 +179,8 @@ export async function createBiginContact(
     const carFallback = [conversation.make, conversation.model, conversation.year]
       .filter(Boolean).join(" ");
     const displayName = conversation.name || carFallback || "Unknown";
-    const [firstName, ...rest] = displayName.trim().split(/\s+/);
-    const lastName = rest.length > 0 ? rest.join(" ") : firstName;
+    // Full name goes into Last_Name only — First_Name is never used
+    const lastName = displayName.trim();
 
     // Phone: always use conversation phone (WhatsApp sender) as primary
     const conversationPhone = (conversation as any).phone_number || (conversation as any).phone || "";
@@ -189,7 +189,6 @@ export async function createBiginContact(
     const primaryPhone = altPhone && altPhone !== conversationPhone ? altPhone : conversationPhone;
 
     const record: Record<string, string> = {
-      First_Name: firstName,
       Last_Name: lastName,
       Phone: primaryPhone || conversationPhone,
       Conversation_Phone_Number: conversationPhone,
