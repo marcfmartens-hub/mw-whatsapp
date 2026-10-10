@@ -245,7 +245,18 @@ export async function createBiginContact(
     // Name: use customer name, fall back to car details, never leave empty
     const carFallback = [conversation.make, conversation.model, conversation.year]
       .filter(Boolean).join(" ");
-    const displayName = conversation.name || carFallback || "Unknown";
+    // Name never saved but given in the chat (answer to the name question) → use it, not the car
+    let chatName: string | null = null;
+    if (!conversation.name && Array.isArray((conversation as any).messages)) {
+      const msgs = (conversation as any).messages as { role: string; content: string }[];
+      for (let i = 0; i < msgs.length - 1 && !chatName; i++) {
+        if (msgs[i].role === "assistant" && msgs[i + 1].role === "user" && /\b(your name|may i (know|have) your name)\b/i.test(msgs[i].content)) {
+          const m = msgs[i + 1].content.trim().replace(/^(hi|hello|hey)[,!\s]+/i, "").match(/^(?:(?:my name is|i am|i'm|this is|it's)\s+)?([A-Za-z][A-Za-z'-]{1,20})(?:\s+([A-Za-z][A-Za-z'-]{1,20}))?[.!\s]*$/i);
+          if (m) chatName = [m[1], m[2]].filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+        }
+      }
+    }
+    const displayName = conversation.name || chatName || carFallback || "Unknown";
     // Full name goes into Last_Name only — First_Name is never used
     const lastName = displayName.trim();
 
@@ -277,6 +288,11 @@ export async function createBiginContact(
     if (conversation.estimated_price)  record["Estimated_Price"]  = conversation.estimated_price;
     if (conversation.owner_status)     record["Owner_Status"]     = conversation.owner_status;
     if (conversation.car_conditions)   record["Car_Conditions"]   = conversation.car_conditions;
+    {
+      const isoD = conversation.appointment_date ? toIsoDate(conversation.appointment_date) : null;
+      const t = conversation.appointment_time ? toTime24(conversation.appointment_time) : null;
+      if (isoD && t) record["Appointment_Date_and_Time"] = `${isoD}T${t}:00+04:00`;
+    }
     {
       const iso = conversation.appointment_date ? toIsoDate(conversation.appointment_date) : null;
       const t24 = conversation.appointment_time ? toTime24(conversation.appointment_time) : null;

@@ -152,6 +152,51 @@ function formatMileage(raw: string | null | undefined): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " km";
 }
 
+// Day for a booking when the customer only gave a time. Follows Kaya's question
+// ("today / this afternoon" → today, "tomorrow" → next open day); if unclear, today when the slot
+// is still ahead and within hours, otherwise the next open day. Never a Sunday.
+function inferApptDate(t24: string, lastQuestion: string): string | null {
+  const now = new Date(Date.now() + 4 * 3600e3);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const mins = +t24.slice(0, 2) * 60 + +t24.slice(3);
+  const fitsDay = (d: Date) => {
+    const dow = d.getUTCDay();
+    if (dow === 0) return false;
+    const openM = dow === 5 ? 12 * 60 : 10 * 60;
+    return mins >= openM && mins <= 18 * 60 + 30;
+  };
+  const nextOpen = () => {
+    const d = new Date(now);
+    do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() === 0);
+    return d;
+  };
+  const todayOk = fitsDay(now) && mins > now.getUTCHours() * 60 + now.getUTCMinutes();
+  const q = lastQuestion.toLowerCase();
+  const saysToday = /\b(today|this (morning|afternoon|evening))\b/.test(q);
+  const saysTomorrow = /\btomorrow\b/.test(q);
+  if (saysTomorrow && !saysToday) return iso(nextOpen());
+  if (todayOk) return iso(now);
+  const n = nextOpen();
+  return fitsDay(n) ? iso(n) : null;
+}
+
+// Customer name when the name field was never filled: the answer to Kaya's name question.
+function nameFromHistory(history: ConversationMessage[]): string | null {
+  for (let i = 0; i < history.length - 1; i++) {
+    const a = history[i], u = history[i + 1];
+    if (a.role === "assistant" && u.role === "user" && /\b(your name|may i (know|have) your name|who am i speaking)\b/i.test(a.content)) {
+      const n = extractNameFromMessage(u.content);
+      if (n) return n;
+    }
+  }
+  for (const m of history) {
+    if (m.role !== "user") continue;
+    const mm = m.content.match(/\b(?:my name is|i am|i'm|this is|it's)\s+([A-Za-z][a-z]+)/i);
+    if (mm) { const n = extractNameFromMessage(mm[1]); if (n) return n; }
+  }
+  return null;
+}
+
 // ── Bigin push — one path for every milestone ───────────────────────────────
 // Called on: booking confirmed, team follow-up / handoff, and (from the cron) 12-min silence.
 // Bigin upserts by phone, so pushing more than once just updates the same contact.
@@ -167,6 +212,11 @@ async function pushLead(
     const latest = await getConversation(phone);
     if (!latest) return;
     const history: ConversationMessage[] = Array.isArray(latest.messages) ? latest.messages : [];
+    // Never push the car as the contact name when the customer did give their name
+    if (!latest.name) {
+      const n = nameFromHistory(history);
+      if (n) { latest.name = n; await updateConversation(phone, { name: n } as any).catch(() => {}); }
+    }
     const aiSummary = await generateInquirySummary(history, latest as any).catch(() => "");
     const notesAll = String((latest as any).car_conditions ?? "");
     const otherCars = notesAll.split(" | ").filter(n => /^(Other car|Also selling|Cars):/.test(n));
@@ -1134,6 +1184,12 @@ export async function POST(req: NextRequest) {
             apptTime = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`;
             ea.appointment_time = apptTime;
           } else apptTime = ea.appointment_time;
+        }
+        // Time without a day ("5pm" in reply to "What time can you come in this afternoon?") → infer the
+        // day from Kaya's question, so the booking never ends up with a time but no date.
+        if (!apptDate && apptTime && toTime24(apptTime)) {
+          const inferred = inferApptDate(toTime24(apptTime)!, lastAssistantMsg);
+          if (inferred) { apptDate = inferred; ea.appointment_date = inferred; }
         }
         const apptSave: Partial<Conversation> = {};
         if (ea.appointment_date) apptSave.appointment_date = apptDate;
