@@ -1068,7 +1068,7 @@ export async function POST(req: NextRequest) {
           addMin = /hour|hr/i.test(m[3]) ? qty * 60 : qty;
         }
         const d = new Date(Date.now() + 4 * 3600e3 + addMin * 60e3);
-        const mins = Math.ceil((d.getUTCHours() * 60 + d.getUTCMinutes()) / 15) * 15;
+        const mins = Math.ceil((d.getUTCHours() * 60 + d.getUTCMinutes()) / 30) * 30;   // half-hour slots
         const dow = d.getUTCDay();
         const openM = dow === 5 ? 12 * 60 : 10 * 60;
         if (dow !== 0 && mins >= openM && mins <= 18 * 60 + 30) {
@@ -1119,7 +1119,16 @@ export async function POST(req: NextRequest) {
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
         // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
         if (ea.appointment_date) apptDate = toIsoDate(ea.appointment_date) ?? ea.appointment_date;
-        if (ea.appointment_time) apptTime  = ea.appointment_time;
+        if (ea.appointment_time) {
+          // Half-hour slots (10:00, 10:30 … 6:30 PM): an in-between time goes to the next slot
+          const t = toTime24(ea.appointment_time);
+          if (t) {
+            const m = +t.slice(0, 2) * 60 + +t.slice(3);
+            const r = Math.ceil(m / 30) * 30;
+            apptTime = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`;
+            ea.appointment_time = apptTime;
+          } else apptTime = ea.appointment_time;
+        }
         const apptSave: Partial<Conversation> = {};
         if (ea.appointment_date) apptSave.appointment_date = apptDate;
         if (ea.appointment_time) apptSave.appointment_time  = ea.appointment_time;
