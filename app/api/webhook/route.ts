@@ -175,6 +175,7 @@ async function pushLead(
       /OPTED OUT:/.test(notesAll) ? "OPTED OUT — customer asked not to be messaged. Do not contact." : "",
       /Prefers WhatsApp/.test(notesAll) ? "Prefers WhatsApp — no phone calls." : "",
       /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
+      /TRUCK\/BUS:/.test(notesAll) ? "TRUCK / BUS — needs filtering by the team, no appointment booked." : "",
       notesAll.match(/Customer expects: AED [\d,]+/)?.[0] ?? "",
       notesAll.match(/Competitor offer \(customer says, unverified\): [^|]+/)?.[0]?.trim() ?? "",
     ].filter(Boolean).join("\n");
@@ -1111,7 +1112,7 @@ export async function POST(req: NextRequest) {
     // Chat closed without a booking (e.g. after a team handoff) and they now want to come in → book it,
     // except for cases that never get an appointment (Hiyaza, buyer-only, multiple cars, non-GCC)
     const notesNow = String((conversation as any).car_conditions ?? "");
-    const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:)/.test(notesNow)
+    const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:)/.test(notesNow)
       && (conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC";
     const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
     const isRebook = (currentStep >= CLOSING_STEP && hasBooking &&
@@ -1249,8 +1250,8 @@ export async function POST(req: NextRequest) {
     // ── Not a car (motorbike, truck, boat…) → we only buy cars ──
     // Only intercepts before a car is known; once a car is in the chat, Claude answers per the prompt rule.
     {
-      const NOT_CAR = /\b(motor ?bikes?|motor ?cycles?|bikes?|scooters?|quad ?bikes?|atvs?|buggy|buggies|jet ?skis?|boats?|yachts?|speed ?boats?|lorry|lorries|buses|bus|minibus|trailers?|caravans?|forklifts?|tractors?|excavators?|harley|ducati|yamaha|kawasaki|ktm|vespa|royal enfield|(?<!(recovery|tow|pickup|pick-up|pick up) )trucks?)\b/i;
-      const NC_LINE = "Sorry, we only buy cars. We don't buy motorbikes, trucks, boats or other vehicles.";
+      const NOT_CAR = /\b(motor ?bikes?|motor ?cycles?|bikes?|scooters?|quad ?bikes?|atvs?|buggy|buggies|jet ?skis?|boats?|yachts?|speed ?boats?|trailers?|caravans?|forklifts?|tractors?|excavators?|harley|ducati|yamaha|kawasaki|ktm|vespa|royal enfield)\b/i;
+      const NC_LINE = "Sorry, we only buy cars. We don't buy motorbikes, boats or similar vehicles.";
       if (!conversation.make && NOT_CAR.test(messageText) && currentStep < CLOSING_STEP) {
         const hist = (conversation.messages ?? []) as ConversationMessage[];
         const reply = `${NC_LINE} If you have a car to sell in the future, we're happy to help!`;
@@ -1260,6 +1261,50 @@ export async function POST(req: NextRequest) {
         await updateConversation(phone, { step: CLOSING_STEP, car_conditions: ex.includes("NOT A CAR:") ? ex : (ex ? `${ex} | ${note}` : note), last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(e => console.error("not-car save error:", e));
         await appendHistory(phone, hist, messageText, reply);
         return NextResponse.json({ status: "not_a_car" }, { status: 200 });
+      }
+    }
+
+    // ── Truck / bus → allowed, but straight to the team for filtering (no booking) ──
+    {
+      const TRUCK = /\b(lorry|lorries|buses|bus|minibus|mini bus|coaster|(?<!(recovery|tow|pickup|pick-up|pick up) )trucks?)\b/i;
+      const TB_LINE = "For trucks and buses, our team will contact you directly.";
+      const TB_CAR_Q = "Could you share the make, model, year and mileage?";
+      const TB_NAME_Q = "May I have your name?";
+      const TB_PHONE_Q = "Which UAE number is best to reach you on?";
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const notesTB = String((conversation as any).car_conditions ?? "");
+      const inTb = hist.some(m => m.role === "assistant" && m.content.includes(TB_LINE)) || notesTB.includes("TRUCK/BUS:");
+      if ((inTb || (!conversation.make && TRUCK.test(messageText))) && currentStep < CLOSING_STEP) {
+        const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+        const upd: Record<string, unknown> = { last_msg_id: message.id, last_message_at: new Date().toISOString() };
+        let name = conversation.name;
+        let notes = notesTB;
+        if (!inTb) notes = notes ? `${notes} | TRUCK/BUS: ${messageText.slice(0, 200)}` : `TRUCK/BUS: ${messageText.slice(0, 200)}`;
+        if (inTb && lastA.includes(TB_CAR_Q)) notes = `${notes} | Vehicle details: ${messageText.slice(0, 200)}`;
+        if (inTb && lastA.includes(TB_NAME_Q) && !name) {
+          const n = extractNameFromMessage(messageText);
+          if (n) { upd.name = n; name = n; }
+        }
+        if (inTb && lastA.includes(TB_PHONE_Q)) {
+          const pm = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+          if (pm) {
+            const raw = pm[0].replace(/\D/g, "");
+            const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+            if (alt !== phone) upd.alternative_phone = alt;
+          }
+        }
+        upd.car_conditions = notes;
+        const asked = (q: string) => hist.some(m => m.role === "assistant" && m.content.includes(q));
+        const nextQ = !asked(TB_CAR_Q) ? TB_CAR_Q : !name && !asked(TB_NAME_Q) ? TB_NAME_Q : !asked(TB_PHONE_Q) ? TB_PHONE_Q : null;
+        const reply = !inTb
+          ? `Thanks for letting me know. ${TB_LINE} ${nextQ ?? ""}`.trim()
+          : nextQ ?? `Thanks! Our team will contact you ${teamWhen()}. Have a nice day!`;
+        if (!nextQ && inTb) upd.step = CLOSING_STEP;
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, upd as any).catch(e => console.error("truck/bus save error:", e));
+        await appendHistory(phone, hist, messageText, reply);
+        if (!inTb || !nextQ) await pushLead(phone, !inTb ? "truck/bus handoff" : "truck/bus — details complete", { salesInquiry: "Other", inspectionBooked: false, milestone: !inTb ? "FOLLOW UP" : undefined });
+        return NextResponse.json({ status: "truck_bus" }, { status: 200 });
       }
     }
 
