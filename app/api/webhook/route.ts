@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
-import { sendWhatsAppMessage, sendWhatsAppImage } from "@/lib/meta";
+import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/lib/meta";
 import { createBiginContact, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
@@ -478,6 +478,7 @@ function extractMessage(body: any): IncomingMessage | null {
 
 // ---- POST: incoming message handler ----
 export async function POST(req: NextRequest) {
+  const t0 = Date.now();
   let body: any;
 
   try {
@@ -649,6 +650,7 @@ export async function POST(req: NextRequest) {
     // Mark this message ID immediately to prevent duplicate processing during async Claude call
     // Re-fetch after stamp so we see any reset that completed between our initial fetch and now
     await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
+    void sendTypingIndicator(message.id); // customer sees "typing…" during the burst wait + reply
     const freshConversation = await getConversation(phone).catch(() => null);
     if (freshConversation) Object.assign(conversation, freshConversation);
 
@@ -1772,6 +1774,7 @@ export async function POST(req: NextRequest) {
       }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
+    console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
       await sendWhatsAppMessage(phone, part);
     }
