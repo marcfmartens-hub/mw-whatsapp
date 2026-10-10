@@ -13,9 +13,14 @@ const RESET_KEYWORD = "reset chat 007";
 
 const LOCATION_KEYWORDS = /\b(location|address|where are you|where is|how to get|directions?|map|find you|your office|office location|come to you)\b/i;
 
-const LOCATION_IMAGE_URL = "https://mw-whatsapp2.vercel.app/location.jpg";
+const LOCATION_IMAGE_URL = ""; // no location photo yet (old location.jpg never existed in /public)
 
-const LOCATION_TEXT = `📍 Mister Wheelz Car Buyers\n\n409 Sheikh Zayed Rd\nF1rst Motors Bldg.\n1st Floor, Office 7\nAl Quoz First - Dubai\n\nEntrance - Left side of the Building\n\nhttps://maps.app.goo.gl/4L7EkwGZfnffofuh8`;
+const LOCATION_TEXT = `📍 Mister Wheelz Car Buyers
+
+Umm Suqeim Branch
+Al Quoz 4 - Dubai
+
+https://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6`;
 
 // ---- GET: Meta webhook verification ----
 export async function GET(req: NextRequest) {
@@ -502,11 +507,11 @@ export async function POST(req: NextRequest) {
       : [];
     const hasOtherQuestion = otherParts.some(p => /\b(do|does|can|could|is|are|will|how|what|which|when|why|parking|open|hours)\b/i.test(p));
     if ((isLocationMessage || isLocationRequest) && hasOtherQuestion) {
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       messageText = otherParts.join(". ") + " (location pin already sent — don't send it again)";
     } else if (isLocationMessage || isLocationRequest) {
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const convForLocation = await getOrCreateConversation(phone);
       if ((convForLocation.step ?? 0) >= FINAL_STEP - 1) {
@@ -701,7 +706,7 @@ export async function POST(req: NextRequest) {
     if (/\b(stop (messaging|texting|contacting|sending|writing)( me)?|unsubscribe|don'?t (message|text|contact) me|do not (message|text|contact) me|leave me alone|remove my (number|details)|opt[\s-]?out)\b|^\s*stop\s*[.!]*\s*$/i.test(messageText)) {
       const reply = "I understand. Whenever you're ready, you're always welcome at our branch or to contact us again.";
       await sendWhatsAppMessage(phone, reply);
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const ex = String((conversation as any).car_conditions ?? "");
       const note = "OPTED OUT: asked not to be messaged — do not contact";
@@ -803,7 +808,7 @@ export async function POST(req: NextRequest) {
         if (!different) {
           // Same car → details already known, go straight to booking
           const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
-          const reply = `Great. The next step is a free 10–15 minute inspection at our branch in Al Quoz. ${q}`;
+          const reply = `Great. The next step is a free 10–15 minute inspection at our Umm Suqeim Branch in Al Quoz 4. ${q}`;
           await sendWhatsAppMessage(phone, reply);
           await updateConversation(phone, { step: FINAL_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
           await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
@@ -1654,13 +1659,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (appointmentConfirmedEarly) {
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
     }
 
     if (action?.type === "OFFER_CALLBACK") {
       await sendWhatsAppMessage(phone, `Our purchase team will be in touch with you ${teamWhen()}. You're also welcome to walk in whenever — here's where to find us.`);
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
     }
 

@@ -12,9 +12,14 @@ const RESET_KEYWORD = "reset chat 007";
 
 const LOCATION_KEYWORDS = /\b(location|address|where are you|where is|how to get|directions?|map|find you|your office|office location|come to you)\b/i;
 
-const LOCATION_IMAGE_URL = "https://mw-whatsapp2.vercel.app/location.jpg";
+const LOCATION_IMAGE_URL = ""; // no location photo yet (old location.jpg never existed in /public)
 
-const LOCATION_TEXT = `📍 Mister Wheelz Car Buyers\n\n409 Sheikh Zayed Rd\nF1rst Motors Bldg.\n1st Floor, Office 7\nAl Quoz First - Dubai\n\nEntrance - Left side of the Building\n\nhttps://maps.app.goo.gl/4L7EkwGZfnffofuh8`;
+const LOCATION_TEXT = `📍 Mister Wheelz Car Buyers
+
+Umm Suqeim Branch
+Al Quoz 4 - Dubai
+
+https://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6`;
 
 // ---- GET: Meta webhook verification ----
 export async function GET(req: NextRequest) {
@@ -209,7 +214,7 @@ export async function POST(req: NextRequest) {
     const isLocationMessage = message.type === "location";
     const isLocationRequest = LOCATION_KEYWORDS.test(messageText);
     if (isLocationMessage || isLocationRequest) {
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const convForLocation = await getOrCreateConversation(phone);
       if ((convForLocation.step ?? 0) >= FINAL_STEP) {
@@ -382,7 +387,7 @@ export async function POST(req: NextRequest) {
     // ── Human handoff request ─────────────────────────────────────────────────
     if (HUMAN_REQUEST.test(messageText) && currentStep > 0) {
       await sendWhatsAppMessage(phone, "Of course — let me get someone from our team to reach out to you directly.");
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       // No immediate Bigin push — cron handles it after 12 min if customer goes silent.
       return NextResponse.json({ status: "human_handoff" }, { status: 200 });
@@ -494,7 +499,7 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, part);
     }
     if (appointmentConfirmed) {
-      await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
     }
 
