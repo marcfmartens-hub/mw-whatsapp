@@ -1246,6 +1246,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Not a car (motorbike, truck, boat…) → we only buy cars ──
+    // Only intercepts before a car is known; once a car is in the chat, Claude answers per the prompt rule.
+    {
+      const NOT_CAR = /\b(motor ?bikes?|motor ?cycles?|bikes?|scooters?|quad ?bikes?|atvs?|buggy|buggies|jet ?skis?|boats?|yachts?|speed ?boats?|lorry|lorries|buses|bus|minibus|trailers?|caravans?|forklifts?|tractors?|excavators?|harley|ducati|yamaha|kawasaki|ktm|vespa|royal enfield|(?<!(recovery|tow|pickup|pick-up|pick up) )trucks?)\b/i;
+      const NC_LINE = "Sorry, we only buy cars. We don't buy motorbikes, trucks, boats or other vehicles.";
+      if (!conversation.make && NOT_CAR.test(messageText) && currentStep < CLOSING_STEP) {
+        const hist = (conversation.messages ?? []) as ConversationMessage[];
+        const reply = `${NC_LINE} If you have a car to sell in the future, we're happy to help!`;
+        const ex = String((conversation as any).car_conditions ?? "");
+        const note = "NOT A CAR: customer wanted to sell a non-car vehicle — declined";
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, { step: CLOSING_STEP, car_conditions: ex.includes("NOT A CAR:") ? ex : (ex ? `${ex} | ${note}` : note), last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(e => console.error("not-car save error:", e));
+        await appendHistory(phone, hist, messageText, reply);
+        return NextResponse.json({ status: "not_a_car" }, { status: 200 });
+      }
+    }
+
     // ── Hiyaza only (ownership certificate, no plates / insurance) → no booking ──
     // Collect name + UAE number, team contacts them.
     {
