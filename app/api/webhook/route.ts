@@ -13,7 +13,7 @@ const RESET_KEYWORD = "reset chat 007";
 
 const LOCATION_KEYWORDS = /\b(location|address|where are you|where is|how to get|directions?|map|find you|your office|office location|come to you)\b/i;
 
-const LOCATION_IMAGE_URL = ""; // no location photo yet (old location.jpg never existed in /public)
+const LOCATION_IMAGE_URL = "https://mw-whatsapp2.vercel.app/location.jpg"; // temporary banner — replace public/location.jpg with branch photo later
 
 const LOCATION_TEXT = `📍 Mister Wheelz Car Buyers
 
