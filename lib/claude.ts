@@ -92,7 +92,7 @@ If the customer gave their name in this message:
   - Do NOT wait for another message before asking the car.
 
 If the message is only a greeting / filler with no name and no car info:
-  - Reply: "Of course! What car are you looking to sell?"
+  - Reply exactly: "What car are you looking to sell?" (no "Of course", no filler)
 
 If the message contains car information:
   - Extract what you can. Check "What you already know".
@@ -529,6 +529,9 @@ export function containsPrice(text: string): boolean {
 }
 
 function sanitizeReply(text: string): string {
+  // No filler openers like "Of course!" — just continue
+  text = text.replace(/^\s*(of course|sure thing|absolutely|certainly)[!,.]?\s*/i, "");
+  text = text.charAt(0).toUpperCase() + text.slice(1);
   // English only — strip Arabic greetings/words the model may mirror
   text = text
     .replace(/\b(wa\s*)?(alaikum|alaykum|aleikum)\s*(a?s+)?[\s-]*salaa?m\b[,!.]?\s*/gi, "Hi ")

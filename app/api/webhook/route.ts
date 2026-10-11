@@ -1596,7 +1596,7 @@ export async function POST(req: NextRequest) {
           if (!conditions.includes("Asked to speak to the team")) conditions = `${conditions} | Asked to speak to the team`;
           updates.car_conditions = conditions;
         } else if (firstAsk) {
-          parts.push(`Of course${c.name ? ", " + c.name : ""}. ${HUMAN_LINE} ${teamWhen()}.`);
+          parts.push(`${HUMAN_LINE} ${teamWhen()}.`);
           if (!conditions.includes("Asked to speak to the team")) {
             conditions = conditions ? `${conditions} | Asked to speak to the team` : "Asked to speak to the team";
             updates.car_conditions = conditions;
