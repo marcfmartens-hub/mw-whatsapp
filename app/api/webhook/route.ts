@@ -115,6 +115,12 @@ function looksLikeName(candidate: string, explicit = false): boolean {
   return true;
 }
 
+// ", Benny" for the goodbye only — first name, never the last name
+function firstName(n: string | null | undefined): string {
+  const f = String(n ?? "").trim().split(/\s+/)[0];
+  return f ? `, ${f}` : "";
+}
+
 // "SUNIL" / "sunil" → "Sunil" (mixed case like "McKenzie" is kept)
 function nameCase(n: string): string {
   const base = n === n.toUpperCase() || n === n.toLowerCase() ? n.toLowerCase() : n;
@@ -434,8 +440,7 @@ function formatBookingConfirmation(name: string | null | undefined, dateRaw: str
   const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
   const [h, m] = t24.split(":").map(Number);
   const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
-  void name;
-  return `You're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details.`;
+  return `You're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details. Have a nice day${firstName(name)}!`;
 }
 
 function apptLabel(dateRaw?: string | null, timeRaw?: string | null): string {
@@ -1229,7 +1234,7 @@ export async function POST(req: NextRequest) {
     const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText) && !mentionsDayOrTime
       && !(CONDITIONAL.test(messageText) && !/\b(cancel|sold)\b/i.test(messageText));
     if (isCancel) {
-      const reply = `No problem${conversation.name ? ", " + conversation.name : ""}, I've cancelled your appointment. If anything changes, just message us here.`;
+      const reply = `No problem, I've cancelled your appointment. If anything changes, just message us here. Have a nice day${firstName(conversation.name)}!`;
       await sendWhatsAppMessage(phone, reply);
       await updateConversation(phone, { appointment_date: null, appointment_time: null, step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
@@ -1591,7 +1596,7 @@ export async function POST(req: NextRequest) {
 
         const parts: string[] = [];
         if (firstAsk && frustrated) {
-          parts.push(`I understand${c.name ? ", " + c.name : ""}. ${HUMAN_LINE} ${teamWhen()}.`);
+          parts.push(`I understand. ${HUMAN_LINE} ${teamWhen()}.`);
           const topic = PRICE_WORDS.test(messageText) || priorPriceAsks > 0 ? "price — customer was frustrated (pushing for a price)" : "customer was frustrated";
           if (!conditions.includes("Wants to discuss:")) conditions = conditions ? `${conditions} | Wants to discuss: ${topic}` : `Wants to discuss: ${topic}`;
           if (!conditions.includes("Asked to speak to the team")) conditions = `${conditions} | Asked to speak to the team`;
@@ -1608,7 +1613,7 @@ export async function POST(req: NextRequest) {
           const ans = await getKayaReply(CLOSING_STEP, hist, messageText, { name: c.name, make: c.make, model: c.model, year: c.year, team_when: teamWhen() } as any);
           parts.push(ans);
         } else {
-          parts.push(nextQ ?? `Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day!`);
+          parts.push(nextQ ?? `Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day${firstName((conversation as any).name)}!`);
         }
 
         for (const part of parts) await sendWhatsAppMessage(phone, part);
@@ -1638,7 +1643,8 @@ export async function POST(req: NextRequest) {
       else if (!c2.loan) { nextQ = "Is there any outstanding mortgage on the car?"; step = 5; }
       else if (!tl) { nextQ = "When are you planning to sell the car?"; step = 6; }
       else { nextQ = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?"; step = FINAL_STEP; }
-      const reply = `Thanks for clarifying${nm}. ${nextQ}`;
+      void nm;
+      const reply = `Thanks for clarifying. ${nextQ}`;
       await sendWhatsAppMessage(phone, reply);
       await updateConversation(phone, { ...vDb, specs: "GCC", non_gcc_handoff: false, step, last_msg_id: message.id } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
@@ -1714,7 +1720,7 @@ export async function POST(req: NextRequest) {
       if (ngQuestion && !saidTeamWillDiscuss) parts.push("That's something our team will discuss with you directly.");
       if (firstTime) parts.push(`Thanks for letting me know. We don't buy every non-GCC car, so I'll have our team contact you${nextQ ? "." : " " + teamWhen() + "."}${nextQ ? " " + nextQ : ""}`);
       else if (nextQ) parts.push(nextQ);
-      if (!nextQ && !firstTime) parts.push(`Thanks${c.name ? ", " + c.name : ""}, I've got all the details. Our team will be in touch ${teamWhen()}.`);
+      if (!nextQ && !firstTime) parts.push(`Thanks, I've got all the details. Our team will be in touch ${teamWhen()}. Have a nice day${firstName(c.name)}!`);
 
       for (const part of parts) await sendWhatsAppMessage(phone, part);
       if (!nextQ) updates.step = CLOSING_STEP;
@@ -1928,7 +1934,8 @@ export async function POST(req: NextRequest) {
     if (currentStep === 6 && !action && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
-      reply = `Got it${nm ? ", " + nm : ""}. ${q}`;
+      void nm;
+      reply = q;
     }
     // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
     // With a valid date + time → make it a real booking (Bigin, location); otherwise never send a fake one.
@@ -1984,6 +1991,20 @@ export async function POST(req: NextRequest) {
         const rest = replyParts[0].replace(/^perfect\b[^.?!]*[.?!]\s*/i, "").trim();
         void nm;
         replyParts[0] = rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : replyParts[0];
+      }
+    }
+    // A bit of emotion (Marc): once per chat, react to a very low mileage or a special car
+    {
+      const said = history.some(m => m.role === "assistant" && /^(wow|beautiful|what a)/i.test(m.content));
+      const yr = parseInt(String(estYear), 10);
+      const km = estMileage ? parseInt(String(estMileage).replace(/\D/g, ""), 10) : NaN;
+      const age = yr ? Math.max(1, new Date().getFullYear() - yr) : 0;
+      const LUX = /^(rolls|ferrari|lamborghini|bentley|mclaren|aston|bugatti|maybach|porsche|koenigsegg|pagani)/i;
+      let wow = "";
+      if (!said && age && !isNaN(km) && km > 0 && km / age < 8000) wow = `Wow, only ${km.toLocaleString("en-US")} km, that's very low!`;
+      else if (!said && LUX.test(String(estMake))) wow = "Beautiful car!";
+      if (wow && replyParts.length === 1 && /\?\s*$/.test(replyParts[0]) && !/you'?re booked/i.test(replyParts[0])) {
+        replyParts[0] = `${wow} ${replyParts[0].replace(/^(great|alright|got it|thanks|nice|okay|ok)[!.,]?\s*/i, "")}`;
       }
     }
     // Natural, varied openers (Marc): "Great", "Alright", "Got it"… — never the same one twice in a row
