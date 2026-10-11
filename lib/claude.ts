@@ -116,8 +116,7 @@ NEVER mention "car dealership" or "test drive".`,
   // ── STEP 6 — Sell timeline → sell method ─────────────────────────────────
   6: `The customer has just answered "When are you planning to sell?" Your goal: find out how they want to sell.
 
-Check "What you already know" — if sell_timeline is not yet captured, the customer's current message IS that answer. Acknowledge it briefly, then ask:
-"Are you looking for a quick cash sale, or would you be open to consignment?"
+Check "What you already know" — if sell_timeline is not yet captured, the customer's current message IS that answer. Answer any question they asked in one short sentence, then ask the exact question from "Booking slot". NEVER ask about cash or consignment — only explain it if THEY ask.
 
 If they want to sell NOW (e.g. "now", "immediately", "as soon as possible", "today", "this week", "urgent") — do NOT ask cash or consignment. Go straight to booking: a few words of acknowledgement, then the exact question from "Booking slot" (it already says if we're closed and when we open).
 
