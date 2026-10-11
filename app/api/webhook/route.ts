@@ -400,7 +400,7 @@ function getBookingSlot(): string {
   const closedNow = openToday == null || mins >= 19 * 60 || mins < openToday * 60;
   const opensLabel = openToday != null && mins < openToday * 60 ? "today" : nextLabel;
   const opensAt = openToday != null && mins < openToday * 60 ? openToday : Number(nextFull.match(/opens (\d+)/)?.[1] ?? 10);
-  const question = closedNow ? `We're closed now, but we open again at ${ampm(opensAt)} ${opensLabel}. What time can you bring the car for inspection ${opensLabel}?`
+  const question = closedNow ? `We're closed right now, but I can book an inspection for you ${opensLabel} after ${ampm(opensAt)}. What time is best for you to bring the car?`
     : !todayOpen ? `What time can you come in ${nextLabel}?`
     : offerNextToo ? `What time can you come in ${todayWord} or ${nextLabel}?`
     : `What time can you come in ${todayWord}?`;
@@ -1345,7 +1345,7 @@ export async function POST(req: NextRequest) {
     const currentYear = new Date().getFullYear();
     const hasAllVehicleFields = !!carMileage && (!!carSpecs || specsExplicitlyUnknown
                                   || conversation.specs === "Unknown");
-    const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && (currentYear - carYear) >= 10;
+    const skipLoan = currentStep === 4 && hasAllVehicleFields && carYear > 0 && carYear < 2020; // Marc: mortgage only for 2020+
 
     // ── Number given after a callback promise (chat closed) → save it ─────────
     if (currentStep >= CLOSING_STEP) {
@@ -1758,7 +1758,7 @@ export async function POST(req: NextRequest) {
     const step3Complete = isCarStep && hasModel && hasYear && !!carMileage && hasSpecs;
     // Booking requested and the car is identified → go straight to booking (step 7)
     const jumpToBooking = (wantsBooking && hasModel && hasYear) || isRebook;
-    const step3OldCar   = step3Complete && carYear > 0 && (currentYear - carYear) >= 10;
+    const step3OldCar   = step3Complete && carYear > 0 && carYear < 2020;
 
     let action: NextAction | undefined;
 
@@ -1937,7 +1937,7 @@ export async function POST(req: NextRequest) {
       void nm;
       // Marc: "asap / as early as possible / soon / quick…" → "No problem!" then the closed line + time question
       const SOON = /\b(asap|a\.s\.a\.p|as (early|soon|fast|quick)(ly)? as possible|soon|early|quick(ly)?|fast|urgent(ly)?|now|immediately|today|tomorrow|tonorrow|tmrw|this week)\b/i;
-      reply = SOON.test(messageText) ? `No problem! ${q}` : q;
+      reply = SOON.test(messageText) ? `No problem, ${q.charAt(0).toLowerCase() + q.slice(1)}`.replace(/\. What time is best/, ".\n\nWhat time is best") : q;
     }
     // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
     // With a valid date + time → make it a real booking (Bigin, location); otherwise never send a fake one.
