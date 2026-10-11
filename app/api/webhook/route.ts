@@ -1935,7 +1935,9 @@ export async function POST(req: NextRequest) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
       void nm;
-      reply = q;
+      // Marc: "asap / as early as possible / soon / quick…" → "No problem!" then the closed line + time question
+      const SOON = /\b(asap|a\.s\.a\.p|as (early|soon|fast|quick)(ly)? as possible|soon|early|quick(ly)?|fast|urgent(ly)?|now|immediately|today|tomorrow|tonorrow|tmrw|this week)\b/i;
+      reply = SOON.test(messageText) ? `No problem! ${q}` : q;
     }
     // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
     // With a valid date + time → make it a real booking (Bigin, location); otherwise never send a fake one.
@@ -2003,7 +2005,7 @@ export async function POST(req: NextRequest) {
       let wow = "";
       if (!said && age && !isNaN(km) && km > 0 && km / age < 8000) wow = `Wow, only ${km.toLocaleString("en-US")} km, that's very low!`;
       else if (!said && LUX.test(String(estMake))) wow = "Beautiful car!";
-      if (wow && replyParts.length === 1 && /\?\s*$/.test(replyParts[0]) && !/you'?re booked/i.test(replyParts[0])) {
+      if (wow && replyParts.length === 1 && !/^no problem/i.test(replyParts[0]) && /\?\s*$/.test(replyParts[0]) && !/you'?re booked/i.test(replyParts[0])) {
         replyParts[0] = `${wow} ${replyParts[0].replace(/^(great|alright|got it|thanks|nice|okay|ok)[!.,]?\s*/i, "")}`;
       }
     }
