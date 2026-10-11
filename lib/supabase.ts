@@ -7,7 +7,10 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY env vars");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Never let Next.js cache Supabase reads (GET routes like the monitor and crons were seeing stale data)
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  global: { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, cache: "no-store" }) },
+});
 
 export interface Conversation {
   phone: string;
