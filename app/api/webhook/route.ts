@@ -1425,7 +1425,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Chat finished and the customer only says "ok / thanks" → no reply (never repeat the closing) ──
-    if (currentStep >= CLOSING_STEP && /^\s*(ok(ay)?|k|thanks?( you)?( so much)?|thx|ty|great|perfect|noted|cool|sure|alright|fine|good|done|👍|🙏|👌|❤️|shukran)[\s.!🙏👍]*$/i.test(messageText)) {
+    if (currentStep >= CLOSING_STEP && /^(\s*(ok(ay)?|k|thanks?|thank you|so much|thx|ty|great|perfect|noted|cool|sure|alright|fine|good|done|see you|bye|👍|🙏|👌|❤️|shukran)[\s,.!🙏👍]*)+$/i.test(messageText)) {
       const hist0 = (conversation.messages ?? []) as ConversationMessage[];
       await updateConversation(phone, { last_msg_id: message.id, messages: [...hist0, { role: "user", content: messageText }].slice(-40), last_message_at: new Date().toISOString() } as any).catch(() => {});
       return NextResponse.json({ status: "ack_no_reply" }, { status: 200 });
