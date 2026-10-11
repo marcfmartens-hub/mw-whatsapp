@@ -3,7 +3,7 @@ import type { Conversation } from "./supabase";
 const BIGIN_CONTACTS_URL = "https://www.zohoapis.com/bigin/v1/Contacts";
 const ZOHO_TOKEN_URL = "https://accounts.zoho.com/oauth/v2/token";
 
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   const refreshToken = process.env.BIGIN_REFRESH_TOKEN;
   const clientId = process.env.BIGIN_CLIENT_ID;
   const clientSecret = process.env.BIGIN_CLIENT_SECRET;
