@@ -1013,8 +1013,8 @@ export async function POST(req: NextRequest) {
       const yr = parseInt(String(vehicleUpdates.year ?? conversation.year ?? ""), 10);
       const km = vehicleUpdates.mileage ? parseInt(String(vehicleUpdates.mileage), 10) : NaN;
       if (!isNaN(km) && km < 1000 && yr && yr < new Date().getFullYear()) {
-        console.warn(`[kaya] implausible mileage "${vehicleUpdates.mileage}" for ${yr} car — not saved`);
-        delete vehicleUpdates.mileage;
+        if (km >= 10) vehicleUpdates.mileage = String(km * 1000); // "180" → 180,000 km
+        else { console.warn(`[kaya] implausible mileage "${vehicleUpdates.mileage}" for ${yr} car — not saved`); delete vehicleUpdates.mileage; }
       }
     }
 
@@ -1047,9 +1047,9 @@ export async function POST(req: NextRequest) {
       {
         const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
         if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
-          if (/^\s*(yes|yeah|yep|yup|ya|right|correct|sure|ok(ay)?|exactly|of course|it is|gcc)\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
-          else if (/^\s*(no|nope|not)\b/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
-          else if (/\b(not sure|no idea|don'?t know)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
+          if (/\b(not sure|no idea|don'?t know|idk)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
+          else if (/^\s*(no|nope|nah|not)\b|\bnon[\s-]?gcc\b|\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b|\bimport/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+          else vehicleUpdates.specs = "GCC"; // "yes", "Ys", "ya", "👍", "gcc" … — never ask the same question twice
         }
       }
       // "not sure what GCC or non-GCC means… bought it from a dealer in Dubai" is not a non-GCC car
@@ -1964,6 +1964,14 @@ export async function POST(req: NextRequest) {
         for (const re of CLOSERS) { re.lastIndex = 0; if (re.test(prevA)) { re.lastIndex = 0; out = out.replace(re, ""); } }
         return out.trim() || p;
       });
+    }
+    {
+      const lastSent = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const nz = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (lastSent && replyParts.length === 1 && nz(replyParts[0]) === nz(lastSent)) {
+        console.warn("[kaya] identical reply to the previous one — not repeated");
+        replyParts = [];
+      }
     }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
