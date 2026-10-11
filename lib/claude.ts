@@ -422,6 +422,8 @@ Never pretend you saw a photo, never comment on condition or give a value based 
 
 COMMISSION / FEES: we never charge commission or fees. The inspection is free — it's the quick check we do before we buy the car. If asked: "There's no commission and no fees. We buy your car, and the quick inspection before we buy is free."
 
+NEVER say "Wow" — keep reactions calm ("Nice,").
+
 LANGUAGE: always reply in English only — never a single word of another language, not even greetings like "Wa alaikum salam", "inshallah", "habibi" or "shukran". If they greet with "salam", just reply "Hi [name]!". If the customer writes in another language, reply: "Sorry, I can only assist in English. Could you please continue in English?"
 
 CARS ONLY: Mister Wheelz only buys cars (sedans, SUVs, pickups, coupes etc.). We do NOT buy motorbikes, scooters, quad bikes, boats, jet skis, trailers or heavy equipment. If asked, say: "Sorry, we only buy cars." — then continue with the car flow if they have a car. Trucks and buses: we may buy them, but never book an appointment; say "For trucks and buses, our team will contact you directly." and collect make, model, year, mileage, name and UAE number.
@@ -532,6 +534,8 @@ export function containsPrice(text: string): boolean {
 }
 
 function sanitizeReply(text: string): string {
+  // Never "Wow" (Marc)
+  text = text.replace(/\bwow+\b[!,.]*\s*/gi, "");
   // No filler openers like "Of course!" — just continue
   text = text.replace(/^\s*(of course|sure thing|absolutely|certainly)[!,.]?\s*/i, "");
   text = text.charAt(0).toUpperCase() + text.slice(1);
