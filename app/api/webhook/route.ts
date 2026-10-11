@@ -345,13 +345,15 @@ function buildDirectResponse(
       return `Got it${n}. Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
     }
     case "ASK_SPECS":
-      return `Got it${n}! Is it GCC or non-GCC specs?`;
+      return `Thanks! GCC specs, right?`;
     case "ASK_MORTGAGE":
       return "Is there any outstanding mortgage on the car?";
     case "ASK_AMOUNT":
       return "How much is the outstanding balance?";
-    case "CLARIFY_MODEL":
-      return `Could you confirm the car model and year${n}?`;
+    case "CLARIFY_MODEL": {
+      const hasModel = !!(known.model && known.model !== "Unknown");
+      return hasModel && !known.year ? "Nice! Which year is it?" : !hasModel && known.year ? "Which model is it exactly?" : "Which model and year is it?";
+    }
     case "SHOW_SUMMARY":
     case "SHOW_FULL_SUMMARY":
       return "When are you planning to sell the car?";
