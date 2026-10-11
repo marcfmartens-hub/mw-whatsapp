@@ -421,7 +421,7 @@ PHOTOS / FILES: you CANNOT open photos, PDFs or any files — you can't see them
 If something you need is still missing or unclear, say: "Unfortunately I'm not able to open photos or files, so I can't see them — could you type the [missing info]?"
 Never pretend you saw a photo, never comment on condition or give a value based on photos.
 
-LANGUAGE: always reply in English only. If the customer writes in another language, reply: "Sorry, I can only assist in English. Could you please continue in English?"
+LANGUAGE: always reply in English only — never a single word of another language, not even greetings like "Wa alaikum salam", "inshallah", "habibi" or "shukran". If they greet with "salam", just reply "Hi [name]!". If the customer writes in another language, reply: "Sorry, I can only assist in English. Could you please continue in English?"
 
 CARS ONLY: Mister Wheelz only buys cars (sedans, SUVs, pickups, coupes etc.). We do NOT buy motorbikes, scooters, quad bikes, boats, jet skis, trailers or heavy equipment. If asked, say: "Sorry, we only buy cars." — then continue with the car flow if they have a car. Trucks and buses: we may buy them, but never book an appointment; say "For trucks and buses, our team will contact you directly." and collect make, model, year, mileage, name and UAE number.
 
@@ -529,6 +529,14 @@ export function containsPrice(text: string): boolean {
 }
 
 function sanitizeReply(text: string): string {
+  // English only — strip Arabic greetings/words the model may mirror
+  text = text
+    .replace(/\b(wa\s*)?(alaikum|alaykum|aleikum)\s*(a?s+)?[\s-]*salaa?m\b[,!.]?\s*/gi, "Hi ")
+    .replace(/\b(as+alaa?mu?\s*alaikum|salaa?m(\s+alaikum)?)\b[,!.]?\s*/gi, "Hi ")
+    .replace(/[,\s]*\b(inshallah|insha'?\s*allah|mashallah|masha'?\s*allah|habibi|yalla|shukran|alhamdulillah)\b[,!.]?/gi, "")
+    .replace(/\bHi\s+Hi\b/g, "Hi")
+    .replace(/[\u0600-\u06FF]+/g, "")
+    .replace(/[ \t]{2,}/g, " ").trim();
   // House style: no emojis after the first greeting
   if (!/Hi! I'm Kaya, the online assistant/i.test(text)) {
     text = text.replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\uFE0F\u200D]/gu, "").replace(/[ \t]{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
