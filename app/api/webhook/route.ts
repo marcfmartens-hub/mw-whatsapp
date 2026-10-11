@@ -944,7 +944,13 @@ export async function POST(req: NextRequest) {
     if (!vehicleUpdates.model || vehicleUpdates.model === "Unknown") {
       const effectiveMake = vehicleUpdates.make ?? conversation.make;
       if (effectiveMake && effectiveMake !== "Unknown") {
-        const found = quickModelMatch(messageText, effectiveMake);
+        // Fallback for models not in the reference: take the word right after the make
+        // ("2023 JAC JS4 FULL OPTION" → "JS4")
+        const makeRe = new RegExp(`\\b${effectiveMake.replace(/[-\s&]/g, "[-\\s&]?")}\\s+([A-Za-z0-9][A-Za-z0-9-]{0,11}(?:\\s+(?:Pro|Plus|Max|Sport|Hybrid))?)`, "i");
+        const after = messageText.match(makeRe)?.[1];
+        const STOP = /^(car|model|full|option|options|fully|loaded|for|in|is|the|my|with|and|gcc|non|spec|specs|km|kms|white|black|red|blue|grey|gray|silver|\d{4})$/i;
+        const found = quickModelMatch(messageText, effectiveMake)
+          ?? (after && !STOP.test(after.split(/\s+/)[0]) ? after.toUpperCase() === after || /\d/.test(after) ? after.toUpperCase() : after.charAt(0).toUpperCase() + after.slice(1).toLowerCase() : undefined);
         if (found) {
           vehicleUpdates.model = found;
           if (vehicleUpdates.typo_check) {
@@ -1423,7 +1429,11 @@ export async function POST(req: NextRequest) {
       // Obvious frustration → stop asking questions, hand over to the team
       const PRICE_WORDS = /\b(price|number|offer|quote|how much|worth|value|amount|pay)\b/i;
       const letters = messageText.replace(/[^A-Za-z]/g, "");
-      const shouting = letters.length >= 8 && letters.replace(/[^A-Z]/g, "").length / letters.length >= 0.7;
+      // All caps alone is not frustration when the message is about the car (many customers type in caps)
+      const carInfoInMsg = !!(vehicleUpdates.make || vehicleUpdates.model || vehicleUpdates.year || vehicleUpdates.mileage)
+        || /\b(19|20)\d{2}\b|\b\d+\s*k?\s*(km|kms)\b/i.test(messageText);
+      const shouting = !carInfoInMsg && letters.length >= 8 && letters.replace(/[^A-Z]/g, "").length / letters.length >= 0.7
+        && (/[!?]/.test(messageText) || PRICE_WORDS.test(messageText));
       const FRUSTRATION_PHRASES = /(!!+|\?\?+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
       const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
       const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
@@ -1451,7 +1461,14 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const missingCar = (["make", "model", "year"] as const).find(k => !c[k] || c[k] === "Unknown");
+        // Ask each car detail at most once here — never loop on the same question
+        const askedBefore = (k: string) => hist.some(m => m.role === "assistant"
+          && (k === "make" ? /share the make, model and year/i.test(m.content) : new RegExp(`share the ${k} of the car`, "i").test(m.content)));
+        if (!firstAsk && /share the (make|model|year)/i.test(lastA)) {
+          const note = `Car (customer's words): ${messageText.slice(0, 120)}`;
+          if (!conditions.includes(note)) { conditions = conditions ? `${conditions} | ${note}` : note; updates.car_conditions = conditions; }
+        }
+        const missingCar = (["make", "model", "year"] as const).find(k => (!c[k] || c[k] === "Unknown") && !askedBefore(k) && !askedBefore("make"));
         const topicDone  = /Wants to discuss:/.test(conditions);
         const phoneAsked = hist.some(m => m.role === "assistant" && /best (number )?to reach you/i.test(m.content));
 

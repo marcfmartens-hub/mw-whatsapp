@@ -29,6 +29,8 @@ export const CAR_MAKES: Record<string, string> = {
   Suzuki: "Suzuki", Tesla: "Tesla", Toyota: "Toyota", TVR: "TVR",
   Volkswagen: "Volkswagen", Volvo: "Volvo", WMotors: "W Motors",
   XPeng: "XPeng", GMC2: "GMC",
+  Chery: "Chery", Hongqi: "Hongqi", Tank: "Tank", Zeekr: "Zeekr", LynkCo: "Lynk & Co",
+  Kaiyi: "Kaiyi", Bestune: "Bestune", Maxus: "Maxus", Soueast: "Soueast", Omoda: "Omoda",
 };
 
 export const CAR_MODELS: Record<string, string[]> = {
@@ -54,6 +56,11 @@ export const CAR_MODELS: Record<string, string[]> = {
   Isuzu: ["D-Max","MU-X","Trooper"],
   Jaguar: ["XE","XF","XJ","F-Pace","E-Pace","I-Pace","F-Type","XK","S-Type","X-Type"],
   Jeep: ["Wrangler","Wrangler Unlimited","Cherokee","Grand Cherokee","Grand Cherokee L","Compass","Renegade","Gladiator"],
+  JAC: ["JS2","JS3","JS4","JS6","JS8","J7","S3","S4","S7","T8","T9"],
+  Chery: ["Tiggo 2","Tiggo 3","Tiggo 4","Tiggo 7","Tiggo 8","Tiggo 9","Arrizo 5","Arrizo 6","Arrizo 8"],
+  Hongqi: ["H5","H9","HS5","HS7","E-HS9"],
+  Tank: ["300","500"],
+  Omoda: ["C5","E5"],
   Jetour: ["T1","T2","X70","X70S","X90","X95"],
   Kia: ["Picanto","Rio","Cerato","Forte","K5","Cadenza","Stinger","Seltos","Sportage","Sorento","Telluride","Carnival","Soul","Niro","EV6","EV9","Mohave"],
   Lamborghini: ["Aventador","Huracan","Urus","Gallardo","Murcielago","Revuelto","Diablo","Countach"],
