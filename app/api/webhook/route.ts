@@ -968,6 +968,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // A name found in this message is saved right away, so the special flows (Hiyaza, truck, buyer…) don't ask again
+    if ((coreUpdates as any).name && !conversation.name) {
+      conversation.name = (coreUpdates as any).name;
+      await updateConversation(phone, { name: conversation.name } as any).catch(() => {});
+    }
+
     const alreadyKnown: VehicleFields = {
       make:    (conversation.make    && conversation.make    !== "Unknown") ? conversation.make    : undefined,
       model:   (conversation.model   && conversation.model   !== "Unknown") ? conversation.model   : undefined,
