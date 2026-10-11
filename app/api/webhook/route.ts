@@ -1975,6 +1975,15 @@ export async function POST(req: NextRequest) {
         replyParts = [];
       }
     }
+    // No "Perfect, Razi - Monday … 3:00 PM" twice in a row
+    {
+      const lastSent = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
+      if (replyParts.length && /^perfect\b/i.test(lastSent) && /^perfect\b/i.test(replyParts[0]) && !/you'?re booked for/i.test(replyParts[0])) {
+        const nm = String((coreUpdates as any).name ?? conversation.name ?? "");
+        const rest = replyParts[0].replace(/^perfect\b[^.?!]*[.?!]\s*/i, "").trim();
+        replyParts[0] = rest ? `Thanks${nm && !lastSent.includes(nm) ? ", " + nm : ""}. ${rest}` : replyParts[0];
+      }
+    }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
       await sendWhatsAppMessage(phone, part);
