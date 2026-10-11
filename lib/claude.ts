@@ -5,10 +5,14 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY as string,
 });
 
-const KAYA_MODEL      = "claude-sonnet-5";      // chat responses — needs reliable instruction-following
-const EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"; // structured JSON extraction — simple, cheap
-const KAYA_MAX_TOKENS      = 1024; // bumped: Sonnet 5 uses thinking tokens before text
-const EXTRACTOR_MAX_TOKENS =   80;
+const KAYA_MODEL      = "claude-haiku-5-5"; // chat replies (adaptive thinking on)
+const EXTRACTOR_MODEL = "claude-haiku-5-5"; // car extraction, appointment parsing, CRM summary (thinking off)
+const KAYA_MAX_TOKENS      = 2048; // thinking tokens count toward this — keep headroom so text always follows
+const EXTRACTOR_MAX_TOKENS =  200;
+// Background tasks are simple JSON/notes — no thinking, so small max_tokens can't end before the text
+const NO_THINKING = { thinking: { type: "disabled" as const } };
+// Static system text is cached (Haiku 5.5 caches from 512 tokens) — repeat reads cost ~10%
+const cached = (text: string) => ({ type: "text" as const, text, cache_control: { type: "ephemeral" as const } });
 /** @deprecated use KAYA_MAX_TOKENS / EXTRACTOR_MAX_TOKENS */
 const MAX_TOKENS = KAYA_MAX_TOKENS;
 
@@ -486,7 +490,8 @@ export async function generateInquirySummary(
   try {
     const response = await anthropic.messages.create({
       model: EXTRACTOR_MODEL,
-      max_tokens: 300,
+      max_tokens: 500,
+      ...NO_THINKING,
       system: `You write short CRM notes for a car-buying call centre team in Dubai.
 Analyse the WhatsApp conversation and write a 3–5 sentence summary covering:
 1. What the customer is looking to do (sell type, urgency, timeframe)
@@ -538,6 +543,16 @@ function sanitizeReply(text: string): string {
   return text;
 }
 
+// Everything before the per-customer part is identical for every chat → cache it
+function splitSystem(full: string) {
+  let cut = full.indexOf("\nWhat you already know:");
+  if (cut < 0) cut = full.indexOf("\n\nCurrent step:");
+  if (cut < 0) return [cached(full)];
+  return [cached(full.slice(0, cut)), { type: "text" as const, text: full.slice(cut) }];
+}
+
+export let lastKayaUsage: unknown = null;
+
 // ─── Kaya reply ───────────────────────────────────────────────────────────────
 
 export async function getKayaReply(
@@ -555,10 +570,13 @@ export async function getKayaReply(
     const response = await anthropic.messages.create({
       model: KAYA_MODEL,
       max_tokens: KAYA_MAX_TOKENS,
-      system: buildSystemPrompt(step, known),
+      system: splitSystem(buildSystemPrompt(step, known)),
       messages,
     });
 
+    lastKayaUsage = response.usage;
+    const u = response.usage as any;
+    console.log(`[Kaya] tokens in=${u.input_tokens} cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} out=${u.output_tokens}`);
     const textBlock = response.content.find((block) => block.type === "text");
     if (textBlock?.type === "text") return sanitizeReply(textBlock.text.trim());
 
@@ -585,7 +603,8 @@ export async function extractAppointment(
   try {
     const response = await anthropic.messages.create({
       model: EXTRACTOR_MODEL,
-      max_tokens: 60,
+      max_tokens: 120,
+      ...NO_THINKING,
       system: `Extract an appointment date and time from a WhatsApp message.
 Return ONLY a JSON object with keys "appointment_date" and "appointment_time".
 - "appointment_date": day/date as written (e.g. "Monday", "Tomorrow", "July 10", "Sunday"). Use "" if not found.
@@ -629,7 +648,8 @@ export async function extractVehicleInfo(
     const response = await anthropic.messages.create({
       model: EXTRACTOR_MODEL,
       max_tokens: EXTRACTOR_MAX_TOKENS,
-      system: `You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data. If you are not 100% sure, return "Unknown" or omit the field.
+      ...NO_THINKING,
+      system: [cached(`You extract structured car data from a customer WhatsApp message to store in a CRM. Accuracy is critical — wrong data is worse than no data. If you are not 100% sure, return "Unknown" or omit the field.
 
 Return ONLY a JSON object with the fields you are certain about:
 - "make"    — must exactly match one of the valid makes below. Use the canonical spelling. If unsure, omit.
@@ -647,7 +667,7 @@ Strict rules:
 - If the make looks like a typo or phonetic variation of a known make (e.g. "Toyata" → "Toyota", "Mercedez" → "Mercedes-Benz"), set make to the canonical spelling and add a typo_check entry. Only use "Unknown" if you genuinely cannot determine which make was meant.
 - If the model looks like a typo or phonetic variation of a known model for that make (e.g. "Landcrusier" → "Land Cruiser", "Corolle" → "Corolla"), set model to the canonical model name and add a typo_check entry. Only use "Unknown" if you genuinely cannot determine which model was meant.
 - Never put model name in "make" or vice versa. Never put year in "model".
-- Do NOT overwrite already known fields: ${knownSummary || "nothing yet"}.
+- Do NOT overwrite fields listed as already known in the message.
 - If nothing vehicle-related is in the message, return {}.
 - Messages may contain filler words ("sorry", "actually", "I mean", "oops", "it's the"). Extract the vehicle fields and ignore the filler.
 - For each suspected typo add an entry to "typo_check": [{"field":"make"|"model"|"year", "input":"what they typed", "suggestion":"what you think they meant"}]
@@ -670,8 +690,8 @@ Examples:
 "patrol" (Nissan known)   → {"model":"Patrol"}
 "I want to sell my car"   → {}
 "just told you"           → {}
-"yes" / "ok"              → {}`,
-      messages: [{ role: "user", content: messageText }],
+"yes" / "ok"              → {}`)],
+      messages: [{ role: "user", content: `Already known: ${knownSummary || "nothing yet"}\n\nCustomer message: ${messageText}` }],
     });
 
     const block = response.content.find((b) => b.type === "text");
