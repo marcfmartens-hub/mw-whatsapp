@@ -1623,11 +1623,23 @@ export async function POST(req: NextRequest) {
     //    "when are you planning to sell?" → cash vs consignment (cars ≤ 8 yrs)
     // 3) close and push to Bigin. No appointment booking.
     // "It's GCC specs" after a non-GCC handoff → correct it and continue to booking
-    if ((conversation as any).non_gcc_handoff === true && /\b(it'?s|is|yes|its|actually)\b.{0,15}\bgcc\b|\bgcc\s+specs?\b/i.test(messageText) && !/\bnon[\s-]?gcc\b/i.test(messageText)) {
-      (conversation as any).non_gcc_handoff = false;
-      conversation.specs = "GCC";
-      vehicleUpdates.specs = "GCC";
-      await updateConversation(phone, { non_gcc_handoff: false, specs: "GCC" } as any).catch(() => {});
+    if (((conversation as any).non_gcc_handoff === true || conversation.specs === "Non-GCC")
+        && /\b(it'?s|is|yes|its|actually)\b.{0,15}\bgcc\b|\bgcc\s+specs?\b/i.test(messageText) && !/\bnon[\s-]?gcc\b/i.test(messageText)) {
+      // Back to the normal flow — the goal is the appointment: next missing question, in order
+      const vDb = vehicleDbFields(vehicleUpdates);
+      const c2 = { ...conversation, ...vDb } as any;
+      const tl = String(c2.sell_timeline ?? "").replace(/\s*\|?\s*sell_method:\w+/, "").trim();
+      const nm = c2.name ? ", " + c2.name : "";
+      let nextQ: string; let step: number;
+      if (!c2.mileage) { nextQ = "What's the mileage on it?"; step = 4; }
+      else if (!c2.loan) { nextQ = "Is there any outstanding mortgage on the car?"; step = 5; }
+      else if (!tl) { nextQ = "When are you planning to sell the car?"; step = 6; }
+      else { nextQ = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?"; step = FINAL_STEP; }
+      const reply = `Thanks for clarifying${nm}. ${nextQ}`;
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { ...vDb, specs: "GCC", non_gcc_handoff: false, step, last_msg_id: message.id } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      return NextResponse.json({ status: "gcc_corrected" }, { status: 200 });
     }
     const isNonGcc = (vehicleUpdates.specs ?? carSpecs) === "Non-GCC" && carSpecs === "Non-GCC";
     const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
@@ -1907,7 +1919,7 @@ export async function POST(req: NextRequest) {
     );
 
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
-    if (currentStep === 6 && !action && URGENT_KEYWORDS.test(messageText)
+    if (currentStep === 6 && !action && (URGENT_KEYWORDS.test(messageText) || /\b(this week|soon|asap|as soon as possible|quick(ly)?|fast|tomorrow)\b/i.test(messageText))
         && !SELL_METHOD_CONSIGNMENT.test(messageText) && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
