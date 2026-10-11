@@ -7,6 +7,7 @@ import { CAR_MODELS } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 
 const RESET_KEYWORD = "reset chat 007";
 

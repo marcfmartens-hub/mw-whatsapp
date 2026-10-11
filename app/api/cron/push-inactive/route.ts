@@ -5,6 +5,7 @@ import { generateInquirySummary } from "@/lib/claude";
 import type { ConversationMessage } from "@/lib/claude";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 
 // Vercel cron calls this route every 5 minutes.
 // It finds conversations that started but went silent, and pushes them to Bigin
@@ -17,7 +18,8 @@ function getSupabase() {
   // Same env vars as lib/supabase.ts — the NEXT_PUBLIC_ ones were never set, so this cron crashed silently
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  return createClient(url, key);
+  // no-store: Next.js was caching these reads, so new silent chats were never seen
+  return createClient(url, key, { global: { fetch: (i: RequestInfo | URL, init?: RequestInit) => fetch(i, { ...init, cache: "no-store" }) } });
 }
 
 export async function GET(req: NextRequest) {
