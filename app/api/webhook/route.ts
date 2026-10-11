@@ -1997,16 +1997,16 @@ export async function POST(req: NextRequest) {
     }
     // A bit of emotion (Marc): once per chat, react to a very low mileage or a special car
     {
-      const said = history.some(m => m.role === "assistant" && /^(nice, that's low mileage|nice car|wow|beautiful)/i.test(m.content));
+      const said = history.some(m => m.role === "assistant" && /^nice,/i.test(m.content));
       const yr = parseInt(String(estYear), 10);
       const km = estMileage ? parseInt(String(estMileage).replace(/\D/g, ""), 10) : NaN;
       const age = yr ? Math.max(1, new Date().getFullYear() - yr) : 0;
       const LUX = /^(rolls|ferrari|lamborghini|bentley|mclaren|aston|bugatti|maybach|porsche|koenigsegg|pagani)/i;
       let wow = "";
-      if (!said && age && !isNaN(km) && km > 0 && km / age < 8000) wow = "Nice, that's low mileage.";
-      else if (!said && LUX.test(String(estMake))) wow = "Nice car.";
+      if (!said && ((age && !isNaN(km) && km > 0 && km / age < 8000) || LUX.test(String(estMake)))) wow = "Nice,";
       if (wow && replyParts.length === 1 && !/^no problem/i.test(replyParts[0]) && /\?\s*$/.test(replyParts[0]) && !/you'?re booked/i.test(replyParts[0])) {
-        replyParts[0] = `${wow} ${replyParts[0].replace(/^(great|alright|got it|thanks|nice|okay|ok)[!.,]?\s*/i, "")}`;
+        const q = replyParts[0].replace(/^(great|alright|got it|thanks|nice|okay|ok)[!.,]?\s*/i, "");
+        replyParts[0] = `${wow} ${q.charAt(0).toLowerCase() + q.slice(1)}`; // "Nice, is there any outstanding mortgage on the car?"
       }
     }
     // Natural, varied openers (Marc): "Great", "Alright", "Got it"… — never the same one twice in a row
