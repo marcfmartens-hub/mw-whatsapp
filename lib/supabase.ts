@@ -91,19 +91,28 @@ export async function updateConversation(
   phone: string,
   updates: Partial<Conversation>
 ): Promise<Conversation> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update(updates)
-    .eq("phone", phone)
-    .select("*")
-    .single();
-
-  if (error) {
+  // A column missing from the table must never cost the whole save (make/model/step were lost
+  // this way): drop just that column and retry.
+  let fields: Record<string, unknown> = { ...updates };
+  for (let tries = 0; tries < 8; tries++) {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update(fields)
+      .eq("phone", phone)
+      .select("*")
+      .single();
+    if (!error) return data as Conversation;
+    const missing = error.code === "PGRST204" ? error.message.match(/'([a-z_]+)' column/)?.[1] : undefined;
+    if (missing && missing in fields) {
+      console.warn(`[supabase] column ${missing} missing in ${TABLE} — saved without it`);
+      delete fields[missing];
+      if (Object.keys(fields).length === 0) return (await getConversation(phone)) as Conversation;
+      continue;
+    }
     console.error("updateConversation error:", error);
     throw error;
   }
-
-  return data as Conversation;
+  throw new Error("updateConversation: too many missing columns");
 }
 
 // Reset must never fail silently. Strategy:
