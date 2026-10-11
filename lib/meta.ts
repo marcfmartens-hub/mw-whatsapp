@@ -1,6 +1,13 @@
 const GRAPH_API_VERSION = "v21.0";
 
+// Stress-test simulation: messages to registered test phones are captured, never sent.
+export function simLog(to: string): string[] | null {
+  const sim = (globalThis as any).__kayaSim as Map<string, string[]> | undefined;
+  return sim?.get(to) ?? null;
+}
+
 export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: string): Promise<void> {
+  const log = simLog(to); if (log) { log.push(`[image] ${caption ?? ""}`); return; }
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   const accessToken = process.env.META_ACCESS_TOKEN;
 
@@ -33,6 +40,7 @@ export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: 
 }
 
 export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
+  const log = simLog(to); if (log) { log.push(body); return; }
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   const accessToken = process.env.META_ACCESS_TOKEN;
 
@@ -68,6 +76,7 @@ export async function sendWhatsAppMessage(to: string, body: string): Promise<voi
 // WhatsApp shows the indicator until the reply arrives (max ~25 s). Never throws.
 export async function sendTypingIndicator(messageId: string): Promise<void> {
   try {
+    if (messageId.startsWith("sim_")) return;
     const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
     const accessToken = process.env.META_ACCESS_TOKEN;
     if (!phoneNumberId || !accessToken || !messageId) return;

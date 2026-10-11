@@ -58,6 +58,12 @@ async function getContactFields(accessToken: string): Promise<FieldMeta[] | null
 const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // "Saturday", "tomorrow", "10 October", "2026-10-10" → "YYYY-MM-DD" (Dubai time)
+// Marc: always show numbers as +971… (also in Bigin)
+export function plusPhone(p: string | null | undefined): string {
+  const d = String(p ?? "").replace(/\D/g, "");
+  return d ? `+${d}` : "";
+}
+
 export function toIsoDate(raw: string): string | null {
   const v = raw.trim().toLowerCase();
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
@@ -239,6 +245,15 @@ export async function createBiginContact(
   },
   attempt = 1
 ): Promise<boolean> {
+  {
+    const sim = (globalThis as any).__kayaSim as Map<string, string[]> | undefined;
+    const log = sim?.get(String((conversation as any).phone ?? (conversation as any).phone_number ?? ""));
+    if (log) {
+      const c: any = conversation;
+      log.push(`[BIGIN] name=${c.name ?? ""} car=${[c.make, c.model, c.year].filter(Boolean).join(" ")} km=${c.mileage ?? ""} specs=${c.specs ?? ""} booked=${!!c.inspection_booked} appt=${c.appointment_date ?? ""} ${c.appointment_time ?? ""} inquiry=${c.sales_inquiry ?? ""} tag=${c.milestone_tag ?? ""} est=${c.estimated_price ?? ""}`);
+      return true;
+    }
+  }
   try {
     const accessToken = await getAccessToken();
 
@@ -268,8 +283,8 @@ export async function createBiginContact(
 
     const record: Record<string, string> = {
       Last_Name: lastName,
-      Phone: primaryPhone || conversationPhone,
-      Conversation_Phone_Number: conversationPhone,
+      Phone: plusPhone(primaryPhone || conversationPhone),
+      Conversation_Phone_Number: plusPhone(conversationPhone),
       Lead_Source: "WhatsApp Bot",
       Source_Url: "WhatsApp Bot",
       Sales_Inquiry: resolveSalesInquiry(conversation as any),
@@ -318,7 +333,9 @@ export async function createBiginContact(
     let applyTag: string | null = null;
     let rows: any[] = [];
     if (conversationPhone) {
-      const sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(conversationPhone)}`, { headers });
+      // Older contacts were saved without "+", new ones with it — search both
+      let sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(plusPhone(conversationPhone))}`, { headers });
+      if (sr.status === 204) sr = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(String(conversationPhone).replace(/\D/g, ""))}`, { headers });
       if (sr.status === 200) {
         const sj = await sr.json().catch(() => null);
         rows = Array.isArray(sj?.data) ? sj.data : [];

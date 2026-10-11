@@ -331,7 +331,7 @@ export default function MonitorPage() {
               <div style={S.contactInfo}>
                 <div style={S.contactTop}>
                   <div style={S.contactPhone}>
-                    {c.name ? <><span style={S.contactName}>{c.name}</span><span style={S.contactPhoneSub}> · {c.phone}</span></> : c.phone}
+                    {c.name ? <><span style={S.contactName}>{c.name}</span><span style={S.contactPhoneSub}> · +{c.phone}</span></> : "+" + c.phone}
                   </div>
                   <div style={S.contactTime}>{relativeTime(c.last_message_at)}</div>
                 </div>
@@ -358,7 +358,7 @@ export default function MonitorPage() {
             <div style={S.chatHeader}>
               <div style={{ ...S.avatar, background: avatarColor(activeConv.phone), width: 42, height: 42, fontSize: 16, flexShrink: 0 }}>{avatarInitial(activeConv)}</div>
               <div style={S.chatHeaderInfo}>
-                <div style={S.chatHeaderName}>{activeConv.name ? `${activeConv.name} · ` : ""}{activeConv.phone}</div>
+                <div style={S.chatHeaderName}>{activeConv.name ? `${activeConv.name} · ` : ""}+{activeConv.phone}</div>
                 <div style={S.chatHeaderStatus}><span style={S.dot} />{stepLabel(activeConv.step)} · step {activeConv.step}/8</div>
               </div>
               <div style={S.fieldPills}>

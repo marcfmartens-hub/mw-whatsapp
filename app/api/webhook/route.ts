@@ -115,6 +115,12 @@ function looksLikeName(candidate: string, explicit = false): boolean {
   return true;
 }
 
+// "SUNIL" / "sunil" → "Sunil" (mixed case like "McKenzie" is kept)
+function nameCase(n: string): string {
+  const base = n === n.toUpperCase() || n === n.toLowerCase() ? n.toLowerCase() : n;
+  return base.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function extractNameFromMessage(text: string): string | null {
   const m = text.match(
     /(?:i'?m\s+|i\s+am\s+|my\s+name(?:\s+is)?\s+|this\s+is\s+|name\s+is\s+|call\s+me\s+)([A-Za-z][a-z]*(?:\s+[A-Za-z][a-z]*){0,3})/i
@@ -126,11 +132,11 @@ function extractNameFromMessage(text: string): string | null {
     const all = m[1].trim().split(/\s+/);
     let k = 0; while (k < all.length && looksLikeName(all.slice(0, k + 1).join(" "), explicit)) k++;
     const nm = all.slice(0, k).join(" ");
-    return nm ? nm.replace(/\b\w/g, (c) => c.toUpperCase()) : null;
+    return nm ? nameCase(nm) : null;
   }
   const trimmed = text.trim();
   if (/^[A-Za-z]+(?:\s+[A-Za-z]+){0,3}$/.test(trimmed) && trimmed.length <= 40 && looksLikeName(trimmed))
-    return trimmed.replace(/\b\w/g, (c) => c.toUpperCase());
+    return nameCase(trimmed);
   return null;
 }
 
@@ -191,6 +197,8 @@ function nameFromHistory(history: ConversationMessage[]): string | null {
   }
   for (const m of history) {
     if (m.role !== "user") continue;
+    const here = m.content.match(/^\s*(?:(?:hi|hello|hey|salam)[,!.\s]+)?([A-Za-z][a-z]{1,15})\s+here\b/i);
+    if (here) { const n = extractNameFromMessage(here[1]); if (n) return n; }
     const mm = m.content.match(/\b(?:my name is|i am|i'm|this is|it's)\s+([A-Za-z][a-z]+)/i);
     if (mm) { const n = extractNameFromMessage(mm[1]); if (n) return n; }
   }
@@ -291,7 +299,7 @@ function describeAction(a: NextAction): string {
     case "ASK_SPECS":        return `Ask ONLY: "Is it GCC or non-GCC specs?"`;
     case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
     case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
-    case "CLARIFY_MODEL":    return "Ask the customer to confirm or clarify the car model and year.";
+    case "CLARIFY_MODEL":    return `Ask ONLY for what is still missing — the model and/or the year (check "What you already know") — in a few words, e.g. "Which year is it?". Never ask to "confirm" something they already gave.`;
     case "SHOW_SUMMARY":      return `Ask: "When are you planning to sell the car?"`;
     case "SHOW_FULL_SUMMARY": return `Ask: "When are you planning to sell the car?"`;
     case "OFFER_CALLBACK":   return `Tell the customer the purchasing team will call them ${teamWhen()}, and they're welcome to come in whenever.`;
@@ -378,7 +386,14 @@ function getBookingSlot(): string {
     }
   }
   const todayWord = now.getUTCHours() < 12 ? "today" : "this afternoon";
-  const question = !todayOpen ? `What time can you come in ${nextLabel}?`
+  // Branch closed right now (Marc: say we're closed, when we open, then ask for a time)
+  const openToday = OPEN[now.getUTCDay()];
+  const ampm = (h: number) => (h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`);
+  const closedNow = openToday == null || mins >= 19 * 60 || mins < openToday * 60;
+  const opensLabel = openToday != null && mins < openToday * 60 ? "today" : nextLabel;
+  const opensAt = openToday != null && mins < openToday * 60 ? openToday : Number(nextFull.match(/opens (\d+)/)?.[1] ?? 10);
+  const question = closedNow ? `We're closed now, but we open again at ${ampm(opensAt)} ${opensLabel}. What time can you bring the car for inspection ${opensLabel}?`
+    : !todayOpen ? `What time can you come in ${nextLabel}?`
     : offerNextToo ? `What time can you come in ${todayWord} or ${nextLabel}?`
     : `What time can you come in ${todayWord}?`;
   return `Ask exactly: "${question}" — always ask for a TIME, never a yes/no question. ` +
@@ -552,7 +567,12 @@ export async function POST(req: NextRequest) {
 
     // ── Location trigger ───────────────────────────────────────────
     const isLocationMessage = message.type === "location";
-    const isLocationRequest = LOCATION_KEYWORDS.test(messageText);
+    // "got the location, thanks" isn't a request; and never resend the pin if it was just sent (unless they ask again with "where")
+    const recentA = (((LOCATION_KEYWORDS.test(messageText) ? (await getConversation(phone).catch(() => null))?.messages : null) ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-3).map(m => m.content).join("\n");
+    const pinSentRecently = /maps\.app\.goo\.gl|Here below is our location/i.test(recentA);
+    const isLocationRequest = LOCATION_KEYWORDS.test(messageText)
+      && !/\b(got|have|received|saw|thanks for)\b.{0,15}\b(the )?(location|address|map|pin)\b/i.test(messageText)
+      && (!pinSentRecently || /\bwhere\b/i.test(messageText));
     // Other parts of the message besides the location request ("where are you? and is there parking")
     const otherParts = isLocationRequest
       ? messageText.split(/[?.!\n]+|\band\b|,/i).map(p => p.trim()).filter(p => p.length > 3 && !LOCATION_KEYWORDS.test(p))
@@ -667,7 +687,7 @@ export async function POST(req: NextRequest) {
         const freshest = ((await getConversation(phone).catch(() => null))?.messages ?? prior) as ConversationMessage[];
         await updateConversation(phone, { messages: [...freshest, { role: "user", content: messageText }].slice(-40) } as any).catch(() => {});
       }
-      await new Promise(r => setTimeout(r, isMedia ? 8000 : 4000));
+      await new Promise(r => setTimeout(r, message.id.startsWith("sim_") ? 200 : isMedia ? 8000 : 4000));
       let after = await getConversation(phone).catch(() => null);
       if (after && after.last_msg_id && after.last_msg_id !== message.id) {
         return NextResponse.json({ status: "superseded" }, { status: 200 });
@@ -889,6 +909,18 @@ export async function POST(req: NextRequest) {
 
     const currentStep = conversation.step ?? 0;
     const fieldToSave = FIELD_BY_STEP[currentStep];
+    {
+      const lastA = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (lastA && norm(messageText).length > 15 && norm(lastA).includes(norm(messageText))) {
+        // Customer copied Kaya's question back (e.g. "Is it GCC or non-GCC specs?") — not an answer
+        const ask = /gcc/i.test(messageText) ? "Is the car GCC specs (made for the Gulf), or imported from another country?" : lastA.split(/\n\n/).pop()!;
+        await sendWhatsAppMessage(phone, ask);
+        await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
+        await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, ask);
+        return NextResponse.json({ status: "echo" }, { status: 200 });
+      }
+    }
 
     const coreUpdates: Partial<Conversation> = {
       last_msg_id: message.id,
@@ -921,13 +953,18 @@ export async function POST(req: NextRequest) {
         if (n) (coreUpdates as any).name = n;
       }
     }
-    if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
+    if (!conversation.name && !(coreUpdates as any).name && currentStep < 2) {
+      // Early in the chat only a clear "I'm Marc." / "my name is Marc," — never "I'm tied up most of the week"
+      const em = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is)\s+([A-Za-z]{2,15})(?=\s*(?:[.,!]|$|\band\b|\bhere\b))/i);
+      if (em && looksLikeName(em[1]) && !/^(sorry|busy|fine|good|ok|okay|here|interested|selling|looking|ready|tied|new|back|done|happy|available|free|not)$/i.test(em[1])) (coreUpdates as any).name = nameCase(em[1]);
+    }
+    if (!conversation.name && !(coreUpdates as any).name && currentStep >= 2) {
       const nm = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is|call\s+me|name\s*:)\s+([A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){0,3})\b/i);
       const NOT_NAMES = /^(selling|looking|interested|not|ok|okay|fine|good|here|coming|ready|sure|busy|planning|going|thinking|in|at|from|the|a|an|out|done|happy|available|free|asking|trying)\b/i;
       if (nm && !NOT_NAMES.test(nm[1])) {
         const words = nm[1].trim().split(/\s+/);
         let k = 0; while (k < words.length && looksLikeName(words.slice(0, k + 1).join(" "))) k++;
-        if (k > 0) (coreUpdates as any).name = words.slice(0, k).join(" ").replace(/\b\w/g, c => c.toUpperCase());
+        if (k > 0) (coreUpdates as any).name = nameCase(words.slice(0, k).join(" "));
       }
     }
 
@@ -938,8 +975,8 @@ export async function POST(req: NextRequest) {
       mileage: conversation.mileage ?? undefined,
       specs:   conversation.specs   ?? undefined,
     };
-    // Don't extract vehicle info at step 0 — it's the greeting step, ask for name first
-    const vehicleUpdates = currentStep === 0 ? {} : await extractVehicleInfo(messageText, alreadyKnown);
+    // Also at step 0: "Hi, I have a Nissan Patrol 2020" must be saved, not asked again later
+    const vehicleUpdates = await extractVehicleInfo(messageText, currentStep === 0 ? {} : alreadyKnown);
 
     if (!vehicleUpdates.model || vehicleUpdates.model === "Unknown") {
       const effectiveMake = vehicleUpdates.make ?? conversation.make;
@@ -960,6 +997,16 @@ export async function POST(req: NextRequest) {
             if (vehicleUpdates.typo_check.length === 0) delete vehicleUpdates.typo_check;
           }
         }
+      }
+    }
+
+    // Implausible mileage ("8.6 km" on a 2016 car) → don't store it as mileage
+    {
+      const yr = parseInt(String(vehicleUpdates.year ?? conversation.year ?? ""), 10);
+      const km = vehicleUpdates.mileage ? parseInt(String(vehicleUpdates.mileage), 10) : NaN;
+      if (!isNaN(km) && km < 1000 && yr && yr < new Date().getFullYear()) {
+        console.warn(`[kaya] implausible mileage "${vehicleUpdates.mileage}" for ${yr} car — not saved`);
+        delete vehicleUpdates.mileage;
       }
     }
 
@@ -987,6 +1034,11 @@ export async function POST(req: NextRequest) {
         else if (/\bgcc\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
       } else if (vehicleUpdates.specs === "GCC" && NON_GCC.test(messageText)) {
         vehicleUpdates.specs = "Non-GCC";
+      }
+      // "not sure what GCC or non-GCC means… bought it from a dealer in Dubai" is not a non-GCC car
+      const UNSURE_SPECS = /\bgcc\s+or\s+non|\bwhat\b.{0,25}\bgcc\b|\b(not sure|no idea|don'?t know)\b.{0,30}\bgcc\b/i;
+      if (UNSURE_SPECS.test(messageText) && vehicleUpdates.specs === "Non-GCC" && !/\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b.{0,10}\b(spec|import)/i.test(messageText)) {
+        vehicleUpdates.specs = /\bprobably\s+gcc\b|\bdealer\b.{0,20}\b(dubai|uae|abu dhabi|sharjah)\b|\b(bought|purchased)\b.{0,20}\b(in|from)\s+(dubai|the uae|uae)\b/i.test(messageText) ? "GCC" : "Unknown";
       }
       if (!alreadyKnown.mileage && !vehicleUpdates.mileage) {
         const mk = messageText.match(/\b(\d+(?:\.\d+)?)\s*k\s*(?:km|kms|kilomet\w*)?\b/i);
@@ -1140,8 +1192,13 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    const wantsBooking = currentStep >= 1 && currentStep < FINAL_STEP &&
-      (isBookingMsg(messageText) || priorUserMsgs.some(isBookingMsg));
+    const notesEarly = String((conversation as any).car_conditions ?? "");
+    const noBookingCase = /(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:|NOT A CAR:)/.test(notesEarly)
+      || (conversation as any).non_gcc_handoff === true || conversation.specs === "Non-GCC";
+    // "call me after 6pm" / "call tomorrow morning" is about a phone call, not a visit
+    const aboutCall = (t: string) => /\bcall(s|ed|ing)?\b/i.test(t) && !/\b(come|coming|book|visit|bring|inspection|drop)\b/i.test(t);
+    const wantsBooking = !noBookingCase && currentStep >= 1 && currentStep < FINAL_STEP &&
+      ((isBookingMsg(messageText) && !aboutCall(messageText)) || priorUserMsgs.some(t => isBookingMsg(t) && !aboutCall(t)));
 
     // ── After booking: cancel or reschedule ───────────────────────────
     const hasBooking = !!(conversation.appointment_date || conversation.appointment_time);
@@ -1149,7 +1206,10 @@ export async function POST(req: NextRequest) {
     const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can we make it|make it)\b/i;
     const lastAssistantMsg = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
     const mentionsDayOrTime = new RegExp(`\\b${DAY}\\b|\\b${TIME}`, "i").test(messageText);
-    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText) && !mentionsDayOrTime;
+    // "I'm not coming for nothing / unless you answer" is a condition, not a cancellation
+    const CONDITIONAL = /\b(unless|if|without|before|for nothing|until|otherwise)\b/i;
+    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText) && !mentionsDayOrTime
+      && !(CONDITIONAL.test(messageText) && !/\b(cancel|sold)\b/i.test(messageText));
     if (isCancel) {
       const reply = `No problem${conversation.name ? ", " + conversation.name : ""}, I've cancelled your appointment. If anything changes, just message us here.`;
       await sendWhatsAppMessage(phone, reply);
@@ -1166,14 +1226,17 @@ export async function POST(req: NextRequest) {
     const dayWord   = messageText.match(new RegExp(`\\b${DAY}\\b`, "i"))?.[0];
     const differentDay = !!dayWord && toIsoDate(dayWord) !== conversation.appointment_date;
     const GOODBYE = /\b(see you|thanks|thank you|great|perfect|cool|noted|got it)\b/i;
-    const newDayOrTime = (timeInMsg || differentDay) && !GOODBYE.test(messageText);
+    // A day/time inside a longer question ("can the team confirm before tomorrow morning?") is not a new booking time
+    const CHANGE_WORDS = /\b(come|coming|book|instead|change|move|switch|make it|can we do|how about|what about|better|rather)\b/i;
+    const newDayOrTime = (timeInMsg || differentDay) && !GOODBYE.test(messageText)
+      && (messageText.length <= 40 || CHANGE_WORDS.test(messageText));
     // Chat closed without a booking (e.g. after a team handoff) and they now want to come in → book it,
     // except for cases that never get an appointment (Hiyaza, buyer-only, multiple cars, non-GCC)
     const notesNow = String((conversation as any).car_conditions ?? "");
     const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:)/.test(notesNow)
       && (conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC";
     const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
-    const isRebook = (currentStep >= CLOSING_STEP && hasBooking &&
+    const isRebook = !noBookingCase && !aboutCall(messageText) && (currentStep >= CLOSING_STEP && hasBooking &&
       (RESCHEDULE.test(messageText) || newDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg)))
       || bookFromClosed;
 
@@ -1328,6 +1391,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Answer to "Which UAE number…?" that isn't a phone number (e.g. a plate "Dubai X68212") → ask once more ──
+    if (/best (number )?to reach you/i.test(lastAssistantMsg) && currentStep < CLOSING_STEP + 1) {
+      const hasPhone = /(?:\+?971|00971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b5\d{8}\b/.test(messageText);
+      const pointsToThis = /\b(this|same|that|here|current|whatsapp|yes|yeah|yep|ok|okay|sure|it'?s fine|use (it|this))\b/i.test(messageText);
+      const looksLikePlate = /\b(dubai|dxb|abu dhabi|auh|sharjah|shj|ajman|rak|fujairah|uaq)\b.{0,6}\b[a-z]{0,2}\s*\d{2,5}\b|^\s*[a-z]{1,2}\s*\d{3,5}\s*$/i.test(messageText);
+      const alreadyAskedAgain = /that looks like a plate number|mobile number is best/i.test(lastAssistantMsg);
+      if (!hasPhone && !pointsToThis && !alreadyAskedAgain && (looksLikePlate || /\d{3,}/.test(messageText))) {
+        const ask = looksLikePlate
+          ? "Thanks, that looks like a plate number. Which UAE mobile number is best to reach you on? If it's this WhatsApp number, just say \"this one\"."
+          : "Which UAE mobile number is best to reach you on? If it's this WhatsApp number, just say \"this one\".";
+        await sendWhatsAppMessage(phone, ask);
+        const hist0 = (conversation.messages ?? []) as ConversationMessage[];
+        await updateConversation(phone, { last_msg_id: message.id, ...(looksLikePlate ? { car_conditions: [String((conversation as any).car_conditions ?? ""), `Plate: ${messageText.slice(0, 30)}`].filter(Boolean).join(" | ") } : {}) } as any).catch(() => {});
+        await appendHistory(phone, hist0, messageText, ask);
+        return NextResponse.json({ status: "phone_clarify" }, { status: 200 });
+      }
+    }
+
+    // ── Chat finished and the customer only says "ok / thanks" → no reply (never repeat the closing) ──
+    if (currentStep >= CLOSING_STEP && /^\s*(ok(ay)?|k|thanks?( you)?( so much)?|thx|ty|great|perfect|noted|cool|sure|alright|fine|good|done|👍|🙏|👌|❤️|shukran)[\s.!🙏👍]*$/i.test(messageText)) {
+      const hist0 = (conversation.messages ?? []) as ConversationMessage[];
+      await updateConversation(phone, { last_msg_id: message.id, messages: [...hist0, { role: "user", content: messageText }].slice(-40), last_message_at: new Date().toISOString() } as any).catch(() => {});
+      return NextResponse.json({ status: "ack_no_reply" }, { status: 200 });
+    }
+
     // ── Truck / bus → allowed, but straight to the team for filtering (no booking) ──
     {
       const TRUCK = /\b(lorry|lorries|buses|bus|minibus|mini bus|coaster|(?<!(recovery|tow|pickup|pick-up|pick up) )trucks?)\b/i;
@@ -1432,8 +1520,10 @@ export async function POST(req: NextRequest) {
       // All caps alone is not frustration when the message is about the car (many customers type in caps)
       const carInfoInMsg = !!(vehicleUpdates.make || vehicleUpdates.model || vehicleUpdates.year || vehicleUpdates.mileage)
         || /\b(19|20)\d{2}\b|\b\d+\s*k?\s*(km|kms)\b/i.test(messageText);
-      const shouting = !carInfoInMsg && letters.length >= 8 && letters.replace(/[^A-Z]/g, "").length / letters.length >= 0.7
-        && (/[!?]/.test(messageText) || PRICE_WORDS.test(messageText));
+      // Some customers type everything in capitals — only a sudden switch to caps with "!" counts as shouting
+      const capsRatio = (t: string) => { const l = t.replace(/[^A-Za-z]/g, ""); return l.length >= 8 ? l.replace(/[^A-Z]/g, "").length / l.length : 0; };
+      const wroteNormallyBefore = hist.some(m => m.role === "user" && m.content.replace(/[^A-Za-z]/g, "").length >= 8 && capsRatio(m.content) < 0.5);
+      const shouting = !carInfoInMsg && wroteNormallyBefore && capsRatio(messageText) >= 0.7 && /!/.test(messageText);
       const FRUSTRATION_PHRASES = /(!!+|\?\?+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
       const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
       const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
@@ -1446,6 +1536,10 @@ export async function POST(req: NextRequest) {
         const c = { ...conversation, ...vDb } as any;
         let conditions: string = c.car_conditions ?? "";
         const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+        if (!c.name) { // name question answered inside a frustrated message ("Omar here. Just give me a range")
+          const n = nameFromHistory([...hist, { role: "user", content: messageText }]);
+          if (n) { c.name = n; updates.name = n; }
+        }
 
         // Save answers to the questions asked last time
         if (!firstAsk && /what would you like to discuss/i.test(lastA)) {
@@ -1491,7 +1585,13 @@ export async function POST(req: NextRequest) {
             updates.car_conditions = conditions;
           }
         }
-        parts.push(nextQ ?? `Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day!`);
+        if (!nextQ && !firstAsk && /\?/.test(messageText)) {
+          // Handed over, but the customer still asks something (documents, is it free…) → answer it
+          const ans = await getKayaReply(CLOSING_STEP, hist, messageText, { name: c.name, make: c.make, model: c.model, year: c.year, team_when: teamWhen() } as any);
+          parts.push(ans);
+        } else {
+          parts.push(nextQ ?? `Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day!`);
+        }
 
         for (const part of parts) await sendWhatsAppMessage(phone, part);
         if (!nextQ) updates.step = CLOSING_STEP;
@@ -1507,9 +1607,16 @@ export async function POST(req: NextRequest) {
     // 1) Handoff message  2) one question at a time: missing car details →
     //    "when are you planning to sell?" → cash vs consignment (cars ≤ 8 yrs)
     // 3) close and push to Bigin. No appointment booking.
-    const isNonGcc = carSpecs === "Non-GCC";
+    // "It's GCC specs" after a non-GCC handoff → correct it and continue to booking
+    if ((conversation as any).non_gcc_handoff === true && /\b(it'?s|is|yes|its|actually)\b.{0,15}\bgcc\b|\bgcc\s+specs?\b/i.test(messageText) && !/\bnon[\s-]?gcc\b/i.test(messageText)) {
+      (conversation as any).non_gcc_handoff = false;
+      conversation.specs = "GCC";
+      vehicleUpdates.specs = "GCC";
+      await updateConversation(phone, { non_gcc_handoff: false, specs: "GCC" } as any).catch(() => {});
+    }
+    const isNonGcc = (vehicleUpdates.specs ?? carSpecs) === "Non-GCC" && carSpecs === "Non-GCC";
     const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
-    if (((isNonGcc && currentStep >= 2) || alreadyHandedOff) && currentStep < CLOSING_STEP) {
+    if (((isNonGcc && currentStep >= 1) || alreadyHandedOff) && currentStep < CLOSING_STEP) {
       const firstTime = !alreadyHandedOff;
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const vDb = vehicleDbFields(vehicleUpdates);
@@ -1528,7 +1635,10 @@ export async function POST(req: NextRequest) {
         && !/\b(difference|explain|which is better)\b/i.test(messageText);
       // Save this message as the answer to the question we asked last time
       let explainMethod = false;
-      if (!firstTime && !missingCar && !ngQuestion) {
+      // If we just asked the timeline / method, this message is the answer even if it also asks something
+      const lastA0 = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const answersOurQ = /when are you planning to sell|direct cash, or with consignment|cash sale, or would you/i.test(lastA0);
+      if (!firstTime && !missingCar && (!ngQuestion || answersOurQ)) {
         if (!hasTimeline) {
           tl = messageText + (hasMethod ? ` | ${tl}` : "");
         } else if (!hasMethod && age <= 8) {
@@ -1559,17 +1669,22 @@ export async function POST(req: NextRequest) {
       // Decide the next question
       const nowHasTimeline = !!tl.replace(/\s*\|?\s*sell_method:\w+/, "").trim();
       const nowHasMethod   = /sell_method:/.test(tl);
+      // Marc: short explanation, ask for the full car details, fill what's missing — and that's all
+      // (no timeline / cash-consignment / phone questions for non-GCC)
+      void nowHasTimeline; void nowHasMethod; void explainMethod; void phoneAskedBefore; void PHONE_Q;
+      const carList = (["make", "model", "year", "mileage"] as const).filter(k => !c[k] || c[k] === "Unknown");
       let nextQ: string | null = null;
-      if (missingCar) nextQ = `Just to have your information complete — could you share the ${missingCar} of the car?`;
-      else if (!nowHasTimeline) nextQ = "Just to have your information complete — when are you planning to sell it?";
-      else if (explainMethod) nextQ = "With a direct cash sale we buy it and pay you on the spot. With consignment we sell it on your behalf at market price — usually a better return, but it takes 2–4 weeks. Which would you prefer?";
-      else if (!nowHasMethod && age <= 8) nextQ = "Would you like to sell it for direct cash, or with consignment?";
-      else if (!phoneAskedBefore) nextQ = PHONE_Q;
+      if (firstTime && carList.length) nextQ = "Please share the full car details so we have the full information.";
+      else if (missingCar) nextQ = `Could you share the ${missingCar} of the car?`;
+      // Loop guard: never ask the same question a second time — move on
+      if (nextQ && hist.some(m => m.role === "assistant" && m.content.includes(nextQ!))) nextQ = null;
 
       const parts: string[] = [];
-      if (ngQuestion) parts.push("That's something our purchasing team will discuss with you directly.");
-      if (firstTime) parts.push("Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition. I'll have someone from our purchasing team reach out to you directly.");
-      parts.push(nextQ ?? `Thanks, I've got everything I need. Our team will be in touch ${teamWhen()}. Have a nice day!`);
+      const saidTeamWillDiscuss = hist.some(m => m.role === "assistant" && /purchasing team will discuss|team will answer/i.test(m.content));
+      if (ngQuestion && !saidTeamWillDiscuss) parts.push("That's something our team will discuss with you directly.");
+      if (firstTime) parts.push(`Thanks for letting me know. We don't buy every non-GCC car, so I'll have our team contact you${nextQ ? "." : " " + teamWhen() + "."}${nextQ ? " " + nextQ : ""}`);
+      else if (nextQ) parts.push(nextQ);
+      if (!nextQ && !firstTime) parts.push(`Thanks${c.name ? ", " + c.name : ""}, I've got all the details. Our team will be in touch ${teamWhen()}.`);
 
       for (const part of parts) await sendWhatsAppMessage(phone, part);
       if (!nextQ) updates.step = CLOSING_STEP;
@@ -1771,11 +1886,31 @@ export async function POST(req: NextRequest) {
     // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
     // time were captured and the reply reads like a confirmation.
     const hasApptDateTime = !!(apptDate || conversation.appointment_date) && !!(apptTime || conversation.appointment_time);
-    const appointmentConfirmedEarly = (currentStep === FINAL_STEP || jumpToBooking) && !action && (
+    let appointmentConfirmedEarly = (currentStep === FINAL_STEP || jumpToBooking) && !action && (
       /team will be in touch on whatsapp/i.test(reply) ||
       (hasApptDateTime && /\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in|in touch)\b/i.test(reply))
     );
 
+    // Wants to sell now → no cash/consignment question, straight to the time (Marc)
+    if (currentStep === 6 && !action && URGENT_KEYWORDS.test(messageText)
+        && !SELL_METHOD_CONSIGNMENT.test(messageText) && !/\?/.test(messageText)) {
+      const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
+      const nm = (coreUpdates as any).name ?? conversation.name;
+      reply = `Got it${nm ? ", " + nm : ""}. ${q}`;
+    }
+    // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
+    // With a valid date + time → make it a real booking (Bigin, location); otherwise never send a fake one.
+    if (!appointmentConfirmedEarly && /you'?re booked for|booking is (saved|confirmed)/i.test(reply)) {
+      if (hasApptDateTime && toIsoDate(String(apptDate || conversation.appointment_date || "")) && toTime24(String(apptTime || conversation.appointment_time || ""))) {
+        appointmentConfirmedEarly = true;
+        console.warn("[kaya] confirmation written outside the booking step — registered as booking");
+      } else {
+        const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
+        console.warn("[kaya] blocked a booking confirmation without a valid date/time:", reply.slice(0, 200));
+        reply = q;
+      }
+    }
+    console.log(`[kaya] step=${currentStep} action=${action?.type ?? "-"} jump=${jumpToBooking} appt=${apptDate}|${apptTime} confirmed=${appointmentConfirmedEarly}`);
     let replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
     if (appointmentConfirmedEarly) {
       // Fixed confirmation format (car summary from Kaya stays as the first message, if she sent one)
@@ -1790,6 +1925,16 @@ export async function POST(req: NextRequest) {
         reply = replyParts.join("\n[SPLIT]\n");
       }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
+    }
+    // Never repeat the closing line ("Our team will be in touch… Have a nice day!") a second time
+    {
+      const prevA = history.filter(m => m.role === "assistant").map(m => m.content).join("\n");
+      const CLOSERS = [/\s*Our (purchase )?team will be in touch[^.!]*[.!]/gi, /\s*Have a nice day!/gi];
+      replyParts = replyParts.map(p => {
+        let out = p;
+        for (const re of CLOSERS) { re.lastIndex = 0; if (re.test(prevA)) { re.lastIndex = 0; out = out.replace(re, ""); } }
+        return out.trim() || p;
+      });
     }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
@@ -1882,8 +2027,8 @@ export async function POST(req: NextRequest) {
 
     if (appointmentConfirmed) {
       const sellTl = (await getConversation(phone).catch(() => null))?.sell_timeline ?? "";
-      const salesInquiry = sellTl.includes("consignment") ? "Consignment"
-        : sellTl.includes("cash") ? "Cash Deal" : "Not Sure - Need Advise";
+      const salesInquiry = /sell_method:consignment/.test(sellTl) ? "Consignment"
+        : /sell_method:cash/.test(sellTl) ? "Cash Deal" : "Not Sure - Need Advise";
       const rescheduled = isRebook && hasBooking;
       await pushLead(phone, rescheduled ? "booking rescheduled" : "booking confirmed", {
         salesInquiry, inspectionBooked: true, altPhone,
