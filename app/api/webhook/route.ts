@@ -1921,8 +1921,8 @@ export async function POST(req: NextRequest) {
     );
 
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
-    if (currentStep === 6 && !action && (URGENT_KEYWORDS.test(messageText) || /\b(this week|soon|asap|as soon as possible|quick(ly)?|fast|tomorrow)\b/i.test(messageText))
-        && !SELL_METHOD_CONSIGNMENT.test(messageText) && !/\?/.test(messageText)) {
+    // Marc: no cash/consignment question — after "when do you want to sell?" always go to the appointment
+    if (currentStep === 6 && !action && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
       reply = `Got it${nm ? ", " + nm : ""}. ${q}`;
