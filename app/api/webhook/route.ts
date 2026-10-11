@@ -335,14 +335,14 @@ function buildDirectResponse(
       } else if (hasMake) {
         return `Nice! What's the model and year?`;
       }
-      return `Sure${n}, I can help! Could you share the make, model and year of your car?`;
+      return `Could you share the make, model and year of the car?`;
     }
     case "ASK_MILEAGE_SPECS": {
       const hasSpecs   = !!(known.specs && known.specs !== "Unknown");
       const hasMileage = !!known.mileage;
-      if (hasSpecs && !hasMileage) return `Got it${n}. What's the mileage on it?`;
+      if (hasSpecs && !hasMileage) return `What's the mileage on it?`;
       if (hasMileage && !hasSpecs) return `Thanks! GCC specs, right?`;
-      return `Got it${n}. Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
+      return `Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
     }
     case "ASK_SPECS":
       return `Thanks! GCC specs, right?`;
@@ -434,7 +434,8 @@ function formatBookingConfirmation(name: string | null | undefined, dateRaw: str
   const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
   const [h, m] = t24.split(":").map(Number);
   const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
-  return `Perfect${name ? ", " + name : ""} - you're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details.`;
+  void name;
+  return `You're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details.`;
 }
 
 function apptLabel(dateRaw?: string | null, timeRaw?: string | null): string {
@@ -1981,7 +1982,8 @@ export async function POST(req: NextRequest) {
       if (replyParts.length && /^perfect\b/i.test(lastSent) && /^perfect\b/i.test(replyParts[0]) && !/you'?re booked for/i.test(replyParts[0])) {
         const nm = String((coreUpdates as any).name ?? conversation.name ?? "");
         const rest = replyParts[0].replace(/^perfect\b[^.?!]*[.?!]\s*/i, "").trim();
-        replyParts[0] = rest ? `Thanks${nm && !lastSent.includes(nm) ? ", " + nm : ""}. ${rest}` : replyParts[0];
+        void nm;
+        replyParts[0] = rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : replyParts[0];
       }
     }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
