@@ -1802,7 +1802,9 @@ export async function POST(req: NextRequest) {
     // Save sell method at step 6
     if (currentStep === 6 && messageText) {
       let sellMethod: string | undefined;
-      if (SELL_METHOD_CASH.test(messageText))        sellMethod = "cash";
+      // "open to consignment" / "either" / "maybe" is not a choice
+      if (/\b(open to|either|both|maybe|depends|not sure|could be|whatever)\b/i.test(messageText)) sellMethod = "not_sure";
+      else if (SELL_METHOD_CASH.test(messageText))        sellMethod = "cash";
       else if (SELL_METHOD_CONSIGNMENT.test(messageText)) sellMethod = "consignment";
       else if (SELL_METHOD_NOT_SURE.test(messageText))    sellMethod = "not_sure";
       if (sellMethod) {
