@@ -384,7 +384,7 @@ export default function MonitorPage() {
                     <div style={isBot ? S.bubbleIn : S.bubbleOut}>
                       {isBot && <div style={S.senderTag}>🤖 Kaya</div>}
                       <div style={S.msgText}>
-                        {msg.content.split("\n").map((line, j, arr) => (
+                        {msg.content.replace(/\n?\[SPLIT\]\n?/gi, "\n\n").split("\n").map((line, j, arr) => (
                           <span key={j}>{line}{j < arr.length - 1 ? <br /> : null}</span>
                         ))}
                       </div>
