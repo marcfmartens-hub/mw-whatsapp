@@ -1997,14 +1997,14 @@ export async function POST(req: NextRequest) {
     }
     // A bit of emotion (Marc): once per chat, react to a very low mileage or a special car
     {
-      const said = history.some(m => m.role === "assistant" && /^(wow|beautiful|what a)/i.test(m.content));
+      const said = history.some(m => m.role === "assistant" && /^(nice, that's low mileage|nice car|wow|beautiful)/i.test(m.content));
       const yr = parseInt(String(estYear), 10);
       const km = estMileage ? parseInt(String(estMileage).replace(/\D/g, ""), 10) : NaN;
       const age = yr ? Math.max(1, new Date().getFullYear() - yr) : 0;
       const LUX = /^(rolls|ferrari|lamborghini|bentley|mclaren|aston|bugatti|maybach|porsche|koenigsegg|pagani)/i;
       let wow = "";
-      if (!said && age && !isNaN(km) && km > 0 && km / age < 8000) wow = `Wow, only ${km.toLocaleString("en-US")} km, that's very low!`;
-      else if (!said && LUX.test(String(estMake))) wow = "Beautiful car!";
+      if (!said && age && !isNaN(km) && km > 0 && km / age < 8000) wow = "Nice, that's low mileage.";
+      else if (!said && LUX.test(String(estMake))) wow = "Nice car.";
       if (wow && replyParts.length === 1 && !/^no problem/i.test(replyParts[0]) && /\?\s*$/.test(replyParts[0]) && !/you'?re booked/i.test(replyParts[0])) {
         replyParts[0] = `${wow} ${replyParts[0].replace(/^(great|alright|got it|thanks|nice|okay|ok)[!.,]?\s*/i, "")}`;
       }
