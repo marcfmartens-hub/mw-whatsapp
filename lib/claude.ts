@@ -169,7 +169,7 @@ Mileage: [Mileage] km  (omit if unknown)
 Specs: [Specs]  (omit if unknown)
 [SPLIT]
 Then confirm the booking in EXACTLY this format (same line breaks, WhatsApp bold with *):
-Perfect, [Name] - you're booked for
+You're booked for
 
 *[Day] [date] of [Month]*
 at *[time with AM/PM]*
