@@ -296,7 +296,7 @@ function describeAction(a: NextAction): string {
     case "ASK_UAE_PHONE":    return "Ask: \"On which UAE number can we reach you on?\"";
     case "ASK_CAR_DETAILS":  return "Ask for the car make, model and year.";
     case "ASK_MILEAGE_SPECS":return "Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.";
-    case "ASK_SPECS":        return `Ask ONLY: "Is it GCC or non-GCC specs?"`;
+    case "ASK_SPECS":        return `Ask ONLY: "GCC specs, right?" — nothing else, no repeating what they said.`;
     case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
     case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
     case "CLARIFY_MODEL":    return `Ask ONLY for what is still missing — the model and/or the year (check "What you already know") — in a few words, e.g. "Which year is it?". Never ask to "confirm" something they already gave.`;
@@ -341,7 +341,7 @@ function buildDirectResponse(
       const hasSpecs   = !!(known.specs && known.specs !== "Unknown");
       const hasMileage = !!known.mileage;
       if (hasSpecs && !hasMileage) return `Got it${n}. What's the mileage on it?`;
-      if (hasMileage && !hasSpecs) return `Got it${n}. Is it GCC or non-GCC specs?`;
+      if (hasMileage && !hasSpecs) return `Thanks! GCC specs, right?`;
       return `Got it${n}. Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
     }
     case "ASK_SPECS":
