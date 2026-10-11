@@ -1986,6 +1986,22 @@ export async function POST(req: NextRequest) {
         replyParts[0] = rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : replyParts[0];
       }
     }
+    // Natural, varied openers (Marc): "Great", "Alright", "Got it"… — never the same one twice in a row
+    {
+      const OPENERS = ["Great!", "Alright.", "Got it.", "Thanks!", "Nice.", "Okay."];
+      const lastSent = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const lastOpener = OPENERS.find(o => lastSent.toLowerCase().startsWith(o.slice(0, -1).toLowerCase()));
+      const p0 = replyParts[0] ?? "";
+      const startsBare = /^(could|what|is|are|when|which|how|do|does|and)\b/i.test(p0);
+      const startsOpener = /^(great|alright|got it|thanks|thank you|nice|okay|ok|perfect|sure|of course)\b/i.test(p0);
+      if (replyParts.length === 1 && startsBare && history.length >= 2) {
+        const choices = OPENERS.filter(o => o !== lastOpener);
+        replyParts[0] = `${choices[history.length % choices.length]} ${p0}`;
+      } else if (replyParts.length >= 1 && startsOpener && lastOpener && p0.toLowerCase().startsWith(lastOpener.slice(0, -1).toLowerCase())) {
+        const choices = OPENERS.filter(o => o !== lastOpener);
+        replyParts[0] = p0.replace(/^(great|alright|got it|thanks|thank you|nice|okay|ok)[!.,]?/i, choices[history.length % choices.length]);
+      }
+    }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
       await sendWhatsAppMessage(phone, part);
