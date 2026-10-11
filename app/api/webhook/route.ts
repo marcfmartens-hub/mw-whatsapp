@@ -1041,6 +1041,15 @@ export async function POST(req: NextRequest) {
       } else if (vehicleUpdates.specs === "GCC" && NON_GCC.test(messageText)) {
         vehicleUpdates.specs = "Non-GCC";
       }
+      // Answer to "GCC specs, right?" → yes = GCC, no = non-GCC
+      {
+        const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+        if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
+          if (/^\s*(yes|yeah|yep|yup|ya|right|correct|sure|ok(ay)?|exactly|of course|it is|gcc)\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
+          else if (/^\s*(no|nope|not)\b/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+          else if (/\b(not sure|no idea|don'?t know)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
+        }
+      }
       // "not sure what GCC or non-GCC means… bought it from a dealer in Dubai" is not a non-GCC car
       const UNSURE_SPECS = /\bgcc\s+or\s+non|\bwhat\b.{0,25}\bgcc\b|\b(not sure|no idea|don'?t know)\b.{0,30}\bgcc\b/i;
       if (UNSURE_SPECS.test(messageText) && vehicleUpdates.specs === "Non-GCC" && !/\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b.{0,10}\b(spec|import)/i.test(messageText)) {
