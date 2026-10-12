@@ -17,7 +17,7 @@ interface Conv {
 }
 
 interface LoginRecord { id: number; username: string; ip: string; user_agent: string; logged_in_at: string; }
-interface UserRecord  { username: string; role: "super_admin" | "call_center"; password: string | null; created_at: string; }
+interface UserRecord  { username: string; role: "super_admin" | "call_center"; password: string | null; email: string | null; created_at: string; }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
   const [tab, setTab] = useState<"history" | "users">("history");
   const [logins, setLogins] = useState<LoginRecord[]>([]);
   const [users, setUsers]   = useState<UserRecord[]>([]);
-  const [newUser, setNewUser] = useState({ username: "", password: "", role: "call_center" });
+  const [newUser, setNewUser] = useState({ username: "", password: "", role: "call_center", email: "" });
   const [needsMigration, setNeedsMigration] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menuItem: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", background: "none", border: "none",
@@ -112,6 +112,14 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
     reloadUsers();
   }
 
+  async function changeEmail(username: string, current: string | null) {
+    const email = prompt(`Email for ${username} (used for "Forgot password", super admins only). Leave empty to remove:`, current ?? "");
+    if (email === null) return;
+    const res = await fetch("/api/monitor/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, email }) });
+    if (!res.ok) alert((await res.json()).error ?? "Failed");
+    reloadUsers();
+  }
+
   async function deleteUser(username: string) {
     if (!confirm(`Delete user ${username}?`)) return;
     const res = await fetch("/api/monitor/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username }) });
@@ -129,7 +137,7 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
     });
     if (res.ok) {
       setAddOk(true);
-      setNewUser({ username: "", password: "", role: "call_center" });
+      setNewUser({ username: "", password: "", role: "call_center", email: "" });
       reloadUsers();
     } else {
       const d = await res.json();
@@ -213,7 +221,7 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
           {!loading && tab === "users" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
               {/* Existing users */}
-              {needsMigration && <div style={SP.errMsg}>Database update needed for roles and visible passwords (run the SQL).</div>}
+              {needsMigration && <div style={SP.errMsg}>Database update needed for emails (run the SQL).</div>}
               <div>
                 <div style={SP.sectionTitle}>Active users</div>
                 <div style={SP.userList}>
@@ -231,6 +239,7 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
                         <div style={{ fontSize: 13, color: "#e9edef", margin: "4px 0", fontFamily: "monospace" }}>
                           🔑 {u.password ?? <span style={{ color: "#8696a0", fontFamily: "inherit" }}>shows after next login</span>}
                         </div>
+                        {u.email && <div style={{ fontSize: 12, color: "#8696a0", marginBottom: 2 }}>✉ {u.email}</div>}
                         <div style={SP.loginTime}>Added {fmtDate(u.created_at)}</div>
                       </div>
                       {(
@@ -246,6 +255,7 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
                                 </button>
                               )}
                               <button style={menuItem} onClick={() => { setMenuFor(null); changePassword(u.username); }}>Change password</button>
+                              <button style={menuItem} onClick={() => { setMenuFor(null); changeEmail(u.username, u.email); }}>{u.email ? "Change email" : "Add email"}</button>
                               {u.role !== "super_admin" && u.username !== me && (
                                 <button style={{ ...menuItem, color: "#ff6b6b" }} onClick={() => { setMenuFor(null); deleteUser(u.username); }}>Delete user</button>
                               )}
@@ -276,6 +286,13 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
                     value={newUser.password}
                     onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
                     required
+                  />
+                  <input
+                    style={SP.input}
+                    type="email"
+                    placeholder="Email (optional, for password reset)"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
                   />
                   <select
                     style={SP.input}

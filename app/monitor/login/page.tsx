@@ -9,6 +9,21 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [fEmail, setFEmail] = useState("");
+  const [fMsg, setFMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [fBusy, setFBusy] = useState(false);
+
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setFMsg(null); setFBusy(true);
+    const res = await fetch("/api/monitor/forgot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: fEmail }) });
+    const d = await res.json().catch(() => ({}));
+    setFBusy(false);
+    if (d.contactAdmin) setFMsg({ ok: false, text: "Password reset by email is only for the super admin. Please ask your super admin to reset your password." });
+    else if (!res.ok) setFMsg({ ok: false, text: d.error ?? "Something went wrong" });
+    else setFMsg({ ok: true, text: "A reset link has been sent to your email. Open it on this device." });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,6 +86,18 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
+
+        {!forgot && (
+          <div style={S.forgot} onClick={() => { setForgot(true); setFMsg(null); }}>Forgot password?</div>
+        )}
+        {forgot && (
+          <form onSubmit={handleForgot} style={{ ...S.form, marginTop: 20 }}>
+            <input style={S.input} type="email" placeholder="Your email" value={fEmail} onChange={(e) => setFEmail(e.target.value)} required />
+            {fMsg && <div style={fMsg.ok ? S.ok : S.error}>{fMsg.text}</div>}
+            <button style={S.btn} type="submit" disabled={fBusy}>{fBusy ? "Sending…" : "Send reset link"}</button>
+            <div style={S.forgot} onClick={() => setForgot(false)}>Cancel</div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -86,7 +113,7 @@ const S: Record<string, React.CSSProperties> = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
   },
   card: {
-    width: 360,
+    width: "100%", maxWidth: 360,
     background: "#202c33",
     borderRadius: 16,
     padding: "40px 36px 36px",
@@ -118,5 +145,7 @@ const S: Record<string, React.CSSProperties> = {
     borderRadius: 8, padding: "13px", fontSize: 15, fontWeight: 700,
     cursor: "pointer", transition: "background .15s",
   },
+  forgot: { color: "#00a884", fontSize: 13, cursor: "pointer", marginTop: 16, textAlign: "center" },
+  ok: { background: "#0b3a2e", border: "1px solid #1f6b4f", borderRadius: 8, padding: "10px 14px", color: "#25d366", fontSize: 13 },
   btnDisabled: { background: "#005c47", cursor: "not-allowed", color: "#4a7a6a" },
 };

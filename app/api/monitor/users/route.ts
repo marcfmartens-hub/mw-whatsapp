@@ -22,17 +22,11 @@ export async function GET(req: NextRequest) {
 
   const [{ data: logins }, usersRes] = await Promise.all([
     supabase.from("mw_monitor_logins").select("*").order("logged_in_at", { ascending: false }).limit(50),
-    supabase.from("mw_monitor_users").select("username, role, password_plain, created_at").order("created_at", { ascending: true }),
+    supabase.from("mw_monitor_users").select("*").order("created_at", { ascending: true }),
   ]);
 
   let users: any[] = usersRes.data ?? [];
-  let needsMigration = false;
-  if (usersRes.error) {
-    // role / password_plain columns not added yet
-    needsMigration = true;
-    const { data } = await supabase.from("mw_monitor_users").select("username, created_at").order("created_at", { ascending: true });
-    users = data ?? [];
-  }
+  const needsMigration = users.length > 0 && !("email" in users[0]);
 
   return NextResponse.json({
     logins: logins ?? [],
@@ -41,6 +35,7 @@ export async function GET(req: NextRequest) {
       username: u.username,
       role: u.role === "super_admin" ? "super_admin" : "call_center",
       password: u.password_plain ?? null,
+      email: u.email ?? null,
       created_at: u.created_at,
     })),
   });
@@ -50,7 +45,7 @@ export async function POST(req: NextRequest) {
   const g = await guard(req);
   if (g.res) return g.res;
 
-  const { username, password, role } = await req.json();
+  const { username, password, role, email } = await req.json();
   if (!username?.trim() || !password?.trim()) {
     return NextResponse.json({ error: "Username and password required" }, { status: 400 });
   }
@@ -61,6 +56,7 @@ export async function POST(req: NextRequest) {
     password_hash: hashPassword(password),
     password_plain: password,
     role: r,
+    ...(email?.trim() ? { email: email.trim().toLowerCase() } : {}),
   });
 
   if (error) {
@@ -77,9 +73,10 @@ export async function PATCH(req: NextRequest) {
   const g = await guard(req);
   if (g.res) return g.res;
 
-  const { username, password, role } = await req.json();
+  const { username, password, role, email } = await req.json();
   if (!username) return NextResponse.json({ error: "Username required" }, { status: 400 });
-  const upd: Record<string, string> = {};
+  const upd: Record<string, string | null> = {};
+  if (typeof email === "string") upd.email = email.trim() ? email.trim().toLowerCase() : null;
   if (password?.trim()) { upd.password_hash = hashPassword(password); upd.password_plain = password; }
   if (role && ROLES.includes(role)) {
     if (username === g.me!.username && role !== "super_admin") {
