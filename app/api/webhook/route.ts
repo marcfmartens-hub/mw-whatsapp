@@ -1208,6 +1208,7 @@ export async function POST(req: NextRequest) {
     let apptDate = conversation.appointment_date ?? "";
     let apptTime = conversation.appointment_time ?? "";
     let defaultedTime = false; // time picked by us (day given without a time)
+    let apptFromMsg = false;   // this message gave a day and/or time
     let altPhone: string | undefined;
 
     // Customer explicitly asks to book — from this message or earlier in the chat
@@ -1273,7 +1274,10 @@ export async function POST(req: NextRequest) {
     const GOODBYE = /\b(see you|thanks|thank you|great|perfect|cool|noted|got it)\b/i;
     // A day/time inside a longer question ("can the team confirm before tomorrow morning?") is not a new booking time
     const CHANGE_WORDS = /\b(come|coming|book|instead|change|move|switch|make it|can we do|how about|what about|better|rather)\b/i;
-    const newDayOrTime = (timeInMsg || differentDay) && !GOODBYE.test(messageText)
+    // Mentioning the time they're already booked for ("I'll be there at 3pm") is not a change
+    const timeStr = messageText.match(new RegExp(`\\b${TIME}`, "i"))?.[0];
+    const sameTime = !!timeStr && toTime24(timeStr) != null && toTime24(timeStr) === toTime24(String(conversation.appointment_time ?? ""));
+    const newDayOrTime = ((timeInMsg && !sameTime) || differentDay) && !GOODBYE.test(messageText)
       && (messageText.length <= 40 || CHANGE_WORDS.test(messageText));
     // Chat closed without a booking (e.g. after a team handoff) and they now want to come in → book it,
     // except for cases that never get an appointment (Hiyaza, buyer-only, multiple cars, non-GCC)
@@ -1325,6 +1329,8 @@ export async function POST(req: NextRequest) {
         // Day without a time ("On 16th or 17th I can come") → book 12:15 PM by default (Marc)
         // …or 1:15 / 2:15 PM etc. when that time is already taken (Marc)
         // "in the afternoon" / "morning" without a clock time → a free slot in that part of the day
+        if (apptTime && !toTime24(apptTime) && !/\b(now|right now|asap|soon)\b/i.test(apptTime)) { apptTime = ""; ea.appointment_time = undefined as any; }
+        if (ea.appointment_date || ea.appointment_time) apptFromMsg = true;
         const dayPart = (messageText.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase()) as "morning" | "afternoon" | "evening" | undefined;
         if (apptTime && !toTime24(apptTime) && /\b(morning|afternoon|evening|noon)\b/i.test(apptTime)) { apptTime = ""; ea.appointment_time = undefined as any; }
         if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) {
@@ -1506,7 +1512,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ status: "post_booking_question" }, { status: 200 });
       }
       if (lastAssistantMsg.endsWith(POST_NAME_Q)) {
-        const n = extractNameFromMessage(messageText) ?? (/^[A-Za-z]{2,15}(\s+[A-Za-z]{2,15})?$/.test(messageText.trim()) ? nameCase(messageText.trim()) : null);
+        const n = extractNameFromMessage(messageText) ?? (/^[A-Za-z]{2,15}(\s+[A-Za-z]{2,15})?$/.test(messageText.trim()) && looksLikeName(messageText.trim()) ? nameCase(messageText.trim()) : null);
         if (n) { upd.name = n; nm = n; }
         if (!isUAE) nextQ = POST_PHONE_Q;
       } else {
@@ -1990,7 +1996,7 @@ export async function POST(req: NextRequest) {
     }
     // Price asked while we're settling the day/time (Marc): fixed reassurance, then a choice of DAY —
     // never pressure for a time today. 3rd ask goes to the team (handled above).
-    if (currentStep >= 6 && !jumpToBooking && PRICE_PUSH.test(messageText) && pricePushCount <= 1
+    if (currentStep >= 6 && !jumpToBooking && !apptFromMsg && PRICE_PUSH.test(messageText) && pricePushCount <= 1
         && !/\b(inspection|fee|fees|charge|charges|commission|cost)\b/i.test(messageText)) {
       const PRICE_1 = "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately.";
       const PRICE_2 = "I understand. Every car is different, so we can only give an accurate price once we've seen it. The inspection is free, takes 10–15 minutes, and there's no obligation to sell.";
@@ -2042,6 +2048,26 @@ export async function POST(req: NextRequest) {
       (hasApptDateTime && /\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in|in touch)\b/i.test(reply))
     );
 
+    // The customer gave a day/time in this message and we now have a valid date + time → that IS the
+    // booking, even if Kaya's text didn't read like a confirmation (stress test: "anything after 2pm"
+    // was saved as 2:30 PM but Kaya said the team would call).
+    if (!appointmentConfirmedEarly && apptFromMsg && currentStep >= 6 && !(currentStep === 6 && defaultedTime) && action?.type !== "OFFER_CALLBACK") {
+      const dIso = toIsoDate(String(apptDate || conversation.appointment_date || "")) ?? "";
+      const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dIso) && t24) {
+        const nowD = new Date(Date.now() + 4 * 3600e3);
+        const today = nowD.toISOString().slice(0, 10);
+        const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
+        const mins = +t24.slice(0, 2) * 60 + +t24.slice(3);
+        const openM = dow === 5 ? 12 * 60 : 10 * 60;
+        const valid = dIso >= today && dow !== 0 && mins >= openM && mins <= 18 * 60 + 30
+          && !(dIso === today && mins < nowD.getUTCHours() * 60 + nowD.getUTCMinutes());
+        if (valid) {
+          appointmentConfirmedEarly = true;
+          console.log(`[kaya] booking registered from the customer's day/time: ${dIso} ${t24}`);
+        }
+      }
+    }
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
     // Marc: no cash/consignment question — after "when do you want to sell?" always go to the appointment
     if (currentStep === 6 && !action && !/\?/.test(messageText)) {
