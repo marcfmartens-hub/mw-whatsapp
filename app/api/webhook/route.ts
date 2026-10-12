@@ -2015,6 +2015,8 @@ export async function POST(req: NextRequest) {
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     // Greeting follows the clock: "Good morning! I'm Kaya…"
+    // …and right after they give their name: "Good morning Marc! What car would you like to sell?"
+    if (currentStep === 1 && replyParts.length) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey|nice to meet you)[,\s]+([A-Z][a-z]+)!/i, (_m, _h, nm) => `${timeGreeting()} ${nm}!`);
     if (currentStep === 0 && replyParts.length) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey)(\s+[A-Z][a-z]+)?!/i, (_m, _h, nmPart) => `${timeGreeting()}${nmPart ?? ""}!`);
     // Never repeat the closing line ("Our team will be in touch… Have a nice day!") a second time
     {
