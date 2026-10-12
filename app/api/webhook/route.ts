@@ -1984,11 +1984,14 @@ export async function POST(req: NextRequest) {
     let replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
     if (appointmentConfirmedEarly) {
       // Fixed confirmation format (car summary from Kaya stays as the first message, if she sent one)
-      const conf = formatBookingConfirmation(
-        (coreUpdates as any).name ?? conversation.name,
+      const nmForConf = (coreUpdates as any).name ?? conversation.name;
+      const confRaw = formatBookingConfirmation(
+        nmForConf,
         String(apptDate || conversation.appointment_date || ""),
         String(apptTime || conversation.appointment_time || ""),
       );
+      // Goodbye only in the very last message: not here if we still ask the name / number after the booking
+      const conf = confRaw && (!nmForConf || !isUAE) ? confRaw.replace(/\s*Have a nice day[^!]*!/, "") : confRaw;
       if (conf) {
         const summary = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
         replyParts = [...(summary ? [summary] : []), conf];
@@ -2040,15 +2043,18 @@ export async function POST(req: NextRequest) {
     }
     // Natural, varied openers (Marc): "Great", "Alright", "Got it"… — never the same one twice in a row
     {
-      const OPENERS = ["Great!", "Alright.", "Got it.", "Thanks!", "Nice.", "Okay."];
+      const OPENERS = ["Great!", "Alright.", "Got it.", "Thanks!", "Okay."];
+      const recentA = history.filter(m => m.role === "assistant").slice(-3).map(m => m.content.toLowerCase());
+      const usedRecently = (o: string) => recentA.some(t => t.startsWith(o.slice(0, -1).toLowerCase()));
       const lastSent = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
       const lastOpener = OPENERS.find(o => lastSent.toLowerCase().startsWith(o.slice(0, -1).toLowerCase()));
       const p0 = replyParts[0] ?? "";
       const startsBare = /^(could|what|is|are|when|which|how|do|does|and)\b/i.test(p0);
       const startsOpener = /^(great|alright|got it|thanks|thank you|nice|okay|ok|perfect|sure|of course)\b/i.test(p0);
       if (replyParts.length === 1 && startsBare && history.length >= 2) {
-        const choices = OPENERS.filter(o => o !== lastOpener);
-        replyParts[0] = `${choices[history.length % choices.length]} ${p0}`;
+        const choices = OPENERS.filter(o => !usedRecently(o));
+        const pick = (choices.length ? choices : OPENERS.filter(o => o !== lastOpener))[history.filter(m => m.role === "assistant").length % Math.max(1, choices.length || 5)];
+        replyParts[0] = `${pick ?? "Great!"} ${p0}`;
       } else if (replyParts.length >= 1 && startsOpener && lastOpener && p0.toLowerCase().startsWith(lastOpener.slice(0, -1).toLowerCase())) {
         const choices = OPENERS.filter(o => o !== lastOpener);
         replyParts[0] = p0.replace(/^(great|alright|got it|thanks|thank you|nice|okay|ok)[!.,]?/i, choices[history.length % choices.length]);
