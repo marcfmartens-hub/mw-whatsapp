@@ -300,16 +300,16 @@ type NextAction =
 
 function describeAction(a: NextAction): string {
   switch (a.type) {
-    case "ASK_NAME":         return `Greet by time of day (Good morning/afternoon/evening), then ask: "What car are you looking to sell?"`;
+    case "ASK_NAME":         return `Greet by time of day (Good morning/afternoon/evening), then ask: "What car would you like to sell?"`;
     case "ASK_UAE_PHONE":    return "Ask: \"On which UAE number can we reach you on?\"";
     case "ASK_CAR_DETAILS":  return "Ask for the car make, model and year.";
     case "ASK_MILEAGE_SPECS":return "Ask for BOTH the mileage AND whether the car is GCC or non-GCC specs — in one question.";
     case "ASK_SPECS":        return `Ask ONLY: "GCC specs, right?" — nothing else, no repeating what they said.`;
-    case "ASK_MORTGAGE":     return `Ask: "Is there any outstanding mortgage on the car?"`;
+    case "ASK_MORTGAGE":     return `Ask: "Any loan on the car?"`;
     case "ASK_AMOUNT":       return `Ask: "How much is the outstanding balance?"`;
     case "CLARIFY_MODEL":    return `Ask ONLY for what is still missing — the model and/or the year (check "What you already know") — in a few words, e.g. "Which year is it?". Never ask to "confirm" something they already gave.`;
-    case "SHOW_SUMMARY":      return `Ask: "When are you planning to sell the car?"`;
-    case "SHOW_FULL_SUMMARY": return `Ask: "When are you planning to sell the car?"`;
+    case "SHOW_SUMMARY":      return `Ask: "When would you like to sell?"`;
+    case "SHOW_FULL_SUMMARY": return `Ask: "When would you like to sell?"`;
     case "OFFER_CALLBACK":   return `Tell the customer the purchasing team will call them ${teamWhen()}, and they're welcome to come in whenever.`;
   }
 }
@@ -328,7 +328,7 @@ function buildDirectResponse(
       {
         const h = getDubaiHour();
         const greet = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
-        return `${greet}! What car are you looking to sell?`;
+        return `${greet}! What car would you like to sell?`;
       }
     case "ASK_UAE_PHONE":
       return `Hi${n}! Which UAE number is best to reach you on?`;
@@ -337,34 +337,34 @@ function buildDirectResponse(
       const hasModel = !!(known.model && known.model !== "Unknown");
       const hasYear  = !!known.year;
       if (hasMake && hasModel) {
-        return `Nice! Which year is it?`;
+        return `Which year?`;
       } else if (hasMake && hasYear) {
         return `Nice! Which model is it?`;
       } else if (hasMake) {
         return `Nice! What's the model and year?`;
       }
-      return `Could you share the make, model and year of the car?`;
+      return `Which make, model and year?`;
     }
     case "ASK_MILEAGE_SPECS": {
       const hasSpecs   = !!(known.specs && known.specs !== "Unknown");
       const hasMileage = !!known.mileage;
       if (hasSpecs && !hasMileage) return `What's the mileage on it?`;
       if (hasMileage && !hasSpecs) return `Thanks! GCC specs, right?`;
-      return `Could you tell me the mileage and whether it's GCC or non-GCC specs?`;
+      return `Mileage, and GCC specs?`;
     }
     case "ASK_SPECS":
       return `Thanks! GCC specs, right?`;
     case "ASK_MORTGAGE":
-      return "Is there any outstanding mortgage on the car?";
+      return "Any loan on the car?";
     case "ASK_AMOUNT":
       return "How much is the outstanding balance?";
     case "CLARIFY_MODEL": {
       const hasModel = !!(known.model && known.model !== "Unknown");
-      return hasModel && !known.year ? "Nice! Which year is it?" : !hasModel && known.year ? "Which model is it exactly?" : "Which model and year is it?";
+      return hasModel && !known.year ? "Which year?" : !hasModel && known.year ? "Which model is it exactly?" : "Which model and year is it?";
     }
     case "SHOW_SUMMARY":
     case "SHOW_FULL_SUMMARY":
-      return "When are you planning to sell the car?";
+      return "When would you like to sell?";
     case "OFFER_CALLBACK":
       return `No worries — I'll have someone from our team call you ${teamWhen()}. Whenever you're ready to come in, we're here for you.`;
   }
@@ -629,7 +629,7 @@ export async function POST(req: NextRequest) {
       const hi = `Welcome back${c.name ? ", " + c.name : ""}!`;
       const reply = carDesc
         ? `${hi} Last time we spoke about your ${carDesc}. Is this about the same car, or a different one?`
-        : `${hi} What car are you looking to sell?`;
+        : `${hi} What car would you like to sell?`;
       await sendWhatsAppMessage(phone, reply);
       const hist = (c.messages ?? []) as ConversationMessage[];
       await updateConversation(phone, {
@@ -1668,8 +1668,8 @@ export async function POST(req: NextRequest) {
       const nm = c2.name ? ", " + c2.name : "";
       let nextQ: string; let step: number;
       if (!c2.mileage) { nextQ = "What's the mileage on it?"; step = 4; }
-      else if (!c2.loan && parseInt(String(c2.year), 10) >= 2020) { nextQ = "Is there any outstanding mortgage on the car?"; step = 5; }
-      else if (!tl) { nextQ = "When are you planning to sell the car?"; step = 6; }
+      else if (!c2.loan && parseInt(String(c2.year), 10) >= 2020) { nextQ = "Any loan on the car?"; step = 5; }
+      else if (!tl) { nextQ = "When would you like to sell?"; step = 6; }
       else { nextQ = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?"; step = FINAL_STEP; }
       void nm;
       const reply = `Thanks for clarifying. ${nextQ}`;
@@ -1701,7 +1701,7 @@ export async function POST(req: NextRequest) {
       let explainMethod = false;
       // If we just asked the timeline / method, this message is the answer even if it also asks something
       const lastA0 = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
-      const answersOurQ = /when are you planning to sell|direct cash, or with consignment|cash sale, or would you/i.test(lastA0);
+      const answersOurQ = /when are you planning to sell|when would you like to sell|direct cash, or with consignment|cash sale, or would you/i.test(lastA0);
       if (!firstTime && !missingCar && (!ngQuestion || answersOurQ)) {
         if (!hasTimeline) {
           tl = messageText + (hasMethod ? ` | ${tl}` : "");
@@ -2049,7 +2049,7 @@ export async function POST(req: NextRequest) {
       const lastSent = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
       const lastOpener = OPENERS.find(o => lastSent.toLowerCase().startsWith(o.slice(0, -1).toLowerCase()));
       const p0 = replyParts[0] ?? "";
-      const startsBare = /^(could|what|is|are|when|which|how|do|does|and)\b/i.test(p0);
+      const startsBare = /^(could|what|is|are|when|which|how|do|does|and|mileage|any)\b/i.test(p0);
       const startsOpener = /^(great|alright|got it|thanks|thank you|nice|okay|ok|perfect|sure|of course)\b/i.test(p0);
       if (replyParts.length === 1 && startsBare && history.length >= 2) {
         const choices = OPENERS.filter(o => !usedRecently(o));
