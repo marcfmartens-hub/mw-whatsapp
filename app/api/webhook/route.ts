@@ -2016,7 +2016,7 @@ export async function POST(req: NextRequest) {
     }
     // Loan on the car → reassure first, then the next question as its own message (Marc)
     {
-      const LOAN_LINE = "Okay no problem, we have a free loan settlement service so we can help you clear the loan.";
+      const LOAN_LINE = "Okay no problem, we have a free loan settlement service so we can help you to settle the loan with your bank.";
       const saidLoanLine = history.some(m => m.role === "assistant" && m.content.includes("free loan settlement service"));
       if (currentStep === 5 && loanIsYes && action?.type === "SHOW_FULL_SUMMARY" && !saidLoanLine && replyParts.length === 1) {
         replyParts = [LOAN_LINE, replyParts[0].replace(/^(great|alright|got it|thanks|okay|ok|nice)[!.,]?\s*/i, "")];
