@@ -75,7 +75,7 @@ const SCRIPTS: Record<string, string[]> = {
 
 const als = new AsyncLocalStorage<string[]>();
 let hooked = false;
-function hookConsole() {
+export function hookConsole() {
   if (hooked) return; hooked = true;
   const fmt = (a: unknown[]) => a.map(x => x instanceof Error ? x.message : typeof x === "string" ? x : JSON.stringify(x)).join(" ");
   const e = console.error, w = console.warn, l = console.log;
@@ -84,7 +84,7 @@ function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-const BATCH = ["lakh", "roughoffer", "daynotime", "afternoon", "fullauto", "sameday", "price", "nongcc", "happy", "messy"];
+export const BATCH = ["lakh", "roughoffer", "daynotime", "afternoon", "fullauto", "sameday", "price", "nongcc", "happy", "messy"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
@@ -99,7 +99,6 @@ export async function GET(req: NextRequest) {
     const out = String(data?.car_conditions ?? "");
     if (!out) return txt(`job ${job}: not found`);
     if (out.startsWith("RUNNING")) return txt(`job ${job}: ${out}`);
-    await supabase.from("mw_whatsapp").delete().eq("phone", `stress_${job}`);
     return txt(out);
   }
   if (name === "all") {
@@ -120,7 +119,7 @@ export async function GET(req: NextRequest) {
   return new NextResponse(await runScenario(name), { headers: { "content-type": "text/plain; charset=utf-8" } });
 }
 
-async function runScenario(name: string): Promise<string> {
+export async function runScenario(name: string): Promise<string> {
   const idx = SCRIPTS[name] ? 100 + Object.keys(SCRIPTS).indexOf(name) : Object.keys(P).indexOf(name);
   const phone = name === "nonuae" ? `4477009${String(idx).padStart(5, "0")}` : `971599900${String(idx).padStart(3, "0")}`;
   const log: string[] = [];
