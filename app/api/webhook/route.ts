@@ -971,7 +971,7 @@ export async function POST(req: NextRequest) {
     if (!conversation.name && currentStep >= 2 && !(coreUpdates as any).name) {
       const lastAskedName = [...((conversation.messages ?? []) as ConversationMessage[])].reverse()
         .find(m => m.role === "assistant")?.content ?? "";
-      if (/may i have your name|what'?s your name|your name\?/i.test(lastAskedName)) {
+      if (/may i (have|know) your name|what'?s your name|your name( please)?\?/i.test(lastAskedName)) {
         const n = extractNameFromMessage(messageText);
         if (n) (coreUpdates as any).name = n;
       }
@@ -1685,7 +1685,7 @@ export async function POST(req: NextRequest) {
 
         let nextQ: string | null = null;
         if (missingCar) nextQ = missingCar === "make" ? "In the meantime, could you share the make, model and year of your car?" : `Could you share the ${missingCar} of the car?`;
-        else if (!c.name && !hist.some(m => m.role === "assistant" && /may i have your name/i.test(m.content))) nextQ = "May I have your name?";
+        else if (!c.name && !hist.some(m => m.role === "assistant" && /may i (have|know) your name/i.test(m.content))) nextQ = "May I have your name?";
         else if (!isUAE && !phoneAsked) nextQ = "Which number is best to reach you on?";
         void topicDone;
 
@@ -2100,6 +2100,8 @@ export async function POST(req: NextRequest) {
     // Greeting follows the clock: "Good morning! I'm Kaya…"
     // …and right after they give their name: "Good morning Marc! What car would you like to sell?"
     if (currentStep === 1 && replyParts.length) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey|nice to meet you)[,\s]+([A-Z][a-z]+)!/i, (_m, _h, nm) => `${timeGreeting()} ${nm}!`);
+    // Marc's intro wording for the name question
+    if (replyParts.length && /I'm Kaya from Mister Wheelz/i.test(replyParts[0])) replyParts[0] = replyParts[0].replace(/(?:Before we start,?\s*)?May I (?:have|know) your name(?: please)?\?/i, "Before we start may I know your name please?");
     if (replyParts.length && /I'm Kaya from Mister Wheelz/i.test(replyParts[0])) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey)(\s+[A-Z][a-z]+)?!/i, (_m, _h, nmPart) => `${timeGreeting()}${nmPart ?? ""}!`);
     // Never repeat the closing line ("Our team will be in touch… Have a nice day!") a second time
     {
