@@ -81,6 +81,11 @@ export async function GET(req: NextRequest) {
         car_conditions: conv.car_conditions,
       }).catch(() => "");
 
+      // A day was agreed but no time → book 12:15 PM by default (Marc)
+      if (conv.appointment_date && !conv.appointment_time) {
+        conv.appointment_time = "12:15";
+        await supabase.from(TABLE).update({ appointment_time: "12:15" }).eq("phone", conv.phone);
+      }
       const ok = await createBiginContact({
         ...conv,
         phone_number: conv.phone_number || conv.phone,

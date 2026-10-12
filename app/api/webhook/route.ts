@@ -1293,6 +1293,10 @@ export async function POST(req: NextRequest) {
             ea.appointment_time = apptTime;
           } else apptTime = ea.appointment_time;
         }
+        // Day without a time ("On 16th or 17th I can come") → book 12:15 PM by default (Marc)
+        if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) {
+          apptTime = "12:15"; ea.appointment_time = "12:15";
+        }
         // Time without a day ("5pm" in reply to "What time can you come in this afternoon?") → infer the
         // day from Kaya's question, so the booking never ends up with a time but no date.
         if (!apptDate && apptTime && toTime24(apptTime)) {
@@ -2031,7 +2035,7 @@ export async function POST(req: NextRequest) {
     // Greeting follows the clock: "Good morning! I'm Kaya…"
     // …and right after they give their name: "Good morning Marc! What car would you like to sell?"
     if (currentStep === 1 && replyParts.length) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey|nice to meet you)[,\s]+([A-Z][a-z]+)!/i, (_m, _h, nm) => `${timeGreeting()} ${nm}!`);
-    if (currentStep === 0 && replyParts.length) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey)(\s+[A-Z][a-z]+)?!/i, (_m, _h, nmPart) => `${timeGreeting()}${nmPart ?? ""}!`);
+    if (replyParts.length && /I'm Kaya from Mister Wheelz/i.test(replyParts[0])) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey)(\s+[A-Z][a-z]+)?!/i, (_m, _h, nmPart) => `${timeGreeting()}${nmPart ?? ""}!`);
     // Never repeat the closing line ("Our team will be in touch… Have a nice day!") a second time
     {
       const prevA = history.filter(m => m.role === "assistant").map(m => m.content).join("\n");
