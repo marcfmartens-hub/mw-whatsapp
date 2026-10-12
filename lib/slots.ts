@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { getAccessToken, toTime24 } from "@/lib/bigin";
 
 // Default time when the customer gives a day but no time (Marc): 12:15 PM, unless something is
-// already booked around then — then 1:15, 2:15 … PM. Checks Kaya's own bookings (Supabase) and
+// already booked twice around then — then 1:15, 2:15 … PM. Checks Kaya's own bookings (Supabase) and
 // Bigin (contact appointments + calendar events).
 
 const OPEN: Record<number, number | null> = { 0: null, 1: 10, 2: 10, 3: 10, 4: 10, 5: 12, 6: 10 };
@@ -32,8 +32,8 @@ function dubaiHHMM(dt: string): string | null {
   return `${String(x.getUTCHours()).padStart(2, "0")}:${String(x.getUTCMinutes()).padStart(2, "0")}`;
 }
 
-async function biginTimes(isoDate: string): Promise<string[]> {
-  const out: string[] = [];
+async function biginTimes(isoDate: string): Promise<{ contacts: string[]; events: string[] }> {
+  const out = { contacts: [] as string[], events: [] as string[] };
   try {
     const token = await getAccessToken();
     const headers = { Authorization: `Zoho-oauthtoken ${token}` };
@@ -46,11 +46,11 @@ async function biginTimes(isoDate: string): Promise<string[]> {
     ]);
     for (const c of contacts?.data ?? []) {
       const t = c.Appointment_Date_and_Time ? dubaiHHMM(c.Appointment_Date_and_Time) : c.Appointment_Time ? toTime24(String(c.Appointment_Time)) : null;
-      if (t) out.push(t);
+      if (t) out.contacts.push(t);
     }
     for (const e of events?.data ?? []) {
       const t = e.Start_DateTime ? dubaiHHMM(e.Start_DateTime) : null;
-      if (t) out.push(t);
+      if (t) out.events.push(t);
     }
   } catch (e) {
     console.warn("[slots] Bigin check failed (using Supabase only):", e);
@@ -73,13 +73,18 @@ export async function pickDefaultTime(isoDate: string, excludePhone?: string, pa
 
   const [a, b] = await Promise.all([
     withTimeout(supabaseTimes(isoDate, excludePhone), 4000, [] as string[]),
-    withTimeout(biginTimes(isoDate), 5000, [] as string[]),
+    withTimeout(biginTimes(isoDate), 5000, { contacts: [] as string[], events: [] as string[] }),
   ]);
-  const taken = [...a, ...b].map(toMin);
+
+  // Max 2 bookings per slot (Marc). Kaya's bookings are also in Bigin, so the sources overlap:
+  // per slot take the highest count of any one source rather than adding them up.
+  const SLOT_CAPACITY = 2;
+  const near = (list: string[], c: string) => list.filter((t) => Math.abs(toMin(t) - toMin(c)) < 30).length;
+  const booked = (c: string) => Math.max(near(a, c), near(b.contacts, c), near(b.events, c));
 
   const valid = (part ? PART[part] : CANDIDATES).filter((c) => toMin(c) >= open * 60 && (!isToday || toMin(c) >= nowMin + 60));
-  const free = valid.find((c) => !taken.some((t) => Math.abs(t - toMin(c)) < 30));
+  const free = valid.find((c) => booked(c) < SLOT_CAPACITY);
   const pick = free ?? valid[0] ?? "12:15";
-  console.log(`[slots] ${isoDate}: taken=[${[...a, ...b].join(",")}] → ${pick}`);
+  console.log(`[slots] ${isoDate}: supabase=[${a.join(",")}] bigin=[${b.contacts.join(",")}] events=[${b.events.join(",")}] → ${pick}`);
   return pick;
 }
