@@ -347,6 +347,11 @@ export async function createBiginContact(
     if (milestone) {
       if (rows.length > 0) {
         applyTag = milestone;
+        // Changes made with Kaya → "Kaya – Changes" pipeline, with a link to the original contact
+        if (milestone === "RESCHEDULE" || milestone === "CANCEL") {
+          record["Change"] = milestone === "RESCHEDULE" ? "Reschedule" : "Cancel";
+          record["Original_Deal"] = `https://bigin.zoho.com/bigin/org869557047/Home#/contacts/${rows[0].id}`;
+        }
         record["Inquiry_Summary"] = `[${milestone}] Existing customer — needs attention.\n\n${record["Inquiry_Summary"] ?? ""}`.trim();
       }
     } else {
