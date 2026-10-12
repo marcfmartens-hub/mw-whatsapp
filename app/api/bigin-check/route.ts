@@ -6,6 +6,20 @@ export const dynamic = "force-dynamic";
 // TEMPORARY read-only check of Bigin setup (fields, pipelines, org). Remove after use.
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
+  const dt = req.nextUrl.searchParams.get("dealtest");
+  if (dt) {
+    const tk = await getAccessToken(); const hh = { Authorization: `Zoho-oauthtoken ${tk}` };
+    const urls = [
+      `https://www.zohoapis.com/bigin/v1/Pipelines/search?criteria=${encodeURIComponent(`(Contact_Name:equals:${dt})`)}`,
+      `https://www.zohoapis.com/bigin/v1/Pipelines/search?criteria=${encodeURIComponent(`(Contact_Name.id:equals:${dt})`)}`,
+      `https://www.zohoapis.com/bigin/v1/Contacts/${dt}/Pipelines?fields=Deal_Name,Stage`,
+      `https://www.zohoapis.com/bigin/v1/Contacts/${dt}/Deals?fields=Deal_Name,Stage`,
+      `https://www.zohoapis.com/bigin/v2/Contacts/${dt}/Pipelines?fields=Deal_Name,Stage`,
+    ];
+    const out: any[] = [];
+    for (const u of urls) { const r = await fetch(u, { headers: hh }); out.push({ u: u.replace(/https:\/\/www.zohoapis.com/, ""), s: r.status, b: (await r.text()).slice(0, 250) }); }
+    return NextResponse.json(out);
+  }
   const tt = req.nextUrl.searchParams.get("tasktest");
   if (tt) {
     const { createChangeTask } = await import("@/lib/bigin");
