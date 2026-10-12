@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/lib/meta";
-import { createBiginContact, toIsoDate, toTime24 } from "@/lib/bigin";
+import { createBiginContact, createChangeTask, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 
@@ -1247,16 +1247,14 @@ export async function POST(req: NextRequest) {
     const CONDITIONAL = /\b(unless|if|without|before|for nothing|until|otherwise)\b/i;
     const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText) && !mentionsDayOrTime
       && !(CONDITIONAL.test(messageText) && !/\b(cancel|sold)\b/i.test(messageText));
+    // Marc: Kaya never changes bookings — cancel / reschedule requests become a task for the call centre
+    const CHANGE_REPLY = "No problem, I'll pass this on to our team and they will contact you to arrange it.";
     if (isCancel) {
-      const reply = `No problem, I've cancelled your appointment. If anything changes, just message us here. Have a nice day${firstName(conversation.name)}!`;
-      await sendWhatsAppMessage(phone, reply);
-      await updateConversation(phone, { appointment_date: null, appointment_time: null, step: CLOSING_STEP, last_message_at: new Date().toISOString() } as any).catch(() => {});
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
-      await pushLead(phone, "appointment cancelled", {
-        inspectionBooked: false, clearAppointment: true, milestone: "CANCEL",
-        topNote: `CANCELLED — appointment on ${apptLabel(conversation.appointment_date, conversation.appointment_time)} was cancelled by the customer.`,
-      });
-      return NextResponse.json({ status: "cancelled" }, { status: 200 });
+      await sendWhatsAppMessage(phone, CHANGE_REPLY);
+      await updateConversation(phone, { step: CLOSING_STEP, last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, CHANGE_REPLY);
+      await createChangeTask({ ...conversation, phone }, "CANCEL", messageText);
+      return NextResponse.json({ status: "cancel_task" }, { status: 200 });
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
     const timeInMsg = new RegExp(`\\b${TIME}`, "i").test(messageText);
@@ -1273,9 +1271,16 @@ export async function POST(req: NextRequest) {
     const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:)/.test(notesNow)
       && (conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC";
     const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
-    const isRebook = !noBookingCase && !aboutCall(messageText) && (currentStep >= CLOSING_STEP && hasBooking &&
-      (RESCHEDULE.test(messageText) || newDayOrTime || /works better|new (time|date)|which (day|time)|what time can you come/i.test(lastAssistantMsg)))
-      || bookFromClosed;
+    const wantsReschedule = !noBookingCase && !aboutCall(messageText) && currentStep >= CLOSING_STEP && hasBooking &&
+      (RESCHEDULE.test(messageText) || newDayOrTime);
+    if (wantsReschedule) {
+      await sendWhatsAppMessage(phone, CHANGE_REPLY);
+      await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, CHANGE_REPLY);
+      await createChangeTask({ ...conversation, phone }, "RESCHEDULE", messageText);
+      return NextResponse.json({ status: "reschedule_task" }, { status: 200 });
+    }
+    const isRebook = bookFromClosed;
 
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
       try {

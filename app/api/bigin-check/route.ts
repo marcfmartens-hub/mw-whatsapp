@@ -6,6 +6,11 @@ export const dynamic = "force-dynamic";
 // TEMPORARY read-only check of Bigin setup (fields, pipelines, org). Remove after use.
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
+  const tt = req.nextUrl.searchParams.get("tasktest");
+  if (tt) {
+    const { createChangeTask } = await import("@/lib/bigin");
+    return NextResponse.json(await createChangeTask({ phone: tt, phone_number: tt, name: "Sunil", make: "JAC", model: "JS4", year: "2023", mileage: "45000", specs: "GCC", appointment_date: "2026-10-13", appointment_time: "11:00" }, "RESCHEDULE", "TEST — can we do 4pm instead? (delete this task)"));
+  }
   const token = await getAccessToken();
   const h = { Authorization: `Zoho-oauthtoken ${token}` };
   const get = async (u: string) => {

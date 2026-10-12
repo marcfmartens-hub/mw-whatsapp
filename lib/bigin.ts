@@ -347,11 +347,7 @@ export async function createBiginContact(
     if (milestone) {
       if (rows.length > 0) {
         applyTag = milestone;
-        // Changes made with Kaya → "Kaya – Changes" pipeline, with a link to the original contact
-        if (milestone === "RESCHEDULE" || milestone === "CANCEL") {
-          record["Change"] = milestone === "RESCHEDULE" ? "Reschedule" : "Cancel";
-          record["Original_Deal"] = `https://bigin.zoho.com/bigin/org869557047/Home#/contacts/${rows[0].id}`;
-        }
+
         record["Inquiry_Summary"] = `[${milestone}] Existing customer — needs attention.\n\n${record["Inquiry_Summary"] ?? ""}`.trim();
       }
     } else {
@@ -399,5 +395,81 @@ export async function createBiginContact(
     }
     console.error("Bigin contact creation error (all retries failed):", error);
     return false;
+  }
+}
+
+// ── Reschedule / cancel requests → a task for the call centre (Kaya never changes bookings herself) ──
+// Linked to the customer's latest WhatsApp pipeline card, with a link, car details, name and all phone numbers.
+export async function createChangeTask(
+  conversation: Record<string, any>,
+  kind: "RESCHEDULE" | "CANCEL",
+  request: string,
+): Promise<{ ok: boolean; taskId?: string; dealId?: string; error?: string }> {
+  try {
+    const sim = (globalThis as any).__kayaSim as Map<string, string[]> | undefined;
+    const simLog = sim?.get(String(conversation.phone ?? ""));
+    const token = await getAccessToken();
+    const headers = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" };
+    const phone = String(conversation.phone_number || conversation.phone || "");
+    const ORG = "https://bigin.zoho.com/bigin/org869557047/Home#";
+
+    // Contact(s) for this WhatsApp number (old ones saved without "+")
+    let contacts: any[] = [];
+    for (const q of [plusPhone(phone), phone.replace(/\D/g, "")]) {
+      const r = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(q)}`, { headers });
+      if (r.status === 200) { contacts = ((await r.json().catch(() => null))?.data ?? []); if (contacts.length) break; }
+    }
+    contacts.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
+
+    // Their latest pipeline card
+    let deal: any = null;
+    for (const c of contacts.slice(0, 5)) {
+      const r = await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/search?criteria=${encodeURIComponent(`(Contact_Name:equals:${c.id})`)}`, { headers });
+      if (r.status === 200) {
+        const rows = ((await r.json().catch(() => null))?.data ?? []) as any[];
+        rows.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
+        if (rows[0]) { deal = rows[0]; break; }
+      }
+    }
+
+    const name = conversation.name || contacts[0]?.Last_Name || "Unknown";
+    const car = [conversation.make, conversation.model, conversation.year].filter(Boolean).join(" ") || "car unknown";
+    const km = conversation.mileage ? `${String(conversation.mileage).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} km` : "";
+    const phones = [plusPhone(phone), conversation.alternative_phone ? plusPhone(conversation.alternative_phone) : ""].filter(Boolean);
+    const appt = [conversation.appointment_date, conversation.appointment_time].filter(Boolean).join(" ");
+    const dubai = new Date(Date.now() + 4 * 3600e3);
+    const due = dubai.getUTCHours() >= 19 || dubai.getUTCDay() === 0
+      ? new Date(dubai.getTime() + (dubai.getUTCDay() === 6 && dubai.getUTCHours() >= 19 ? 2 : 1) * 86400e3) : dubai;
+    const subject = `${kind}: ${name} | ${car}`;
+    const description = [
+      kind === "RESCHEDULE" ? "Customer wants to RESCHEDULE the inspection — call to arrange the new time." : "Customer wants to CANCEL the inspection — call to confirm.",
+      `Customer wrote: "${request.slice(0, 300)}"`,
+      appt ? `Current appointment: ${appt}` : "",
+      "",
+      `Name: ${name}`,
+      `Phone: ${phones.join(" / ")}`,
+      `Car: ${car}${km ? ", " + km : ""}${conversation.specs ? ", " + conversation.specs : ""}`,
+      "",
+      deal ? `Pipeline record: ${ORG}/deals/${deal.id}` : "",
+      contacts[0] ? `Contact: ${ORG}/contacts/${contacts[0].id}` : "",
+    ].filter((l, i, a) => l !== "" || (a[i - 1] ?? "") !== "").join("\n");
+
+    if (simLog) { simLog.push(`[TASK] ${subject}\n${description}`); return { ok: true, taskId: "sim", dealId: deal?.id }; }
+
+    const task: Record<string, unknown> = { Subject: subject, Due_Date: due.toISOString().slice(0, 10), Priority: "High", Description: description };
+    if (deal) { task["$related_module"] = "Deals"; task["Related_To"] = { id: deal.id }; }
+    else if (contacts[0]) { task["$related_module"] = "Contacts"; task["Related_To"] = { id: contacts[0].id }; }
+    const res = await fetch("https://www.zohoapis.com/bigin/v1/Tasks", { method: "POST", headers, body: JSON.stringify({ data: [task] }) });
+    const text = await res.text();
+    const row = (() => { try { return JSON.parse(text)?.data?.[0]; } catch { return null; } })();
+    if (!res.ok || (row?.status && row.status !== "success")) {
+      console.error("[Bigin] task create failed:", res.status, text.slice(0, 400));
+      return { ok: false, error: `${res.status} ${text.slice(0, 200)}` };
+    }
+    console.log(`[Bigin] ${kind} task created for ${phone} (deal ${deal?.id ?? "-"})`);
+    return { ok: true, taskId: row?.details?.id, dealId: deal?.id };
+  } catch (e) {
+    console.error("[Bigin] task create error:", e);
+    return { ok: false, error: String(e) };
   }
 }
