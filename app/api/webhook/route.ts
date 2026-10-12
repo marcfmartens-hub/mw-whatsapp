@@ -378,7 +378,7 @@ function buildDirectResponse(
     case "SHOW_FULL_SUMMARY":
       return "When would you like to sell?";
     case "OFFER_CALLBACK":
-      return `No worries — I'll have someone from our team call you ${teamWhen()}. Whenever you're ready to come in, we're here for you.`;
+      return `Ok, I understand. I will forward this to our team and have them contact you so you can discuss it with them directly.`;
   }
 }
 
@@ -1589,7 +1589,7 @@ export async function POST(req: NextRequest) {
       const FRUSTRATION_PHRASES = /(!!+|\?\?+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
       const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
       const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
-        || (PRICE_WORDS.test(messageText) && priorPriceAsks >= 2);
+        || (PRICE_WORDS.test(messageText) && priorPriceAsks >= 3); // 1st ask: short reply, 2nd: process explanation, 3rd: team
       const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP
         && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText) || frustrated);
       if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
@@ -1636,7 +1636,9 @@ export async function POST(req: NextRequest) {
 
         const parts: string[] = [];
         if (firstAsk && frustrated) {
-          parts.push(`I understand. ${HUMAN_LINE} ${teamWhen()}.`);
+          parts.push(PRICE_WORDS.test(messageText) || priorPriceAsks > 0
+            ? `Ok, I understand. ${HUMAN_LINE} so you can discuss it with them directly.`
+            : `I understand. ${HUMAN_LINE} ${teamWhen()}.`);
           const topic = PRICE_WORDS.test(messageText) || priorPriceAsks > 0 ? "price — customer was frustrated (pushing for a price)" : "customer was frustrated";
           if (!conditions.includes("Wants to discuss:")) conditions = conditions ? `${conditions} | Wants to discuss: ${topic}` : `Wants to discuss: ${topic}`;
           if (!conditions.includes("Asked to speak to the team")) conditions = `${conditions} | Asked to speak to the team`;
@@ -1869,6 +1871,7 @@ export async function POST(req: NextRequest) {
       (currentStep >= 6 && HANDOFF_SIGNALS.test(messageText)) ||
       // Only callback if consignment was already suggested and they still refuse
       (alreadyExplainedOptions && BOOKING_REFUSAL.test(messageText)) ||
+      (pricePushCount >= 1 && BOOKING_REFUSAL.test(messageText)) ||
       (alreadyExplainedOptions && customerWantsCashOnly && BOOKING_REFUSAL.test(messageText));
 
     // If customer pushes on price a second time (and consignment not yet explained) → let Claude pivot to consignment
@@ -2089,9 +2092,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (action?.type === "OFFER_CALLBACK") {
-      await sendWhatsAppMessage(phone, `Our purchase team will be in touch with you ${teamWhen()}. You're also welcome to walk in whenever — here's where to find us.`);
-      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
-      await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      // Marc: confirm the number (UAE WhatsApp) or ask for one (non-UAE)
+      await sendWhatsAppMessage(phone, isUAE ? "They can reach you on this same number, correct?" : POST_PHONE_Q);
     }
 
     try {
