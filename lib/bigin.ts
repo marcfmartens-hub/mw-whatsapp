@@ -424,7 +424,7 @@ export async function createChangeTask(
     // Their latest pipeline card
     let deal: any = null;
     for (const c of contacts.slice(0, 5)) {
-      const r = await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/search?criteria=${encodeURIComponent(`(Contact_Name:equals:${c.id})`)}`, { headers });
+      const r = await fetch(`https://www.zohoapis.com/bigin/v1/Contacts/${c.id}/Pipelines?fields=Deal_Name,Stage,Created_Time`, { headers });
       if (r.status === 200) {
         const rows = ((await r.json().catch(() => null))?.data ?? []) as any[];
         rows.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
