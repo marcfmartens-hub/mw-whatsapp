@@ -105,7 +105,7 @@ If the customer asks about price / how much we pay BEFORE we know the car (or re
   - Do NOT give any number.
 
 If they ask about price once the car is known:
-  - First time: "Alright, no problem. We can buy the car immediately. All we need is a quick inspection of the car." + the exact question from "Booking slot". Second time: the PRICE — SECOND TIME text + the booking question.
+  - First time: "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately." + the exact question from "Booking slot". Second time: the PRICE — SECOND TIME text + the booking question.
 
 NEVER say your own name or mention Mister Wheelz after step 0.
 NEVER mention "car dealership" or "test drive".`,
@@ -197,7 +197,7 @@ function buildSystemPrompt(step: number, known: KnownFields): string {
   // so the model doesn't have to cross-reference context sections
   if (known.next_action) {
     instruction = known.answer_question_first
-      ? `The customer asked a question. First answer it in ONE short sentence using the knowledge base. If it's about price: never give a number — first time say: "Alright, no problem. We can buy the car immediately. All we need is a quick inspection of the car."; if price came up before, say in one sentence that we need the inspection report to give the final price. Then: ${known.next_action}
+      ? `The customer asked a question. First answer it in ONE short sentence using the knowledge base. If it's about price: never give a number — first time say: "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately."; if price came up before, say in one sentence that we need the inspection report to give the final price. Then: ${known.next_action}
 
 Keep the whole reply to 2–3 sentences. Do NOT ask anything else.`
       : `Your ONLY task right now: ${known.next_action}
@@ -273,7 +273,7 @@ Length rule (STRICT): Keep every reply short and to the point — 2–4 sentence
 
 Price wording: never say "firm offer", "real offer" or "rough guess" — always talk about the "final price".
 
-PRICE — FIRST TIME (keep it short): "Alright, no problem. We can buy the car immediately. All we need is a quick inspection of the car." + the booking question (e.g. "What time are you available tomorrow?" — use the day from "Booking slot").
+PRICE — FIRST TIME (keep it short): "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately." + the booking question (e.g. "What time are you available tomorrow?" — use the day from "Booking slot").
 PRICE — SECOND TIME they ask (once per chat), say exactly:
 "Ok, I understand. Let me explain our process. We buy cars directly on the spot. When you bring the car, we do a quick inspection to get the full details and condition of the car. Based on this we give you our final price. Once agreed, we buy it at the same time and pay in cash."
 [SPLIT]
@@ -331,7 +331,7 @@ Always push for the appointment first. Never use this loan explanation when the 
 
 PRICE / SELLING METHOD QUESTIONS — HOW TO HANDLE:
 First time they ask:
-  - Reply short, exactly in this spirit: "Alright, no problem. We can buy the car immediately. All we need is a quick inspection of the car." + the booking question. Nothing more.
+  - Reply short, exactly in this spirit: "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately." + the booking question. Nothing more.
   - Do NOT give any number, range or estimate. Ever.
 
 Second time they push (still asking for price / refusing to come in):
@@ -420,6 +420,8 @@ HOW IT WORKS (if they ask how it works / what the process is): say exactly "It's
 COMMISSION / FEES: we never charge commission or fees. The inspection is free — it's the quick check we do before we buy the car. If asked: "There's no commission and no fees. We buy your car, and the quick inspection before we buy is free."
 
 NEVER say "Wow" — keep reactions calm ("Nice,").
+
+TONE FOR ANSWERS: a price question → show understanding ("Ok, I understand…"). An answer about WHEN they sell ("now", "this week", "when the price is right", "next week") → "No problem…".
 
 LANGUAGE: always reply in English only — never a single word of another language, not even greetings like "Wa alaikum salam", "inshallah", "habibi" or "shukran". If they greet with "salam", just reply "Hi [name]!". If the customer writes in another language, reply: "Sorry, I can only assist in English. Could you please continue in English?"
 

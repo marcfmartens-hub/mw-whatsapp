@@ -1980,12 +1980,12 @@ export async function POST(req: NextRequest) {
       const nm = (coreUpdates as any).name ?? conversation.name;
       void nm;
       // Marc: "asap / as early as possible / soon / quick…" → "No problem!" then the closed line + time question
-      const SOON = /\b(asap|a\.s\.a\.p|as (early|soon|fast|quick)(ly)? as possible|soon|early|quick(ly)?|fast|urgent(ly)?|now|immediately|today|tomorrow|tonorrow|tmrw|this week)\b/i;
+      const SOON = /\b(when the price is (right|good)|if the price is (right|good)|depends on the price|asap|a\.s\.a\.p|as (early|soon|fast|quick)(ly)? as possible|soon|early|quick(ly)?|fast|urgent(ly)?|now|immediately|today|tomorrow|tonorrow|tmrw|this week)\b/i;
       const weekWord = messageText.match(/\b(this|next)\s+week\b/i)?.[1]?.toLowerCase();
       const firstDay = /\b(today|this afternoon)\b/i.test(q) ? "today" : "tomorrow";
       reply = weekWord
         // Marc: "this week / next week" → offer the first possible day, or a day of their choice
-        ? `Ok great, I can arrange an inspection for you ${firstDay} if you want, or else later ${weekWord === "next" ? "or next week" : "this week"}. Which day do you prefer?`
+        ? `No problem, I can arrange an inspection for you ${firstDay} if you want, or else later ${weekWord === "next" ? "or next week" : "this week"}. Which day do you prefer?`
         : SOON.test(messageText) ? `No problem, ${q.charAt(0).toLowerCase() + q.slice(1)}`.replace(/\. What time is best/, ".\n\nWhat time is best") : q;
     }
     // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
