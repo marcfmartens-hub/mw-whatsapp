@@ -17,7 +17,7 @@ interface Conv {
 }
 
 interface LoginRecord { id: number; username: string; ip: string; user_agent: string; logged_in_at: string; }
-interface UserRecord  { username: string; created_at: string; }
+interface UserRecord  { username: string; role: "super_admin" | "call_center"; password: string | null; created_at: string; }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,8 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<"history" | "users">("history");
   const [logins, setLogins] = useState<LoginRecord[]>([]);
   const [users, setUsers]   = useState<UserRecord[]>([]);
-  const [newUser, setNewUser] = useState({ username: "", password: "" });
+  const [newUser, setNewUser] = useState({ username: "", password: "", role: "call_center" });
+  const [needsMigration, setNeedsMigration] = useState(false);
   const [addError, setAddError] = useState("");
   const [addOk, setAddOk] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -86,8 +87,34 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     fetch("/api/monitor/users")
       .then((r) => r.json())
-      .then((d) => { setLogins(d.logins ?? []); setUsers(d.users ?? []); setLoading(false); });
+      .then((d) => { setLogins(d.logins ?? []); setUsers(d.users ?? []); setNeedsMigration(!!d.needsMigration); setLoading(false); });
   }, []);
+
+  async function reloadUsers() {
+    const d = await fetch("/api/monitor/users").then((r) => r.json());
+    setUsers(d.users ?? []);
+  }
+
+  async function changeRole(username: string, role: string) {
+    const res = await fetch("/api/monitor/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, role }) });
+    if (!res.ok) alert((await res.json()).error ?? "Failed");
+    reloadUsers();
+  }
+
+  async function changePassword(username: string) {
+    const password = prompt(`New password for ${username}:`);
+    if (!password?.trim()) return;
+    const res = await fetch("/api/monitor/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+    if (!res.ok) alert((await res.json()).error ?? "Failed");
+    reloadUsers();
+  }
+
+  async function deleteUser(username: string) {
+    if (!confirm(`Delete user ${username}?`)) return;
+    const res = await fetch("/api/monitor/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username }) });
+    if (!res.ok) alert((await res.json()).error ?? "Failed");
+    reloadUsers();
+  }
 
   async function handleAddUser(e: React.FormEvent) {
     e.preventDefault();
@@ -99,9 +126,8 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     });
     if (res.ok) {
       setAddOk(true);
-      setNewUser({ username: "", password: "" });
-      const d = await fetch("/api/monitor/users").then((r) => r.json());
-      setUsers(d.users ?? []);
+      setNewUser({ username: "", password: "", role: "call_center" });
+      reloadUsers();
     } else {
       const d = await res.json();
       setAddError(d.error ?? "Failed to add user");
@@ -184,15 +210,41 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           {!loading && tab === "users" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
               {/* Existing users */}
+              {needsMigration && <div style={SP.errMsg}>Database update needed for roles and visible passwords (run the SQL).</div>}
               <div>
                 <div style={SP.sectionTitle}>Active users</div>
                 <div style={SP.userList}>
                   {users.map((u) => (
-                    <div key={u.username} style={SP.userRow}>
+                    <div key={u.username} style={{ ...SP.userRow, alignItems: "flex-start" }}>
                       <div style={SP.loginAvatar}>{u.username[0].toUpperCase()}</div>
-                      <div>
-                        <div style={SP.loginName}>{u.username}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={SP.loginName}>
+                          {u.username}{" "}
+                          <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, marginLeft: 6,
+                            background: u.role === "super_admin" ? "#3b2a05" : "#0b3a2e", color: u.role === "super_admin" ? "#f5c542" : "#25d366" }}>
+                            {u.role === "super_admin" ? "Super admin" : "Call center"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#e9edef", margin: "4px 0", fontFamily: "monospace" }}>
+                          🔑 {u.password ?? <span style={{ color: "#8696a0", fontFamily: "inherit" }}>shows after next login</span>}
+                        </div>
                         <div style={SP.loginTime}>Added {fmtDate(u.created_at)}</div>
+                        {u.username.toLowerCase() !== "marc" && (
+                          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                            <select style={{ ...SP.input, padding: "4px 8px", fontSize: 12, width: "auto" }} value={u.role}
+                              onChange={(e) => changeRole(u.username, e.target.value)}>
+                              <option value="call_center">Call center</option>
+                              <option value="super_admin">Super admin</option>
+                            </select>
+                            <button style={{ ...SP.closeBtn, fontSize: 12 }} onClick={() => changePassword(u.username)}>Change password</button>
+                            <button style={{ ...SP.logoutBtn, fontSize: 12, padding: "4px 10px" }} onClick={() => deleteUser(u.username)}>Delete</button>
+                          </div>
+                        )}
+                        {u.username.toLowerCase() === "marc" && (
+                          <div style={{ marginTop: 8 }}>
+                            <button style={{ ...SP.closeBtn, fontSize: 12 }} onClick={() => changePassword(u.username)}>Change password</button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -212,12 +264,20 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                   />
                   <input
                     style={SP.input}
-                    type="password"
+                    type="text"
                     placeholder="Password"
                     value={newUser.password}
                     onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
                     required
                   />
+                  <select
+                    style={SP.input}
+                    value={newUser.role}
+                    onChange={(e) => setNewUser((p) => ({ ...p, role: e.target.value }))}
+                  >
+                    <option value="call_center">Call center</option>
+                    <option value="super_admin">Super admin</option>
+                  </select>
                   {addError && <div style={SP.errMsg}>{addError}</div>}
                   {addOk   && <div style={SP.okMsg}>User added ✓</div>}
                   <button style={SP.addBtn} type="submit">Add user</button>
@@ -241,6 +301,10 @@ export default function MonitorPage() {
   const [loading, setLoading]     = useState(true);
   const [settings, setSettings]   = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [role, setRole]           = useState<string | null>(null);
+  useEffect(() => { fetch("/api/monitor/me", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((d) => setRole(d?.role ?? null)).catch(() => {}); }, []);
+  const isSuper = role === "super_admin";
+  async function signOut() { await fetch("/api/monitor/logout", { method: "POST" }); window.location.href = "/monitor/login"; }
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevLenRef = useRef<Record<string, number>>({});
 
@@ -293,7 +357,7 @@ export default function MonitorPage() {
 
   return (
     <div style={S.app}>
-      {settings && <SettingsPanel onClose={() => setSettings(false)} />}
+      {settings && isSuper && <SettingsPanel onClose={() => setSettings(false)} />}
 
       {/* ── SIDEBAR ── */}
       <div style={{ ...S.sidebar, ...(showSidebar ? {} : { display: "none" }), ...(isMobile ? { width: "100%", minWidth: 0 } : {}) }}>
@@ -307,12 +371,17 @@ export default function MonitorPage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={S.convCount}>{convs.length}</div>
-            <button style={S.iconBtn} title="Settings" onClick={() => setSettings(true)}>
+            {!isSuper && role && (
+              <button style={S.iconBtn} title="Sign out" onClick={signOut}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              </button>
+            )}
+            {isSuper && <button style={S.iconBtn} title="Settings" onClick={() => setSettings(true)}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
               </svg>
-            </button>
+            </button>}
           </div>
         </div>
 
