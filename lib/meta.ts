@@ -40,6 +40,8 @@ export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: 
 }
 
 export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
+  // After 5 PM Dubai time: "Have a nice evening" instead of "Have a nice day"
+  if (new Date(Date.now() + 4 * 3600e3).getUTCHours() >= 17) body = body.replace(/Have a nice day/g, "Have a nice evening");
   const log = simLog(to); if (log) { log.push(body); return; }
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   const accessToken = process.env.META_ACCESS_TOKEN;

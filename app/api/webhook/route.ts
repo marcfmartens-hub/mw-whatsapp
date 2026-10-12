@@ -117,6 +117,19 @@ function looksLikeName(candidate: string, explicit = false): boolean {
   return true;
 }
 
+// Dubai time-of-day words (Marc): greeting and goodbye follow the clock
+function dubaiHourNow(): number { return new Date(Date.now() + 4 * 3600e3).getUTCHours(); }
+function timeGreeting(): string { const h = dubaiHourNow(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; }
+// Goodbye after a booking: same day → "See you later", tomorrow → "See you tomorrow", later → "Have a nice day/evening"
+function bookingGoodbye(name: string | null | undefined, apptIso: string | null | undefined): string {
+  const nm = firstName(name);
+  const today = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 28 * 3600e3).toISOString().slice(0, 10);
+  if (apptIso === today) return `See you later${nm}!`;
+  if (apptIso === tomorrow) return `See you tomorrow${nm}!`;
+  return `Have a nice ${dubaiHourNow() >= 17 ? "evening" : "day"}${nm}!`;
+}
+
 // ", Benny" for the goodbye only — first name, never the last name
 function firstName(n: string | null | undefined): string {
   const f = String(n ?? "").trim().split(/\s+/)[0];
@@ -442,7 +455,7 @@ function formatBookingConfirmation(name: string | null | undefined, dateRaw: str
   const sfx = [11,12,13].includes(n) ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
   const [h, m] = t24.split(":").map(Number);
   const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
-  return `You're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details. Have a nice day${firstName(name)}!`;
+  return `You're booked for\n\n*${DAYS[d.getUTCDay()]} ${n}${sfx} of ${MONTHS[d.getUTCMonth()]}*\nat *${time}*\n\nThe Mister Wheelz team will be in touch to confirm the details. ${bookingGoodbye(name, iso)}`;
 }
 
 function apptLabel(dateRaw?: string | null, timeRaw?: string | null): string {
@@ -1448,7 +1461,7 @@ export async function POST(req: NextRequest) {
         const pm = messageText.match(/(?:\+|00)?\d[\d\s-]{7,15}\d/);
         if (pm) upd.alternative_phone = pm[0].replace(/\D/g, "").replace(/^00/, "");
       }
-      const reply = nextQ ?? `Thanks! See you at the inspection. Have a nice day${firstName(nm)}!`;
+      const reply = nextQ ?? `Thanks! ${bookingGoodbye(nm, conversation.appointment_date)}`;
       await sendWhatsAppMessage(phone, reply);
       await updateConversation(phone, upd as any).catch(() => {});
       await appendHistory(phone, hist0, messageText, reply);
@@ -1991,7 +2004,7 @@ export async function POST(req: NextRequest) {
         String(apptTime || conversation.appointment_time || ""),
       );
       // Goodbye only in the very last message: not here if we still ask the name / number after the booking
-      const conf = confRaw && (!nmForConf || !isUAE) ? confRaw.replace(/\s*Have a nice day[^!]*!/, "") : confRaw;
+      const conf = confRaw && (!nmForConf || !isUAE) ? confRaw.replace(/\s*(Have a nice (day|evening)|See you (later|tomorrow))[^!]*!/, "") : confRaw;
       if (conf) {
         const summary = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
         replyParts = [...(summary ? [summary] : []), conf];
@@ -1999,10 +2012,12 @@ export async function POST(req: NextRequest) {
       }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
+    // Greeting follows the clock: "Good morning! I'm Kaya…"
+    if (currentStep === 0 && replyParts.length) replyParts[0] = replyParts[0].replace(/^(hi|hello|hey)(\s+[A-Z][a-z]+)?!/i, (_m, _h, nmPart) => `${timeGreeting()}${nmPart ?? ""}!`);
     // Never repeat the closing line ("Our team will be in touch… Have a nice day!") a second time
     {
       const prevA = history.filter(m => m.role === "assistant").map(m => m.content).join("\n");
-      const CLOSERS = [/\s*Our (purchase )?team will be in touch[^.!]*[.!]/gi, /\s*Have a nice day!/gi];
+      const CLOSERS = [/\s*Our (purchase )?team will be in touch[^.!]*[.!]/gi, /\s*Have a nice (day|evening)[^!]*!/gi];
       replyParts = replyParts.map(p => {
         let out = p;
         for (const re of CLOSERS) { re.lastIndex = 0; if (re.test(prevA)) { re.lastIndex = 0; out = out.replace(re, ""); } }

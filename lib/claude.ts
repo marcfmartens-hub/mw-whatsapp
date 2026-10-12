@@ -183,7 +183,7 @@ const CLOSING_INSTRUCTION =
 - If the customer asks a question (documents, Mulkiya, location, payment, loan settlement, how long it takes), answer it briefly using the knowledge base.
 - If they just answered "Which UAE number is best to reach you on?", thank them and confirm the team will contact them [Team contact timing]. Don't ask for a visit time unless they ask to come in.
 - Otherwise warmly confirm everything is set and the team will be in touch.
-- Use "Have a nice day!" as the closing — never "Have a good one" or other informal alternatives.
+- Closing: "Have a nice day!" (after 5 PM Dubai time: "Have a nice evening!") — never "Have a good one" or other informal alternatives. If an inspection is booked for today: "See you later!"; for tomorrow: "See you tomorrow!".
 - No more questions, do not restart the flow.`;
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -545,7 +545,7 @@ function sanitizeReply(text: string): string {
     .replace(/[\u0600-\u06FF]+/g, "")
     .replace(/[ \t]{2,}/g, " ").trim();
   // House style: no emojis after the first greeting
-  if (!/Hi! I'm Kaya/i.test(text)) {
+  if (!/I'm Kaya from Mister Wheelz/i.test(text)) {
     text = text.replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\uFE0F\u200D]/gu, "").replace(/[ \t]{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
   }
   if (/ABSOLUTE RULES|KNOWLEDGE BASE|What you already know|next_action|system prompt|my instructions|I was instructed|I('| a)m programmed/i.test(text)) {
