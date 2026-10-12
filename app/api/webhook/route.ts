@@ -1293,6 +1293,20 @@ export async function POST(req: NextRequest) {
             ea.appointment_time = apptTime;
           } else apptTime = ea.appointment_time;
         }
+        // "anytime after 2" / "after 4pm" → the first slot after that time (2:30 PM / 4:30 PM)
+        {
+          const am = messageText.match(/\bafter\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+          if (am) {
+            let h = parseInt(am[1], 10); const m = am[2] ? parseInt(am[2], 10) : 0;
+            if (!am[3] && h >= 1 && h <= 7) h += 12; else if (am[3]?.toLowerCase() === "pm" && h < 12) h += 12;
+            const mins = Math.ceil((h * 60 + m + 1) / 30) * 30;
+            if (mins >= 10 * 60 && mins <= 18 * 60 + 30) {
+              apptTime = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+              ea.appointment_time = apptTime;
+              if (!apptDate) { const inf = inferApptDate(apptTime, lastAssistantMsg); if (inf) { apptDate = inf; ea.appointment_date = inf; } }
+            }
+          }
+        }
         // Day without a time ("On 16th or 17th I can come") → book 12:15 PM by default (Marc)
         if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) {
           apptTime = "12:15"; ea.appointment_time = "12:15";

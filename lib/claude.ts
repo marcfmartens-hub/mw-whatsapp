@@ -533,6 +533,14 @@ export function containsPrice(text: string): boolean {
 }
 
 function sanitizeReply(text: string): string {
+  // Never send the model's own self-corrections ("Wait, the rule says… Let me correct that: …")
+  if (/\b(wait,? the rule|the rules? says?|let me correct|let me fix|i should (ask|say|not)|according to (my|the) (rules|instructions)|my instructions|per the rules|correction:)/i.test(text)) {
+    const after = text.split(/let me (correct|fix) (that|this)[:.]?|correction:/i).pop() ?? "";
+    const clean = after.replace(/^[\s:.-]+/, "").trim();
+    console.warn("[Kaya] stripped self-correction from reply:", text.slice(0, 200));
+    text = clean && !/\b(rule|instruction|i should)\b/i.test(clean) ? clean
+      : text.split(/\n\s*\n/).filter(p => !/\b(wait|rule|instruction|let me|i should)\b/i.test(p)).pop() ?? "";
+  }
   // Never "Wow" (Marc)
   text = text.replace(/\bwow+\b[!,.]*\s*/gi, "");
   // No filler openers like "Of course!" — just continue

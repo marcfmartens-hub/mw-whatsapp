@@ -40,6 +40,12 @@ export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: 
 }
 
 export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
+  // Kaya's intro always opens with the time of day (whatever code path sent it)
+  {
+    const h = new Date(Date.now() + 4 * 3600e3).getUTCHours();
+    const g = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+    body = body.replace(/^(Hi|Hello|Hey)!(\s+I'm Kaya)/, `${g}!$2`);
+  }
   // After 5 PM Dubai time: "Have a nice evening" instead of "Have a nice day"
   if (new Date(Date.now() + 4 * 3600e3).getUTCHours() >= 17) body = body.replace(/Have a nice day/g, "Have a nice evening");
   const log = simLog(to); if (log) { log.push(body); return; }
