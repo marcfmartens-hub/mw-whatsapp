@@ -344,7 +344,7 @@ function buildDirectResponse(
         return `${greet}! What car would you like to sell?`;
       }
     case "ASK_UAE_PHONE":
-      return `Hi${n}! Which UAE number is best to reach you on?`;
+      return `Which UAE number is best to reach you on?`;
     case "ASK_CAR_DETAILS": {
       const hasMake  = !!(known.make  && known.make  !== "Unknown");
       const hasModel = !!(known.model && known.model !== "Unknown");
