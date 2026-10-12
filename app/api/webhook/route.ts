@@ -17,17 +17,12 @@ const LOCATION_KEYWORDS = /\b(location|address|where are you|where is|how to get
 const LOCATION_IMAGE_URL = ""; // add outside branch photo as public/location.jpg, then set "https://mw-whatsapp2.vercel.app/location.jpg"
 
 const LOCATION_TEXT = `📍 *Mister Wheelz Car Buyers*
-Umm Suqeim Branch
-Al Quoz 4, Dubai
-
-🗺️ *Directions*
+Umm Suqeim Branch, Al Quoz 4, Dubai
 https://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6
 
-📞 *Customer service*
-+971 58 582 5543
-
-📄 *Please bring*
-Emirates ID and Mulkiya (car registration)`;
+🕙 Mon–Sat 10 AM – 7 PM (Fri from 12 PM), Sun closed
+📞 +971 58 582 5543
+📄 Please bring your Emirates ID and Mulkiya`;
 
 // ---- GET: Meta webhook verification ----
 export async function GET(req: NextRequest) {
