@@ -80,6 +80,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [users, setUsers]   = useState<UserRecord[]>([]);
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "call_center" });
   const [needsMigration, setNeedsMigration] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const menuItem: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", background: "none", border: "none",
+    color: "#e9edef", padding: "10px 14px", fontSize: 14, cursor: "pointer" };
   const [addError, setAddError] = useState("");
   const [addOk, setAddOk] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -229,23 +232,27 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                           🔑 {u.password ?? <span style={{ color: "#8696a0", fontFamily: "inherit" }}>shows after next login</span>}
                         </div>
                         <div style={SP.loginTime}>Added {fmtDate(u.created_at)}</div>
-                        {u.username.toLowerCase() !== "marc" && (
-                          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                            <select style={{ ...SP.input, padding: "4px 8px", fontSize: 12, width: "auto" }} value={u.role}
-                              onChange={(e) => changeRole(u.username, e.target.value)}>
-                              <option value="call_center">Call center</option>
-                              <option value="super_admin">Super admin</option>
-                            </select>
-                            <button style={{ ...SP.closeBtn, fontSize: 12 }} onClick={() => changePassword(u.username)}>Change password</button>
-                            <button style={{ ...SP.logoutBtn, fontSize: 12, padding: "4px 10px" }} onClick={() => deleteUser(u.username)}>Delete</button>
-                          </div>
-                        )}
-                        {u.username.toLowerCase() === "marc" && (
-                          <div style={{ marginTop: 8 }}>
-                            <button style={{ ...SP.closeBtn, fontSize: 12 }} onClick={() => changePassword(u.username)}>Change password</button>
-                          </div>
-                        )}
                       </div>
+                      {(
+                        <div style={{ position: "relative" }}>
+                          <button style={{ ...SP.closeBtn, padding: "4px 10px", fontSize: 18, lineHeight: 1 }}
+                            onClick={() => setMenuFor(menuFor === u.username ? null : u.username)}>⋮</button>
+                          {menuFor === u.username && (
+                            <div style={{ position: "absolute", right: 0, top: 34, zIndex: 20, background: "#233138", border: "1px solid #2a3942",
+                              borderRadius: 8, minWidth: 190, boxShadow: "0 6px 20px rgba(0,0,0,.4)", overflow: "hidden" }}>
+                              {u.username.toLowerCase() !== "marc" && (
+                                <button style={menuItem} onClick={() => { setMenuFor(null); changeRole(u.username, u.role === "super_admin" ? "call_center" : "super_admin"); }}>
+                                  Make {u.role === "super_admin" ? "call center" : "super admin"}
+                                </button>
+                              )}
+                              <button style={menuItem} onClick={() => { setMenuFor(null); changePassword(u.username); }}>Change password</button>
+                              {u.role !== "super_admin" && (
+                                <button style={{ ...menuItem, color: "#ff6b6b" }} onClick={() => { setMenuFor(null); deleteUser(u.username); }}>Delete user</button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

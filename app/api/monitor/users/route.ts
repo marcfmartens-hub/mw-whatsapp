@@ -103,6 +103,10 @@ export async function DELETE(req: NextRequest) {
   if (username.toLowerCase() === "marc" || username === g.me!.username) {
     return NextResponse.json({ error: "You can't delete this user" }, { status: 400 });
   }
+  const { data: target } = await supabase.from("mw_monitor_users").select("role").eq("username", username).maybeSingle();
+  if (target?.role === "super_admin") {
+    return NextResponse.json({ error: "Super admins can't be deleted. Make them call center first." }, { status: 400 });
+  }
   const { error } = await supabase.from("mw_monitor_users").delete().eq("username", username);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
