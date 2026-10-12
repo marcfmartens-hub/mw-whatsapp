@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { hashPassword, verifyPassword, createToken } from "@/lib/auth";
+import { verifyPassword, createToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,34 +20,15 @@ export async function POST(req: NextRequest) {
 
   let authenticated = false;
 
-  // Try Supabase users table
-  const { data: user, error } = await supabase
+  const { data: user } = await supabase
     .from("mw_monitor_users")
     .select("*")
     .eq("username", username)
     .maybeSingle();
 
-  if (error?.code === "42P01") {
-    // Table doesn't exist yet — bootstrap: accept marc/0492342753 and create tables implicitly
-    if (username === "marc" && password === "0492342753") {
-      authenticated = true;
-    }
-  } else if (!user) {
-    // No such user — if it's the bootstrap admin and table is empty, auto-create
-    if (username === "marc" && password === "0492342753") {
-      const { count } = await supabase
-        .from("mw_monitor_users")
-        .select("*", { count: "exact", head: true });
-      if ((count ?? 0) === 0) {
-        await supabase
-          .from("mw_monitor_users")
-          .insert({ username: "marc", password_hash: hashPassword("0492342753") });
-        authenticated = true;
-      }
-    }
-  } else {
+  if (user) {
     authenticated = verifyPassword(password, user.password_hash);
-    // Keep the password visible for the super admin (existing users before the column existed)
+    // Keep the password visible for the super admin (users created before the column existed)
     if (authenticated && "password_plain" in user && user.password_plain !== password) {
       await supabase.from("mw_monitor_users").update({ password_plain: password }).eq("username", username).then(() => {});
     }

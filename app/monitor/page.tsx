@@ -73,7 +73,7 @@ function lastPreview(conv: Conv): string {
 
 // ── Settings Panel ─────────────────────────────────────────────────────────────
 
-function SettingsPanel({ onClose }: { onClose: () => void }) {
+function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
   const router = useRouter();
   const [tab, setTab] = useState<"history" | "users">("history");
   const [logins, setLogins] = useState<LoginRecord[]>([]);
@@ -240,13 +240,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                           {menuFor === u.username && (
                             <div style={{ position: "absolute", right: 0, top: 34, zIndex: 20, background: "#233138", border: "1px solid #2a3942",
                               borderRadius: 8, minWidth: 190, boxShadow: "0 6px 20px rgba(0,0,0,.4)", overflow: "hidden" }}>
-                              {u.username.toLowerCase() !== "marc" && (
+                              {u.username !== me && (
                                 <button style={menuItem} onClick={() => { setMenuFor(null); changeRole(u.username, u.role === "super_admin" ? "call_center" : "super_admin"); }}>
                                   Make {u.role === "super_admin" ? "call center" : "super admin"}
                                 </button>
                               )}
                               <button style={menuItem} onClick={() => { setMenuFor(null); changePassword(u.username); }}>Change password</button>
-                              {u.role !== "super_admin" && (
+                              {u.role !== "super_admin" && u.username !== me && (
                                 <button style={{ ...menuItem, color: "#ff6b6b" }} onClick={() => { setMenuFor(null); deleteUser(u.username); }}>Delete user</button>
                               )}
                             </div>
@@ -309,7 +309,8 @@ export default function MonitorPage() {
   const [settings, setSettings]   = useState(false);
   const [resetting, setResetting] = useState(false);
   const [role, setRole]           = useState<string | null>(null);
-  useEffect(() => { fetch("/api/monitor/me", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((d) => setRole(d?.role ?? null)).catch(() => {}); }, []);
+  const [meName, setMeName]       = useState("");
+  useEffect(() => { fetch("/api/monitor/me", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((d) => { setRole(d?.role ?? null); setMeName(d?.username ?? ""); }).catch(() => {}); }, []);
   const isSuper = role === "super_admin";
   async function signOut() { await fetch("/api/monitor/logout", { method: "POST" }); window.location.href = "/monitor/login"; }
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -364,7 +365,7 @@ export default function MonitorPage() {
 
   return (
     <div style={S.app}>
-      {settings && isSuper && <SettingsPanel onClose={() => setSettings(false)} />}
+      {settings && isSuper && <SettingsPanel me={meName} onClose={() => setSettings(false)} />}
 
       {/* ── SIDEBAR ── */}
       <div style={{ ...S.sidebar, ...(showSidebar ? {} : { display: "none" }), ...(isMobile ? { width: "100%", minWidth: 0 } : {}) }}>

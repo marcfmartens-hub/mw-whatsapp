@@ -4,18 +4,23 @@ import { verifyToken } from "@/lib/auth";
 
 export type MonitorRole = "super_admin" | "call_center";
 
-// Marc is always super admin, even before the role column exists.
-const OWNER = "marc";
-
 export async function roleOf(username: string): Promise<MonitorRole> {
-  if (username.toLowerCase() === OWNER) return "super_admin";
-  const { data, error } = await supabase
+  const { data: rows, error } = await supabase
     .from("mw_monitor_users")
-    .select("role")
-    .eq("username", username)
-    .maybeSingle();
-  if (error || !data) return "call_center";
-  return data.role === "super_admin" ? "super_admin" : "call_center";
+    .select("username, role, created_at")
+    .order("created_at", { ascending: true });
+  if (error || !rows?.length) return "call_center";
+
+  const me = rows.find((r) => r.username === username);
+  if (!me) return "call_center";
+  if (me.role === "super_admin") return "super_admin";
+
+  // Safety net: if nobody is super admin, the first (oldest) user becomes super admin.
+  if (!rows.some((r) => r.role === "super_admin") && rows[0].username === username) {
+    await supabase.from("mw_monitor_users").update({ role: "super_admin" }).eq("username", username);
+    return "super_admin";
+  }
+  return "call_center";
 }
 
 export async function sessionUser(req: NextRequest): Promise<{ username: string; role: MonitorRole } | null> {

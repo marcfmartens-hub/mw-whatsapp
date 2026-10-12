@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     needsMigration,
     users: users.map((u) => ({
       username: u.username,
-      role: u.username.toLowerCase() === "marc" ? "super_admin" : (u.role === "super_admin" ? "super_admin" : "call_center"),
+      role: u.role === "super_admin" ? "super_admin" : "call_center",
       password: u.password_plain ?? null,
       created_at: u.created_at,
     })),
@@ -82,8 +82,8 @@ export async function PATCH(req: NextRequest) {
   const upd: Record<string, string> = {};
   if (password?.trim()) { upd.password_hash = hashPassword(password); upd.password_plain = password; }
   if (role && ROLES.includes(role)) {
-    if (username.toLowerCase() === "marc" && role !== "super_admin") {
-      return NextResponse.json({ error: "Marc is always super admin" }, { status: 400 });
+    if (username === g.me!.username && role !== "super_admin") {
+      return NextResponse.json({ error: "You can't remove your own super admin role" }, { status: 400 });
     }
     upd.role = role;
   }
@@ -100,7 +100,7 @@ export async function DELETE(req: NextRequest) {
 
   const { username } = await req.json();
   if (!username) return NextResponse.json({ error: "Username required" }, { status: 400 });
-  if (username.toLowerCase() === "marc" || username === g.me!.username) {
+  if (username === g.me!.username) {
     return NextResponse.json({ error: "You can't delete this user" }, { status: 400 });
   }
   const { data: target } = await supabase.from("mw_monitor_users").select("role").eq("username", username).maybeSingle();
