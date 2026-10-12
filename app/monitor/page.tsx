@@ -271,6 +271,17 @@ export default function MonitorPage() {
 
   const activeConv = convs.find((c) => c.phone === active) ?? null;
 
+  // Collapsible sidebar (desktop) + one-panel view on phones, like WhatsApp
+  const [collapsed, setCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check(); window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  const showSidebar = isMobile ? !activeConv : !collapsed;
+  const showChat = isMobile ? !!activeConv : true;
+
   async function handleReset() {
     if (!active || resetting) return;
     if (!confirm("Reset this conversation? All data will be cleared.")) return;
@@ -285,7 +296,7 @@ export default function MonitorPage() {
       {settings && <SettingsPanel onClose={() => setSettings(false)} />}
 
       {/* ── SIDEBAR ── */}
-      <div style={S.sidebar}>
+      <div style={{ ...S.sidebar, ...(showSidebar ? {} : { display: "none" }), ...(isMobile ? { width: "100%", minWidth: 0 } : {}) }}>
         <div style={S.sideHeader}>
           <div style={S.botRow}>
             <img src="/mw-logo.png" alt="Mister Wheelz" style={S.botAvatar} />
@@ -346,7 +357,10 @@ export default function MonitorPage() {
       </div>
 
       {/* ── CHAT PANEL ── */}
-      <div style={S.chatPanel}>
+      <div style={{ ...S.chatPanel, ...(showChat ? {} : { display: "none" }) }}>
+        {!isMobile && collapsed && !activeConv && (
+          <button style={S.collapseBtn} onClick={() => setCollapsed(false)} title="Show chats">☰ Chats</button>
+        )}
         {!activeConv ? (
           <div style={S.emptyState}>
             <img src="/mw-logo.png" alt="Mister Wheelz" style={S.emptyIcon} />
@@ -356,6 +370,10 @@ export default function MonitorPage() {
         ) : (
           <>
             <div style={S.chatHeader}>
+              <button style={S.collapseBtn} title={isMobile ? "Back to chats" : collapsed ? "Show chats" : "Hide chats"}
+                onClick={() => (isMobile ? setActive(null) : setCollapsed(c => !c))}>
+                {isMobile ? "←" : collapsed ? "☰" : "⟨"}
+              </button>
               <div style={{ ...S.avatar, background: avatarColor(activeConv.phone), width: 42, height: 42, fontSize: 16, flexShrink: 0 }}>{avatarInitial(activeConv)}</div>
               <div style={S.chatHeaderInfo}>
                 <div style={S.chatHeaderName}>{activeConv.name ? `${activeConv.name} · ` : ""}+{activeConv.phone}</div>
@@ -439,6 +457,7 @@ const S: Record<string, React.CSSProperties> = {
   contactPreview: { color:"#8696a0", fontSize:13, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 },
   stepBadge: { color:"#fff", borderRadius:10, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap", flexShrink:0 },
   emptyMsg: { color:"#8696a0", textAlign:"center", padding:"32px 16px", fontSize:14 },
+  collapseBtn: { background:"#2a3942", color:"#e9edef", border:"none", borderRadius:8, padding:"8px 12px", fontSize:16, cursor:"pointer", flexShrink:0, margin:"0 4px 0 0" },
   chatPanel: { flex:1, display:"flex", flexDirection:"column", background:"#0b141a", overflow:"hidden" },
   emptyState: { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 },
   emptyIcon: { width:160, height:160, borderRadius:20, objectFit:"contain" },
