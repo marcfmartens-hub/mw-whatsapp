@@ -132,8 +132,7 @@ function bookingGoodbye(name: string | null | undefined, apptIso: string | null 
 
 // ", Benny" for the goodbye only — first name, never the last name
 function firstName(n: string | null | undefined): string {
-  const f = String(n ?? "").trim().split(/\s+/)[0];
-  return f ? `, ${f}` : "";
+  void n; return ""; // Marc: the name is used once only ("Hi Marc!") — never in goodbyes
 }
 
 // "SUNIL" / "sunil" → "Sunil" (mixed case like "McKenzie" is kept)
