@@ -79,7 +79,8 @@ export async function pickDefaultTime(isoDate: string, excludePhone?: string, pa
   // Max 2 bookings per slot (Marc). Kaya's bookings are also in Bigin, so the sources overlap:
   // per slot take the highest count of any one source rather than adding them up.
   const SLOT_CAPACITY = 2;
-  const near = (list: string[], c: string) => list.filter((t) => Math.abs(toMin(t) - toMin(c)) < 30).length;
+  // The :15 slots are Kaya's own (the call center books :00 / :30), so only exact :15 bookings count
+  const near = (list: string[], c: string) => list.filter((t) => toMin(t) === toMin(c)).length;
   const booked = (c: string) => Math.max(near(a, c), near(b.contacts, c), near(b.events, c));
 
   const valid = (part ? PART[part] : CANDIDATES).filter((c) => toMin(c) >= open * 60 && (!isToday || toMin(c) >= nowMin + 60));
