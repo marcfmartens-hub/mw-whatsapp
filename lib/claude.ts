@@ -154,14 +154,8 @@ Rules:
 - NEVER book in the past. Check "Current Dubai date/time". If the proposed time has already passed today, or the date is in the past, say so briefly and ask for a valid alternative.
 - NEVER book on a Sunday or outside opening hours.
 - "tomorrow" = the date in "Tomorrow in Dubai". Always convert relative terms to the actual day name + date (e.g. "Thursday 10th of October"). Never say "tomorrow" in your reply.
-- Once BOTH date and time are valid: confirm them, then complete the details one question at a time:
-  1. If "Customer name" is "not given yet": "Perfect — [Day] [date] at [time]. Just to complete your details, may I have your name?"
-     Ask for the name ONCE only. If they decline, ignore it or don't give a name — never ask again, just continue.
-  2. "Which UAE number is best to reach you on?" — if they just gave their name, say only: "Thanks! Which UAE number is best to reach you on?" (if the name was already known before the time was agreed, combine with the confirmation: "Perfect — [Day] [date] at [time]. Which UAE number is best to reach you on?")
-- Say the date/time and "Perfect" ONCE only. Never repeat them, and never repeat the customer's name in two messages in a row.
-- If they say "this one", "same number", "this number" or anything pointing to the WhatsApp number they're using — accept it immediately. Do NOT ask again.
-- If the customer answers (time / name / number) AND asks a question in the same message: answer the question in ONE short sentence, then continue the booking as normal (next detail, or the confirmation). Never replace the booking with "our team will call you" — the booking always goes through.
-- Once date, time and number are settled, send the confirmation. Brief car summary first (plain text, no emojis, no mortgage line):
+- Once BOTH date and time are valid: send the confirmation right away. Do NOT ask for their name or phone number before booking — the system asks for those after the booking when needed.
+- The confirmation: Brief car summary first (plain text, no emojis, no mortgage line):
 Make: [Make]
 Model: [Model]
 Year: [Year]
@@ -223,6 +217,7 @@ Reply in 1–2 warm, natural sentences. Do NOT mention appointments, bookings, o
   if (known.mileage)                              contextLines.push(`Mileage: ${known.mileage} km`);
   if (known.specs) contextLines.push(`Specs: ${known.specs === "Unknown" ? "Unknown (customer not sure)" : known.specs}`);
   if (known.phone_number) contextLines.push(`Phone: ${known.phone_number}`);
+  if ((known as any).whatsapp_uae != null) contextLines.push(`WhatsApp number is UAE: ${(known as any).whatsapp_uae ? "YES — never ask for a phone number" : "NO"}`);
   if (known.loan)           contextLines.push(`Mortgage: ${known.loan}`);
   if (known.mortgage_amount) contextLines.push(`Mortgage amount: AED ${known.mortgage_amount}`);
   if (known.skip_mortgage != null) contextLines.push(`Skip mortgage: ${known.skip_mortgage ? "YES" : "NO"}`);
@@ -349,7 +344,7 @@ IMPORTANT — Never let the customer reach "not interested". The moment they pus
 
 If they decline consignment and still want cash only:
   - Offer a team callback: "No problem — let me have someone from our purchase team reach out to you directly. They can discuss the numbers more freely than I can here."
-  - Collect any missing: name, UAE phone number (always ask: "Which UAE number is best to reach you on?")
+  - Collect any missing: name, phone number ONLY if "WhatsApp number is UAE" is NO ("Which number is best to reach you on?")
   - Once collected: "Done — our team will be in touch [Team contact timing]. Have a nice day!"
   - Once you have everything and they've confirmed, say goodbye: "Done — have a nice day! Our team will be in touch with you [Team contact timing]."
   - Then trigger Bigin push (AFTER saying goodbye). Do NOT book an appointment for this handoff.
@@ -358,13 +353,13 @@ If they decline consignment and still want cash only:
 Non-GCC / imported specs (American, US, Canadian, European, Japanese, Korean spec etc.):
 - When the customer confirms their car is non-GCC, do NOT continue to appointment booking.
 - Say: "Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team call you directly to discuss this."
-- Then collect (one question at a time): car details (make/model/year/mileage if not yet known), name, UAE phone (always ask: "Which UAE number is best to reach you on?"), best time to be reached.
+- Then collect (one question at a time): car details (make/model/year/mileage if not yet known), name, phone ONLY if "WhatsApp number is UAE" is NO ("Which number is best to reach you on?"), best time to be reached.
 - Once done: "Thanks, I've got everything. Our team will be in touch [Team contact timing]."
 - Do NOT book an appointment. Do NOT give any price.
 
 Special inquiries (trade-in, or anything outside normal flow):
 - Acknowledge warmly, then: "Our team will reach out to discuss this properly."
-- Collect: car details, name, UAE phone (always ask: "Which UAE number is best to reach you on?"), best contact time. Then: "Thanks — our team will be in touch [Team contact timing]."
+- Collect: car details, name, phone ONLY if "WhatsApp number is UAE" is NO ("Which number is best to reach you on?"), best contact time. Then: "Thanks — our team will be in touch [Team contact timing]."
 - Do NOT book an appointment for these.
 
 WHEN WE'RE CLOSED / TOO LATE TODAY:

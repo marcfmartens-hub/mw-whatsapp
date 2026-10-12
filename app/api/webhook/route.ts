@@ -53,6 +53,8 @@ const FIELD_BY_STEP: Record<number, keyof Conversation | undefined> = {
 };
 
 const FINAL_STEP  = 7;
+const POST_NAME_Q  = "May I have your name for the booking?";
+const POST_PHONE_Q = "Which number is best to reach you on?";
 const CLOSING_STEP = 8;
 
 // Sell method detection
@@ -836,7 +838,7 @@ export async function POST(req: NextRequest) {
         }
         const asked = (q: string) => histB.some(m => m.role === "assistant" && m.content.includes(q));
         const nextQ = !conversation.name && !asked(BUYER_NAME_Q) ? BUYER_NAME_Q
-          : !asked(BUYER_PHONE_Q) ? BUYER_PHONE_Q
+          : !isUAE && !asked(BUYER_PHONE_Q) ? BUYER_PHONE_Q
           : !asked(BUYER_AVAIL_Q) ? BUYER_AVAIL_Q
           : null;
         const reply = nextQ ?? `Thanks! Our sales team will contact you ${teamWhen()}. Have a nice day!`;
@@ -861,7 +863,7 @@ export async function POST(req: NextRequest) {
           // fall through → normal selling flow (asks the car if it's not in this message)
         } else {
           await addNoteB(`BUYER: wants to buy a car, not selling`);
-          const nextQ = conversation.name ? BUYER_PHONE_Q : BUYER_NAME_Q;
+          const nextQ = !conversation.name ? BUYER_NAME_Q : !isUAE ? BUYER_PHONE_Q : null;
           const reply = `No problem! ${BUYER_LINE} ${nextQ}`;
           await sendWhatsAppMessage(phone, reply);
           await updateConversation(phone, { last_message_at: new Date().toISOString() } as any).catch(() => {});
@@ -1136,11 +1138,11 @@ export async function POST(req: NextRequest) {
       if (notes) updates.car_conditions = notes;
 
       let nextQ: string | null;
-      if (isOtherQuestion) nextQ = [DETAILS_Q, OWNER_Q, REG_Q, PHONE_Q].find(q => lastA.includes(q) || (q === DETAILS_Q && lastA.includes(MULTI_ASK))) ?? PHONE_Q;
+      if (isOtherQuestion) nextQ = [DETAILS_Q, OWNER_Q, REG_Q, PHONE_Q].find(q => lastA.includes(q) || (q === DETAILS_Q && lastA.includes(MULTI_ASK))) ?? (isUAE ? null : PHONE_Q);
       else if (firstTime || !asked(MULTI_ASK)) nextQ = DETAILS_Q;
       else if (!asked(OWNER_Q)) nextQ = OWNER_Q;
       else if (!asked(REG_Q)) nextQ = REG_Q;
-      else if (!asked(PHONE_Q)) nextQ = PHONE_Q;
+      else if (!isUAE && !asked(PHONE_Q)) nextQ = PHONE_Q;
       else nextQ = null;
 
       const reply = isOtherQuestion
@@ -1432,6 +1434,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Answers to the after-booking questions (name, then number for non-UAE) ──
+    if (currentStep >= CLOSING_STEP && (lastAssistantMsg.endsWith(POST_NAME_Q) || lastAssistantMsg.endsWith(POST_PHONE_Q))) {
+      const hist0 = (conversation.messages ?? []) as ConversationMessage[];
+      const upd: Record<string, unknown> = { last_msg_id: message.id, last_message_at: new Date().toISOString() };
+      let nextQ: string | null = null;
+      let nm = conversation.name;
+      if (lastAssistantMsg.endsWith(POST_NAME_Q)) {
+        const n = extractNameFromMessage(messageText) ?? (/^[A-Za-z]{2,15}(\s+[A-Za-z]{2,15})?$/.test(messageText.trim()) ? nameCase(messageText.trim()) : null);
+        if (n) { upd.name = n; nm = n; }
+        if (!isUAE) nextQ = POST_PHONE_Q;
+      } else {
+        const pm = messageText.match(/(?:\+|00)?\d[\d\s-]{7,15}\d/);
+        if (pm) upd.alternative_phone = pm[0].replace(/\D/g, "").replace(/^00/, "");
+      }
+      const reply = nextQ ?? `Thanks! See you at the inspection. Have a nice day${firstName(nm)}!`;
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, upd as any).catch(() => {});
+      await appendHistory(phone, hist0, messageText, reply);
+      if (upd.name || upd.alternative_phone) await pushLead(phone, "details after booking", { inspectionBooked: true });
+      return NextResponse.json({ status: "post_booking_details" }, { status: 200 });
+    }
+
     // ── Chat finished and the customer only says "ok / thanks" → no reply (never repeat the closing) ──
     if (currentStep >= CLOSING_STEP && /^(\s*(ok(ay)?|k|thanks?|thank you|so much|thx|ty|great|perfect|noted|cool|sure|alright|fine|good|done|see you|bye|👍|🙏|👌|❤️|shukran)[\s,.!🙏👍]*)+$/i.test(messageText)) {
       const hist0 = (conversation.messages ?? []) as ConversationMessage[];
@@ -1470,7 +1494,7 @@ export async function POST(req: NextRequest) {
         }
         upd.car_conditions = notes;
         const asked = (q: string) => hist.some(m => m.role === "assistant" && m.content.includes(q));
-        const nextQ = !asked(TB_CAR_Q) ? TB_CAR_Q : !name && !asked(TB_NAME_Q) ? TB_NAME_Q : !asked(TB_PHONE_Q) ? TB_PHONE_Q : null;
+        const nextQ = !asked(TB_CAR_Q) ? TB_CAR_Q : !name && !asked(TB_NAME_Q) ? TB_NAME_Q : !isUAE && !asked(TB_PHONE_Q) ? TB_PHONE_Q : null;
         const reply = !inTb
           ? `Thanks for letting me know. ${TB_LINE} ${nextQ ?? ""}`.trim()
           : nextQ ?? `Thanks! Our team will contact you ${teamWhen()}. Have a nice day!`;
@@ -1515,7 +1539,10 @@ export async function POST(req: NextRequest) {
           if (!ex.includes("HIYAZA:")) upd.car_conditions = ex ? `${ex} | ${note}` : note;
         }
         const asked = (q: string) => hist.some(m => m.role === "assistant" && m.content.includes(q));
-        const nextQ = !name && !asked(HZ_NAME_Q) ? HZ_NAME_Q : !asked(HZ_PHONE_Q) ? HZ_PHONE_Q : null;
+        const HZ_CAR_Q = "Could you share the make, model, year and mileage of the car?";
+        const cz = { ...conversation, ...vehicleDbFields(vehicleUpdates) } as any;
+        const carMissing = !cz.make || !cz.model || !cz.year || !cz.mileage;
+        const nextQ = carMissing && !asked(HZ_CAR_Q) ? HZ_CAR_Q : !name && !asked(HZ_NAME_Q) ? HZ_NAME_Q : !isUAE && !asked(HZ_PHONE_Q) ? HZ_PHONE_Q : null;
         const reply = !inHz
           ? `Thanks for letting me know. ${HZ_LINE} ${nextQ ?? ""}`.trim()
           : nextQ ?? `Thanks! Our team will contact you ${teamWhen()}. Have a nice day!`;
@@ -1585,14 +1612,15 @@ export async function POST(req: NextRequest) {
           const note = `Car (customer's words): ${messageText.slice(0, 120)}`;
           if (!conditions.includes(note)) { conditions = conditions ? `${conditions} | ${note}` : note; updates.car_conditions = conditions; }
         }
-        const missingCar = (["make", "model", "year"] as const).find(k => (!c[k] || c[k] === "Unknown") && !askedBefore(k) && !askedBefore("make"));
+        const missingCar = (["make", "model", "year", "mileage"] as const).find(k => (!c[k] || c[k] === "Unknown") && !askedBefore(k) && !askedBefore("make"));
         const topicDone  = /Wants to discuss:/.test(conditions);
         const phoneAsked = hist.some(m => m.role === "assistant" && /best (number )?to reach you/i.test(m.content));
 
         let nextQ: string | null = null;
         if (missingCar) nextQ = missingCar === "make" ? "In the meantime, could you share the make, model and year of your car?" : `Could you share the ${missingCar} of the car?`;
-        else if (!topicDone && !(firstAsk && frustrated)) nextQ = "What would you like to discuss with the team?";
-        else if (!phoneAsked) nextQ = "Which UAE number is best to reach you on?";
+        else if (!c.name && !hist.some(m => m.role === "assistant" && /may i have your name/i.test(m.content))) nextQ = "May I have your name?";
+        else if (!isUAE && !phoneAsked) nextQ = "Which number is best to reach you on?";
+        void topicDone;
 
         const parts: string[] = [];
         if (firstAsk && frustrated) {
@@ -1640,7 +1668,7 @@ export async function POST(req: NextRequest) {
       const nm = c2.name ? ", " + c2.name : "";
       let nextQ: string; let step: number;
       if (!c2.mileage) { nextQ = "What's the mileage on it?"; step = 4; }
-      else if (!c2.loan) { nextQ = "Is there any outstanding mortgage on the car?"; step = 5; }
+      else if (!c2.loan && parseInt(String(c2.year), 10) >= 2020) { nextQ = "Is there any outstanding mortgage on the car?"; step = 5; }
       else if (!tl) { nextQ = "When are you planning to sell the car?"; step = 6; }
       else { nextQ = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?"; step = FINAL_STEP; }
       void nm;
@@ -1857,6 +1885,7 @@ export async function POST(req: NextRequest) {
       ...coreUpdates,
       ...vehicleUpdates,
       image_shared: mediaInBurst || isImageMessage || undefined,
+      whatsapp_uae:     isUAE,
       sell_timeline:    sellTimeline,
       sell_urgent:      sellUrgent,
       dubai_hour:       getDubaiHour(),
@@ -2033,6 +2062,10 @@ export async function POST(req: NextRequest) {
     if (appointmentConfirmedEarly) {
       if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
+      // Marc: name and number only AFTER the booking — name if we don't have it, number only for non-UAE WhatsApp
+      const nameNow = (coreUpdates as any).name ?? conversation.name;
+      const after = !nameNow ? POST_NAME_Q : !isUAE ? POST_PHONE_Q : null;
+      if (after) { await sendWhatsAppMessage(phone, after); reply = `${reply}\n[SPLIT]\n${after}`; }
     }
 
     if (action?.type === "OFFER_CALLBACK") {
