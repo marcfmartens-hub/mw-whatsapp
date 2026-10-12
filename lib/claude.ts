@@ -183,7 +183,7 @@ const CLOSING_INSTRUCTION =
 - If the customer asks a question (documents, Mulkiya, location, payment, loan settlement, how long it takes), answer it briefly using the knowledge base.
 - If they just answered "Which UAE number is best to reach you on?", thank them and confirm the team will contact them [Team contact timing]. Don't ask for a visit time unless they ask to come in.
 - Otherwise warmly confirm everything is set and the team will be in touch.
-- Closing: "Have a nice day!" (after 5 PM Dubai time: "Have a nice evening!") — never "Have a good one" or other informal alternatives. If an inspection is booked for today: "See you later!"; for tomorrow: "See you tomorrow!".
+- Closing: "Have a nice day!" (after 5 PM Dubai time: "Have a nice evening!") — never "Have a good one" or other informal alternatives. If an inspection is booked for today: "See you later!"; for tomorrow: "See you tomorrow!". Never add "Have a nice day/evening" after "See you later/tomorrow/soon" — one goodbye only. Never use the customer's name in thanks or goodbyes.
 - No more questions, do not restart the flow.`;
 
 // ─── System prompt ────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createBiginContact } from "@/lib/bigin";
+import { pickDefaultTime } from "@/lib/slots";
 import { generateInquirySummary } from "@/lib/claude";
 import type { ConversationMessage } from "@/lib/claude";
 
@@ -82,9 +83,9 @@ export async function GET(req: NextRequest) {
       }).catch(() => "");
 
       // A day was agreed but no time → book 12:15 PM by default (Marc)
-      if (conv.appointment_date && !conv.appointment_time) {
-        conv.appointment_time = "12:15";
-        await supabase.from(TABLE).update({ appointment_time: "12:15" }).eq("phone", conv.phone);
+      if (conv.appointment_date && !conv.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(String(conv.appointment_date))) {
+        conv.appointment_time = await pickDefaultTime(String(conv.appointment_date), conv.phone);
+        await supabase.from(TABLE).update({ appointment_time: conv.appointment_time }).eq("phone", conv.phone);
       }
       const ok = await createBiginContact({
         ...conv,

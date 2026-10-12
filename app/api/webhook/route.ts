@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
+import { pickDefaultTime } from "@/lib/slots";
 import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/lib/meta";
 import { createBiginContact, createChangeTask, toIsoDate, toTime24 } from "@/lib/bigin";
@@ -108,7 +109,7 @@ const CAR_WORDS = new Set<string>([
   ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
   "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
 ].map(w => String(w).toLowerCase()));
-const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test)$/i;
+const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test|full|fully|automatic|aromatic|automatik|auto|manual|gear|petrol|diesel|hybrid|electric|korean|japanese|chinese|american|german|european|canadian|spec|specs|model|runs|running|mileage|kilometers|kilometres|lakh|lakhs|accident|paint|original|clean|scrap|expired|mulkia|mulkiya|warranty|service|fines|registered)$/i;
 
 function looksLikeName(candidate: string, explicit = false): boolean {
   const words = candidate.trim().split(/\s+/);
@@ -1077,6 +1078,13 @@ export async function POST(req: NextRequest) {
       if (UNSURE_SPECS.test(messageText) && vehicleUpdates.specs === "Non-GCC" && !/\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b.{0,10}\b(spec|import)/i.test(messageText)) {
         vehicleUpdates.specs = /\bprobably\s+gcc\b|\bdealer\b.{0,20}\b(dubai|uae|abu dhabi|sharjah)\b|\b(bought|purchased)\b.{0,20}\b(in|from)\s+(dubai|the uae|uae)\b/i.test(messageText) ? "GCC" : "Unknown";
       }
+      // Indian/Pakistani counting: "3 lakh" = 300,000 km (the extractor misreads it)
+      {
+        const ml = messageText.match(/\b(\d+(?:\.\d+)?)\s*(?:lakhs?|lacs?|lakh?s?)\b/i);
+        if (ml && !alreadyKnown.mileage && !/\b(loan|bank|mortgage|price|aed|dhs|dirham|offer)\b/i.test(messageText)) {
+          vehicleUpdates.mileage = String(Math.round(parseFloat(ml[1]) * 100000));
+        }
+      }
       if (!alreadyKnown.mileage && !vehicleUpdates.mileage) {
         const mk = messageText.match(/\b(\d+(?:\.\d+)?)\s*k\s*(?:km|kms|kilomet\w*)?\b/i);
         const mf = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s*(?:km|kms|kilomet\w*)\b/i);
@@ -1198,6 +1206,7 @@ export async function POST(req: NextRequest) {
 
     let apptDate = conversation.appointment_date ?? "";
     let apptTime = conversation.appointment_time ?? "";
+    let defaultedTime = false; // time picked by us (day given without a time)
     let altPhone: string | undefined;
 
     // Customer explicitly asks to book — from this message or earlier in the chat
@@ -1313,8 +1322,13 @@ export async function POST(req: NextRequest) {
           }
         }
         // Day without a time ("On 16th or 17th I can come") → book 12:15 PM by default (Marc)
+        // …or 1:15 / 2:15 PM etc. when that time is already taken (Marc)
+        // "in the afternoon" / "morning" without a clock time → a free slot in that part of the day
+        const dayPart = (messageText.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase()) as "morning" | "afternoon" | "evening" | undefined;
+        if (apptTime && !toTime24(apptTime) && /\b(morning|afternoon|evening|noon)\b/i.test(apptTime)) { apptTime = ""; ea.appointment_time = undefined as any; }
         if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) {
-          apptTime = "12:15"; ea.appointment_time = "12:15";
+          apptTime = await pickDefaultTime(apptDate, phone, dayPart); ea.appointment_time = apptTime;
+          defaultedTime = true;
         }
         // Time without a day ("5pm" in reply to "What time can you come in this afternoon?") → infer the
         // day from Kaya's question, so the booking never ends up with a time but no date.
@@ -1475,6 +1489,21 @@ export async function POST(req: NextRequest) {
       const upd: Record<string, unknown> = { last_msg_id: message.id, last_message_at: new Date().toISOString() };
       let nextQ: string | null = null;
       let nm = conversation.name;
+      // A question instead of the answer ("Are there charges for inspection?") → answer it first,
+      // then ask the same question again (Marc: never skip the customer's question)
+      const pendingQ = lastAssistantMsg.endsWith(POST_NAME_Q) ? POST_NAME_Q : POST_PHONE_Q;
+      if (/\?\s*$|\b(how|what|where|why|when|is there|are there|do you|do i|can i|will you)\b/i.test(messageText) && !/\d{7,}/.test(messageText.replace(/\D/g, ""))) {
+        const FEES = /\b(charge|charges|fee|fees|cost|pay|commission|free)\b/i;
+        let answer = FEES.test(messageText)
+          ? "There's no commission and no fees. The quick inspection is free."
+          : await getKayaReply(CLOSING_STEP, hist0, messageText, { name: conversation.name ?? undefined, appointment_date: conversation.appointment_date ?? undefined, appointment_time: conversation.appointment_time ?? undefined } as any).catch(() => "");
+        answer = answer.replace(/\s*(Have a nice (day|evening)|See you (later|tomorrow|soon))[^!]*!/gi, "").trim();
+        const parts = [answer, pendingQ].filter(Boolean);
+        for (const p of parts) await sendWhatsAppMessage(phone, p);
+        await updateConversation(phone, upd as any).catch(() => {});
+        await appendHistory(phone, hist0, messageText, parts.join("\n[SPLIT]\n"));
+        return NextResponse.json({ status: "post_booking_question" }, { status: 200 });
+      }
       if (lastAssistantMsg.endsWith(POST_NAME_Q)) {
         const n = extractNameFromMessage(messageText) ?? (/^[A-Za-z]{2,15}(\s+[A-Za-z]{2,15})?$/.test(messageText.trim()) ? nameCase(messageText.trim()) : null);
         if (n) { upd.name = n; nm = n; }
@@ -1611,10 +1640,13 @@ export async function POST(req: NextRequest) {
       const shouting = !carInfoInMsg && wroteNormallyBefore && capsRatio(messageText) >= 0.7 && /!/.test(messageText);
       const FRUSTRATION_PHRASES = /(!!+|\?\?+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
       const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
+      const lastA0 = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
       const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
         || (PRICE_WORDS.test(messageText) && priorPriceAsks >= 3); // 1st ask: short reply, 2nd: process explanation, 3rd: team
       const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP
-        && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText) || frustrated);
+        && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText) || frustrated
+          // reply to the 5-minute nudge ("…or if you need a call back from our team") asking for a call
+          || (lastA0.includes("need a call back from our team") && /\b(call|callback|ring|phone me)\b/i.test(messageText)));
       if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
         const vDb = vehicleDbFields(vehicleUpdates);
         const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
@@ -1955,6 +1987,19 @@ export async function POST(req: NextRequest) {
         : getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "";
       if (follow) reply = `${reply} ${follow}`;
     }
+    // Price asked while we're settling the day/time (Marc): fixed reassurance, then a choice of DAY —
+    // never pressure for a time today. 3rd ask goes to the team (handled above).
+    if (currentStep >= 6 && !jumpToBooking && PRICE_PUSH.test(messageText) && pricePushCount <= 1
+        && !/\b(inspection|fee|fees|charge|charges|commission|cost)\b/i.test(messageText)) {
+      const PRICE_1 = "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately.";
+      const PRICE_2 = "I understand. Every car is different, so we can only give an accurate price once we've seen it. The inspection is free, takes 10–15 minutes, and there's no obligation to sell.";
+      const saidUrgent = [...history.filter(m => m.role === "user").map(m => m.content), messageText]
+        .some(t => /\b(today|now|right now|asap|a\.s\.a\.p|immediately|urgent(ly)?|tomorrow|tmrw)\b/i.test(t));
+      const dayQ = pricePushCount === 0
+        ? (saidUrgent ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "Which day works for you?") : "Which day this week works for you?")
+        : "Which day would be good for you?";
+      reply = `${pricePushCount === 0 ? PRICE_1 : PRICE_2}\n[SPLIT]\n${dayQ}`;
+    }
     if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/not able to open|unable to open|can'?t open photos/i.test(reply)) {
       reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can only use the text you sent. ${reply}`;
     } else if (linkInMsg && currentStep <= 4 && /\?/.test(reply) && !/unable to open|not able to open/i.test(reply)) {
@@ -2040,6 +2085,7 @@ export async function POST(req: NextRequest) {
         replyParts = [...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
+      if (defaultedTime) replyParts[replyParts.length - 1] += "\n\nIf another time suits you better, just let me know.";
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     // Loan on the car → reassure first, then the next question as its own message (Marc)
@@ -2069,8 +2115,18 @@ export async function POST(req: NextRequest) {
       const lastSent = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
       const nz = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
       if (lastSent && replyParts.length === 1 && nz(replyParts[0]) === nz(lastSent)) {
-        console.warn("[kaya] identical reply to the previous one — not repeated");
-        replyParts = [];
+        // Never send the same question word for word (Marc) — check what they meant instead
+        if (/\?\s*$/.test(lastSent)) {
+          console.warn("[kaya] identical question to the previous one — rephrased");
+          const q = lastSent.replace(/^(great|alright|got it|thanks|okay|ok|nice)[!.,]?\s*/i, "");
+          replyParts = [/mileage/i.test(q)
+            ? "Sorry, I didn't catch the mileage. Roughly how many km has the car done? For example 120,000 km."
+            : `Sorry, I didn't quite catch that. ${q}`];
+          if (history.some(m => m.role === "assistant" && m.content === replyParts[0])) replyParts = [];
+        } else {
+          console.warn("[kaya] identical reply to the previous one — not repeated");
+          replyParts = [];
+        }
       }
     }
     // No "Perfect, Razi - Monday … 3:00 PM" twice in a row
@@ -2125,7 +2181,7 @@ export async function POST(req: NextRequest) {
       if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       // Marc: name and number only AFTER the booking — name if we don't have it, number only for non-UAE WhatsApp
-      const nameNow = (coreUpdates as any).name ?? conversation.name;
+      const nameNow = (coreUpdates as any).name ?? conversation.name ?? nameFromHistory([...history, { role: "user", content: messageText }]);
       const after = !nameNow ? POST_NAME_Q : !isUAE ? POST_PHONE_Q : null;
       if (after) { await sendWhatsAppMessage(phone, after); reply = `${reply}\n[SPLIT]\n${after}`; }
     }

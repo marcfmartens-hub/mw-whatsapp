@@ -48,6 +48,15 @@ export async function sendWhatsAppMessage(to: string, body: string): Promise<voi
   }
   // After 5 PM Dubai time: "Have a nice evening" instead of "Have a nice day"
   if (new Date(Date.now() + 4 * 3600e3).getUTCHours() >= 17) body = body.replace(/Have a nice day/g, "Have a nice evening");
+  // The name is used once only (Marc) — never in thanks / goodbyes ("You're welcome, Marcio!")
+  body = body.replace(/\b(You'?re welcome|Thanks|Thank you|See you (?:later|soon|tomorrow)|Have a nice (?:day|evening))(?:,?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?=\s*[!.,])/g, "$1");
+  // "See you later/soon/tomorrow" already says goodbye — no "have a nice day/evening" on top (Marc)
+  if (/\bSee you (later|soon|tomorrow)\b/i.test(body)) {
+    body = body
+      .replace(/,?\s*and\s+have a nice (day|evening)/gi, "")
+      .replace(/\s*Have a nice (day|evening)[^!.]*[!.]/gi, "")
+      .trim();
+  }
   const log = simLog(to); if (log) { log.push(body); return; }
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   const accessToken = process.env.META_ACCESS_TOKEN;
