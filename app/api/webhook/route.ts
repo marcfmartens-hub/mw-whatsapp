@@ -435,7 +435,7 @@ function appointmentConfirmedEarlyGuard(_d: string, _t: string): boolean { retur
 // The booking question Kaya asked last ("What time can you come in this afternoon?") — to pick up where
 // we left off after a side question (location, price), instead of starting a new "which day" question
 function pendingBookingQ(lastAssistant: string): string | null {
-  const qs = lastAssistant.split(/\n+|(?<=[.!])\s+/).map(x => x.trim()).filter(x => /\?\s*$/.test(x));
+  const qs = lastAssistant.split(/\n+|\[SPLIT\]|(?<=[.!?])\s+/).map(x => x.trim()).filter(x => /\?\s*$/.test(x));
   const q = [...qs].reverse().find(x => /\b(shall i book you|what time|which day|which time|when would you like to (come|bring)|would .+ or .+ work)\b/i.test(x));
   return q ?? null;
 }
