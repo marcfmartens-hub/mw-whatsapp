@@ -432,6 +432,14 @@ function getBookingSlot(): string {
 // today Friday → Saturday only · today Saturday → open again Monday · otherwise Friday or Saturday
 function appointmentConfirmedEarlyGuard(_d: string, _t: string): boolean { return false; }
 
+// The booking question Kaya asked last ("What time can you come in this afternoon?") — to pick up where
+// we left off after a side question (location, price), instead of starting a new "which day" question
+function pendingBookingQ(lastAssistant: string): string | null {
+  const qs = lastAssistant.split(/\n+|(?<=[.!])\s+/).map(x => x.trim()).filter(x => /\?\s*$/.test(x));
+  const q = [...qs].reverse().find(x => /\b(what time|which day|which time|when would you like to (come|bring)|would .+ or .+ work)\b/i.test(x));
+  return q ?? null;
+}
+
 function sundayText(): string {
   const dow = new Date(Date.now() + 4 * 3600e3).getUTCDay();
   if (dow === 5) return "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM. Would Saturday work for you?";
@@ -638,9 +646,10 @@ export async function POST(req: NextRequest) {
       const bookedAlready = !!(convForLocation.appointment_date && convForLocation.appointment_time);
       if ((convForLocation.step ?? 0) >= FINAL_STEP - 1 && !bookedAlready) {
         // Location only → ask the DAY (Marc); "send location, I'll come today" → today's time question
+        const lastA = [...((((convForLocation as any).messages ?? []) as ConversationMessage[]))].reverse().find(m => m.role === "assistant")?.content ?? "";
         const q = /\b(today|now|right now|asap)\b/i.test(messageText)
           ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in today?")
-          : "Which day would you like to come?";
+          : (pendingBookingQ(lastA) ?? "Which day would you like to come?");
         await sendWhatsAppMessage(phone, q);
         const prev = String((convForLocation as any).car_conditions ?? "");
         const hist = ((convForLocation as any).messages ?? []) as ConversationMessage[];
@@ -1056,6 +1065,7 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, { name: conversation.name } as any).catch(() => {});
     }
 
+    let askOrigin = false;     // customer doesn't know what GCC means → ask where the car was bought
     const alreadyKnown: VehicleFields = {
       make:    (conversation.make    && conversation.make    !== "Unknown") ? conversation.make    : undefined,
       model:   (conversation.model   && conversation.model   !== "Unknown") ? conversation.model   : undefined,
@@ -1119,6 +1129,15 @@ export async function POST(req: NextRequest) {
       else if (/\b(it'?s|is)\s+gcc\b|\bgcc\s+not\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
     }
 
+    // Answer to "Did you buy the car here in the UAE, or was it imported from another country?" → country decides the specs (Malaysia, Japan, USA… = non-GCC)
+    {
+      const lastQo = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+      if (lastQo.includes("imported from another country") && !alreadyKnown.specs) {
+        if (/\b(malays\w*|malesi\w*|japan\w*|usa|us|america\w*|canad\w*|korea\w*|china|chinese|europe\w*|german\w*|uk|england|singapore|thailand|australia|import\w*|outside|abroad)\b/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+        else if (/\b(uae|dubai|abu dhabi|sharjah|ajman|here|local|saudi|ksa|oman|qatar|kuwait|bahrain|gcc|agency|dealer|showroom)\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
+        else vehicleUpdates.specs = "Unknown";
+      }
+    }
     // Deterministic backup for specs + mileage — never re-ask something the customer already said
     if (currentStep >= 1 && currentStep <= 4) {
       const NON_GCC = /\bnon[\s-]?gcc\b|\b(not|no|isn'?t|is not)\s+(a\s+)?gcc\b|\b(american|us|usa|japanese|japan|canadian|canada|european|korean)\s*(spec|specs|import|imported|version)\b|\bimport(ed)?\s+from\s+(the\s+)?(us|usa|america|canada|japan|korea|europe)\b/i;
@@ -1132,9 +1151,12 @@ export async function POST(req: NextRequest) {
       // Answer to "GCC specs, right?" → yes = GCC, no = non-GCC
       {
         const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
-        if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
+        if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")
+            && /\b(don'?t|do not|didn'?t)\s+(understand|know what)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b|^\s*\?+\s*$|\bwhat\?\s*$/i.test(messageText)) {
+          askOrigin = true;
+        } else if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
           if (/\b(not sure|no idea|don'?t know|idk)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
-          else if (/^\s*(no|nope|nah|not)\b|\bnon[\s-]?gcc\b|\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b|\bimport/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
+          else if (/^\s*(no|nope|nah|not)\b|\bnon[\s-]?gcc\b|\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*|malays\w*|malesi\w*|china|chinese|singapore|thailand|germany|uk|australia)\b|\bimport/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
           else vehicleUpdates.specs = "GCC"; // "yes", "Ys", "ya", "👍", "gcc" … — never ask the same question twice
         }
       }
@@ -1273,7 +1295,7 @@ export async function POST(req: NextRequest) {
     let apptTime = conversation.appointment_time ?? "";
     let defaultedTime = false; // time picked by us (day given without a time)
     let apptFromMsg = false;   // this message gave a day and/or time
-    let negatedDay = false;    // "today not possible" — the customer said which day does NOT work
+    let negatedDay = false;
     let altPhone: string | undefined;
 
     // Customer explicitly asks to book — from this message or earlier in the chat
@@ -1579,6 +1601,23 @@ export async function POST(req: NextRequest) {
           await updateConversation(phone, apptSave);
       } catch (e) {
         console.error("early appointment extraction error:", e);
+      }
+      // "Shall I book you for Thursday 15th…?" → "after 3 PM" / "4pm" / "afternoon" keeps THAT day
+      {
+        const offerDay = lastAssistantMsg.match(/Shall I book you for \w+ (\d{1,2})(?:st|nd|rd|th) of (\w+) at/i);
+        const dayHere = new RegExp(`\\b${DAY}\\b`, "i").test(messageText);
+        if (offerDay && !dayHere) {
+          const d = toIsoDate(`${offerDay[1]} ${offerDay[2]}`);
+          if (d) {
+            apptDate = d;
+            let t: string | null = null;
+            const after = messageText.match(/\bafter\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+            if (after) { let h = +after[1]; if (!after[3] && h >= 1 && h <= 7) h += 12; else if (after[3]?.toLowerCase() === "pm" && h < 12) h += 12; t = `${String(h).padStart(2, "0")}:15`; }
+            else { const t24 = toTime24(String(messageText.match(/\b\d{1,2}(:\d{2})?\s*(am|pm)\b/i)?.[0] ?? "")); if (t24) t = t24; }
+            if (!t && /\b(morning|afternoon|evening)\b/i.test(messageText)) t = await pickDefaultTime(d, phone, messageText.match(/\b(morning|afternoon|evening)\b/i)![1].toLowerCase() as any);
+            if (t) { apptTime = t; apptFromMsg = true; defaultedTime = false; await updateConversation(phone, { appointment_date: d, appointment_time: t } as any).catch(() => {}); }
+          }
+        }
       }
       // "Shall I book you for Saturday 17th of October at 12:15 PM?" → "yes" books exactly that
       {
@@ -2260,14 +2299,16 @@ export async function POST(req: NextRequest) {
       const PRICE_2 = "I understand. Every car is different, so we can only give an accurate price once we've seen it. The inspection is free, takes 10–15 minutes, and there's no obligation to sell.";
       const saidUrgent = [...history.filter(m => m.role === "user").map(m => m.content), messageText]
         .some(t => /\b(today|now|right now|asap|a\.s\.a\.p|immediately|urgent(ly)?|tomorrow|tmrw)\b/i.test(t));
-      const dayQ = pricePushCount === 0
+      const pend = pendingBookingQ(lastAssistantMsg);
+      const dayQ = pend ?? (pricePushCount === 0
         ? (saidUrgent ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "Which day works for you?") : "Which day this week works for you?")
-        : "Which day would be good for you?";
+        : "Which day would be good for you?");
       reply = `${pricePushCount === 0 ? PRICE_1 : PRICE_2}\n[SPLIT]\n${dayQ}`;
     }
     if (negatedDay && currentStep >= 5 && currentStep < CLOSING_STEP && !appointmentConfirmedEarlyGuard(apptDate, apptTime)) {
       reply = "No problem. Which day works better for you?";
     }
+    if (askOrigin) reply = "No problem. GCC specs means the car was made for the Gulf market. Did you buy the car here in the UAE, or was it imported from another country?";
     // Sunday (closed) → mention Saturday and Friday, never book a Sunday (Marc)
     if (/\bsun(day)?\b/i.test(messageText) && currentStep >= 5 && currentStep < CLOSING_STEP && action?.type !== "OFFER_CALLBACK") {
       const dIsoS = String(apptDate || "");
@@ -2384,7 +2425,7 @@ export async function POST(req: NextRequest) {
     }
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
     // Marc: no cash/consignment question — after "when do you want to sell?" always go to the appointment
-    if (currentStep === 6 && !action && !timing && !/\?/.test(messageText)) {
+    if (currentStep === 6 && !action && !timing && !askOrigin && !lastAssistantMsg.includes("imported from another country") && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
       void nm;
@@ -2620,7 +2661,8 @@ export async function POST(req: NextRequest) {
       && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
     const promisedCallback = !appointmentConfirmed && currentStep >= 5 &&
       /\b(team|someone)\b[^.]{0,60}\b(be in touch|reach out|call you|contact you|get back to you)/i.test(reply);
-    const nextStep = promisedCallback ? CLOSING_STEP
+    const nextStep = askOrigin ? currentStep
+      : promisedCallback ? CLOSING_STEP
       : currentStep >= CLOSING_STEP ? (isRebook && !appointmentConfirmed ? FINAL_STEP : CLOSING_STEP)
       : (jumpToBooking && appointmentConfirmed) ? CLOSING_STEP
       : stayAtStep1        ? 1
