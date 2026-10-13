@@ -2119,12 +2119,15 @@ export async function POST(req: NextRequest) {
       const parts: string[] = [];
       const saidTeamWillDiscuss = hist.some(m => m.role === "assistant" && /purchasing team will discuss|team will answer/i.test(m.content));
       if (ngQuestion && !saidTeamWillDiscuss) parts.push("That's something our team will discuss with you directly.");
-      if (firstTime) parts.push(`Thanks for letting me know. We don't buy every non-GCC car, so I'll have our team contact you${nextQ ? "." : " " + teamWhen() + "."}${nextQ ? " " + nextQ : ""}`);
+      if (firstTime && nextQ) parts.push(`Thanks for letting me know. We don't buy every non-GCC car, so I'll have our team contact you. ${nextQ}`);
       else if (nextQ) parts.push(nextQ);
       // Marc (13 Oct): once the details are in, continue straight to booking the inspection
-      const goBooking = !nextQ && !firstTime;
+      // (also when all details were already given before we learned it's non-GCC)
+      const goBooking = !nextQ;
       if (goBooking) {
-        parts.push("Thanks, I've got all the details. Our team will review them, and you're welcome to bring the car in for a quick inspection. When would you like to come?");
+        parts.push(firstTime
+          ? "Thanks for letting me know. We don't buy every non-GCC car, but you're welcome to bring it in for a quick inspection so our team can check it. When would you like to come?"
+          : "Thanks, I've got all the details. Our team will review them, and you're welcome to bring the car in for a quick inspection. When would you like to come?");
         const prevN = String(c.car_conditions ?? "");
         updates.car_conditions = prevN ? `${prevN} | Non-GCC: booking offered` : "Non-GCC: booking offered";
         updates.step = 6;
