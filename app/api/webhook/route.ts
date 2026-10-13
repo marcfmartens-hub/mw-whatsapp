@@ -1142,7 +1142,11 @@ export async function POST(req: NextRequest) {
     if (currentStep >= 1 && currentStep <= 4) {
       const NON_GCC = /\bnon[\s-]?gcc\b|\b(not|no|isn'?t|is not)\s+(a\s+)?gcc\b|\b(american|us|usa|japanese|japan|canadian|canada|european|korean)\s*(spec|specs|import|imported|version)\b|\bimport(ed)?\s+from\s+(the\s+)?(us|usa|america|canada|japan|korea|europe)\b/i;
       const IN_MILES = /\d\s*k?\s*miles?\b/i.test(messageText);
-      if (!alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
+      // "I don't understand what GCC specs" mentions GCC but is not an answer
+      const GCC_CONFUSED = /\b(don'?t|do not|didn'?t|dont)\s+(understand|know what|get)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b|^\s*\?+\s*$|\bwhat\?\s*$/i.test(messageText);
+      if (GCC_CONFUSED && !alreadyKnown.specs) delete (vehicleUpdates as any).specs;
+      if (GCC_CONFUSED) { /* not an answer */ }
+      else if (!alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
         if (NON_GCC.test(messageText) || IN_MILES) vehicleUpdates.specs = "Non-GCC";
         else if (/\bgcc\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
       } else if (vehicleUpdates.specs === "GCC" && NON_GCC.test(messageText)) {
@@ -1151,10 +1155,10 @@ export async function POST(req: NextRequest) {
       // Answer to "GCC specs, right?" → yes = GCC, no = non-GCC
       {
         const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
-        if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")
-            && /\b(don'?t|do not|didn'?t)\s+(understand|know what)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b|^\s*\?+\s*$|\bwhat\?\s*$/i.test(messageText)) {
+        const askedGcc = /\bGCC\b[^?]{0,40}\?/i.test(lastQ);
+        if ((askedGcc || /\bgcc\b/i.test(messageText)) && !alreadyKnown.specs && GCC_CONFUSED) {
           askOrigin = true;
-        } else if (/GCC specs, right\?/i.test(lastQ) && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
+        } else if (askedGcc && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
           if (/\b(not sure|no idea|don'?t know|idk)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
           else if (/^\s*(no|nope|nah|not)\b|\bnon[\s-]?gcc\b|\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*|malays\w*|malesi\w*|china|chinese|singapore|thailand|germany|uk|australia)\b|\bimport/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
           else vehicleUpdates.specs = "GCC"; // "yes", "Ys", "ya", "👍", "gcc" … — never ask the same question twice
