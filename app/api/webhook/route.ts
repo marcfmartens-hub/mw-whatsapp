@@ -436,7 +436,7 @@ function appointmentConfirmedEarlyGuard(_d: string, _t: string): boolean { retur
 // we left off after a side question (location, price), instead of starting a new "which day" question
 function pendingBookingQ(lastAssistant: string): string | null {
   const qs = lastAssistant.split(/\n+|(?<=[.!])\s+/).map(x => x.trim()).filter(x => /\?\s*$/.test(x));
-  const q = [...qs].reverse().find(x => /\b(what time|which day|which time|when would you like to (come|bring)|would .+ or .+ work)\b/i.test(x));
+  const q = [...qs].reverse().find(x => /\b(shall i book you|what time|which day|which time|when would you like to (come|bring)|would .+ or .+ work)\b/i.test(x));
   return q ?? null;
 }
 
@@ -2513,6 +2513,16 @@ export async function POST(req: NextRequest) {
       }
     }
     console.log(`[kaya] step=${currentStep} action=${action?.type ?? "-"} jump=${jumpToBooking} appt=${apptDate}|${apptTime} confirmed=${appointmentConfirmedEarly}`);
+    // "Hello" in the middle of the chat → just repeat the open question (e.g. the "Shall I book you…" offer)
+    if (currentStep >= 5 && currentStep < CLOSING_STEP && /^\s*(hello|hi|hey|hii+|helo|hlo|salam|assalam\w*|hello\?+|\?+)\W*$/i.test(messageText)) {
+      const pend = pendingBookingQ(lastAssistantMsg);
+      if (pend) reply = pend;
+    }
+    // Starting with "Nice," every time sounds robotic — once per chat is enough
+    if (/^Nice[,!.]?\s+/i.test(reply) && history.some(m => m.role === "assistant" && /(^|\n)Nice\b/i.test(m.content))) {
+      reply = reply.replace(/^Nice[,!.]?\s+/i, "");
+      reply = reply.charAt(0).toUpperCase() + reply.slice(1);
+    }
     let replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
     if (appointmentConfirmedEarly) {
       // Fixed confirmation format (car summary from Kaya stays as the first message, if she sent one)
