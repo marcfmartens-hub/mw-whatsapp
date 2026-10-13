@@ -1257,7 +1257,9 @@ export async function POST(req: NextRequest) {
         || priorUserMsgs.some(t => isBookingMsg(t) && !aboutCall(t) && !HOME_VISIT_PATTERN.test(t) && !/\bhome\s*(inspection|service|check)\b/i.test(t)));
 
     // ── After booking: cancel or reschedule ───────────────────────────
-    const hasBooking = !!(conversation.appointment_date || conversation.appointment_time);
+    // Only a booking Kaya actually confirmed counts (a day saved while chatting is not a booking to change/cancel)
+    const hasBooking = !!(conversation.appointment_date && conversation.appointment_time)
+      && ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content));
     const CANCEL = /\b(cancel|already sold|sold it|sold the car|don'?t need (it|the appointment)|not coming|won'?t (be )?com\w*|can'?t (make it|come)|call (it )?off)\b/i;
     const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can we make it|make it)\b/i;
     const lastAssistantMsg = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
