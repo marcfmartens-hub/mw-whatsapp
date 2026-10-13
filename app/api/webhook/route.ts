@@ -71,6 +71,7 @@ const HANDOFF_SIGNALS = /\b(too many questions|call me(?=\s*(back|later|please|p
 // Special inquiry types
 const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
 const TRADE_IN_PATTERN    = /\b(trade[\s-]?in|trade\s*my|swap|exchange|part[\s-]?exchange|replace\s*(my|the)|get\s*(a\s*)?new\s*car|upgrade\s*(my|the)|in\s*exchange\s*for)\b/i;
+const DEFER_PATTERN = /\b(let (u|you) know|(will|i'?ll|i will) (inform|tell|update|confirm|revert|message|text|call)( (u|you))?|get back to (u|you)|i'?ll (check|think|see|decide)|will (check|think|decide)|think about it|not sure yet|let me (check|think|see))\b/i;
 const PRICE_OFFER_PATTERN = /\b(how\s*much|price|offer|estimate|valuation|value|worth|what\s*(will\s*you\s*pay|do\s*you\s*give|can\s*i\s*get)|give\s*me\s*(a\s*)?(price|number|figure|quote))\b/i;
 
 // Ownership detection
@@ -1044,6 +1045,12 @@ export async function POST(req: NextRequest) {
     const CORRECTION = /\b(sorry|actually|correction|correct (one|is)|i mean|i meant|my mistake|mistake|wrong|typo|instead|not\s+\d)/i;
     const isCorrection = CORRECTION.test(messageText);
     if (alreadyKnown.mileage && vehicleUpdates.mileage && !isCorrection) delete vehicleUpdates.mileage;
+    // Make / model / year are never overwritten by later messages ("Still under service contract" became
+    // model "Still") — only when the customer corrects them
+    if (alreadyKnown.make  && vehicleUpdates.make  && !isCorrection) delete vehicleUpdates.make;
+    if (alreadyKnown.model && vehicleUpdates.model && !isCorrection) delete vehicleUpdates.model;
+    if (alreadyKnown.year  && vehicleUpdates.year  && !isCorrection) delete vehicleUpdates.year;
+    if (vehicleUpdates.model && /^(still|under|new|brand|first|owner|service|contract|warranty|car|full|option|scratch\w*|scract\w*|clean|recently|only|complete|ppf|the|my|it|is|no|yes|ok|okay)$/i.test(String(vehicleUpdates.model).trim())) delete vehicleUpdates.model;
     if (alreadyKnown.specs   && vehicleUpdates.specs   && !isCorrection) delete vehicleUpdates.specs;
     if (isCorrection) {
       // "the mileage is 45k not 25k" → the first figure is the new one
@@ -1296,7 +1303,8 @@ export async function POST(req: NextRequest) {
     }
     const isRebook = bookFromClosed;
 
-    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText) {
+    const deferring = DEFER_PATTERN.test(messageText) && !/\b(\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\b/i.test(messageText);
+    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring) {
       try {
         const ea = await extractAppointment(messageText);
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
@@ -1938,7 +1946,15 @@ export async function POST(req: NextRequest) {
 
     // If customer pushes on price a second time (and consignment not yet explained) → let Claude pivot to consignment
     // If customer gives up / not interested after consignment was explained → offer callback
-    const callbackSignal = handoffSignal;
+    // Marc: asked for a price AND a home visit, and all car details are in → stop pushing for an
+    // appointment, arrange a call back from the team right away
+    const HOME_VISIT = /\bhome\s*(visit|inspection|service|check|pick\s*up)|\b(come|visit)\s+(to\s+)?(my|me|our)\b|\bat my (house|home|place|location|villa|apartment|office)\b|\bpick\s*(it\s*)?up\b|\bdoorstep\b/i;
+    const allUserText = [...history.filter(m => m.role === "user").map(m => m.content), messageText];
+    const carComplete = !!((vehicleUpdates.make ?? conversation.make) && (vehicleUpdates.model ?? conversation.model) && (vehicleUpdates.year ?? conversation.year)
+      && (vehicleUpdates.mileage ?? conversation.mileage) && (vehicleUpdates.specs ?? conversation.specs));
+    const priceAndHome = carComplete && allUserText.some(t => PRICE_PUSH.test(t)) && allUserText.some(t => HOME_VISIT.test(t))
+      && !(conversation.appointment_date && conversation.appointment_time);
+    const callbackSignal = handoffSignal || priceAndHome;
     if (!action && currentStep >= 5 && currentStep < CLOSING_STEP && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
     }
@@ -1996,7 +2012,7 @@ export async function POST(req: NextRequest) {
     }
     // Price asked while we're settling the day/time (Marc): fixed reassurance, then a choice of DAY —
     // never pressure for a time today. 3rd ask goes to the team (handled above).
-    if (currentStep >= 6 && !jumpToBooking && !apptFromMsg && PRICE_PUSH.test(messageText) && pricePushCount <= 1
+    if (currentStep >= 5 && currentStep < CLOSING_STEP && !action && !apptFromMsg && PRICE_PUSH.test(messageText) && pricePushCount <= 1
         && !/\b(inspection|fee|fees|charge|charges|commission|cost)\b/i.test(messageText)) {
       const PRICE_1 = "Ok, I understand. We give you our final price right after a quick inspection of the car. When we agree, we'll buy the car cash immediately.";
       const PRICE_2 = "I understand. Every car is different, so we can only give an accurate price once we've seen it. The inspection is free, takes 10–15 minutes, and there's no obligation to sell.";
@@ -2006,6 +2022,10 @@ export async function POST(req: NextRequest) {
         ? (saidUrgent ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "Which day works for you?") : "Which day this week works for you?")
         : "Which day would be good for you?";
       reply = `${pricePushCount === 0 ? PRICE_1 : PRICE_2}\n[SPLIT]\n${dayQ}`;
+    }
+    // Putting it off ("ok i let u know tomorrow") is not a booking — never push, just leave the door open
+    if (deferring && currentStep >= 5 && currentStep < CLOSING_STEP && !action && !(conversation.appointment_date && conversation.appointment_time)) {
+      reply = "No problem, just let me know the day and time that suits you.";
     }
     if (mediaInBurst && currentStep <= 4 && /\?/.test(reply) && !/not able to open|unable to open|can'?t open photos/i.test(reply)) {
       reply = `Thanks! Unfortunately I'm not able to open photos or files, so I can only use the text you sent. ${reply}`;
@@ -2051,7 +2071,8 @@ export async function POST(req: NextRequest) {
     // The customer gave a day/time in this message and we now have a valid date + time → that IS the
     // booking, even if Kaya's text didn't read like a confirmation (stress test: "anything after 2pm"
     // was saved as 2:30 PM but Kaya said the team would call).
-    if (!appointmentConfirmedEarly && apptFromMsg && currentStep >= 6 && !(currentStep === 6 && defaultedTime) && action?.type !== "OFFER_CALLBACK") {
+    const clearIntent = !defaultedTime || messageText.trim().length <= 30 || /\b(come|coming|visit|bring|book|inspection|see you|available|free|works|ok(ay)?)\b/i.test(messageText);
+    if (!appointmentConfirmedEarly && apptFromMsg && clearIntent && !deferring && currentStep >= 6 && !(currentStep === 6 && defaultedTime) && action?.type !== "OFFER_CALLBACK") {
       const dIso = toIsoDate(String(apptDate || conversation.appointment_date || "")) ?? "";
       const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
       if (/^\d{4}-\d{2}-\d{2}$/.test(dIso) && t24) {
@@ -2076,7 +2097,9 @@ export async function POST(req: NextRequest) {
       void nm;
       // Marc: "asap / as early as possible / soon / quick…" → "No problem!" then the closed line + time question
       const SOON = /\b(when the price is (right|good)|if the price is (right|good)|depends on the price|asap|a\.s\.a\.p|as (early|soon|fast|quick)(ly)? as possible|soon|early|quick(ly)?|fast|urgent(ly)?|now|immediately|today|tomorrow|tonorrow|tmrw|this week)\b/i;
-      const weekWord = messageText.match(/\b(this|next)\s+week\b/i)?.[1]?.toLowerCase();
+      // "within 10 days" / "in a few days" / "next few days" → same answer as "this week" (Marc)
+      const SOME_DAYS = /\b(with\s*in|in|next|coming)\s+(a\s+|the\s+)?(few|couple( of)?|\d+|two|three|four|five|ten)\s+(days|weeks)\b|\bfew days\b|\bend of (the )?week\b|\bweekend\b/i;
+      const weekWord = messageText.match(/\b(this|next)\s+week\b/i)?.[1]?.toLowerCase() ?? (SOME_DAYS.test(messageText) ? "this" : undefined);
       const firstDay = /\b(today|this afternoon)\b/i.test(q) ? "today" : "tomorrow";
       reply = weekWord
         // Marc: "this week / next week" → offer the first possible day, or a day of their choice
@@ -2199,6 +2222,19 @@ export async function POST(req: NextRequest) {
       } else if (replyParts.length >= 1 && startsOpener && lastOpener && p0.toLowerCase().startsWith(lastOpener.slice(0, -1).toLowerCase())) {
         const choices = OPENERS.filter(o => o !== lastOpener);
         replyParts[0] = p0.replace(/^(great|alright|got it|thanks|thank you|nice|okay|ok)[!.,]?/i, choices[history.length % choices.length]);
+      }
+    }
+    // They said a later timeframe ("within 10 days", "next week") → never push for today; ask for a day (Marc)
+    {
+      const userT = [...history.filter(m => m.role === "user").map(m => m.content), messageText];
+      const LATER = /\b(this|next)\s+week\b|\b(with\s*in|in|next|coming)\s+(a\s+|the\s+)?(few|couple( of)?|\d+|two|three|four|five|ten)\s+(days|weeks|months?)\b|\bfew days\b|\bnext month\b|\bweekend\b/i;
+      const URGENT = /\b(today|now|right now|asap|a\.s\.a\.p|immediately|urgent(ly)?|this (afternoon|evening))\b/i;
+      if (!appointmentConfirmedEarly && userT.some(t => LATER.test(t)) && !userT.some(t => URGENT.test(t))) {
+        replyParts = replyParts.map(p => {
+          if (!/\btoday\b/i.test(p) || !/\?/.test(p) || /or else later/i.test(p)) return p;
+          const out = p.replace(/[^.!?\n]*\btoday\b[^.!?\n]*\?/gi, "").replace(/[^.!?\n]*\btoday\b[^.!?\n]*[.!]/gi, "").trim();
+          return `${out ? out + "\n\n" : ""}Which day would be good for you?`;
+        });
       }
     }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
