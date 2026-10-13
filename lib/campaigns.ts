@@ -12,8 +12,8 @@ export interface AdReferral {
 // Campaign names by ad id or by words in the headline / primary text. Give every campaign its own
 // headline (or add its ad ids here) so leads can be told apart in Bigin. First match wins.
 const CAMPAIGNS: { name: string; adIds?: string[]; match?: RegExp }[] = [
-  { name: "MW_Expats_Behaviour_English - Aviation_Finance_Senior Management", adIds: [] },
-  { name: "MW_Expats (Sell Your GCC Car in Dubai)", match: /^sell your gcc car in dubai$/i },
+  { name: "MW_Aviation_Finance_Senior Management", match: /^selling your gcc car\?\s*cash on the spot$/i },
+  { name: "MW_Expats_Behaviour_English", match: /^sell your gcc car in dubai$/i },
 ];
 
 export function campaignOf(ref: AdReferral | null | undefined): string {
