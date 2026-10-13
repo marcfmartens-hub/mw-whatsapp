@@ -111,7 +111,7 @@ const CAR_WORDS = new Set<string>([
   ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
   "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
 ].map(w => String(w).toLowerCase()));
-const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test|full|fully|automatic|aromatic|automatik|auto|manual|gear|petrol|diesel|hybrid|electric|korean|japanese|chinese|american|german|european|canadian|spec|specs|model|runs|running|mileage|kilometers|kilometres|lakh|lakhs|accident|paint|original|clean|scrap|expired|mulkia|mulkiya|warranty|service|fines|registered)$/i;
+const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test|kaya|kaia|mister|wheelz|full|fully|automatic|aromatic|automatik|auto|manual|gear|petrol|diesel|hybrid|electric|korean|japanese|chinese|american|german|european|canadian|spec|specs|model|runs|running|mileage|kilometers|kilometres|lakh|lakhs|accident|paint|original|clean|scrap|expired|mulkia|mulkiya|warranty|service|fines|registered)$/i;
 
 function looksLikeName(candidate: string, explicit = false): boolean {
   const words = candidate.trim().split(/\s+/);
@@ -1064,7 +1064,7 @@ export async function POST(req: NextRequest) {
 
     // Deterministic backup for specs + mileage — never re-ask something the customer already said
     if (currentStep >= 1 && currentStep <= 4) {
-      const NON_GCC = /\bnon[\s-]?gcc\b|\b(american|us|usa|japanese|japan|canadian|canada|european|korean)\s*(spec|specs|import|imported|version)\b|\bimport(ed)?\s+from\s+(the\s+)?(us|usa|america|canada|japan|korea|europe)\b/i;
+      const NON_GCC = /\bnon[\s-]?gcc\b|\b(not|no|isn'?t|is not)\s+(a\s+)?gcc\b|\b(american|us|usa|japanese|japan|canadian|canada|european|korean)\s*(spec|specs|import|imported|version)\b|\bimport(ed)?\s+from\s+(the\s+)?(us|usa|america|canada|japan|korea|europe)\b/i;
       const IN_MILES = /\d\s*k?\s*miles?\b/i.test(messageText);
       if (!alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
         if (NON_GCC.test(messageText) || IN_MILES) vehicleUpdates.specs = "Non-GCC";
@@ -1309,6 +1309,10 @@ export async function POST(req: NextRequest) {
         const ea = await extractAppointment(messageText);
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
         // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
+        // "In the afternoon" after "tomorrow" must not move the day back to today: without a day word
+        // (or a date) in this message, the day already agreed stays
+        const dayInMsg = new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)\\b|\\b\\d{1,2}[/.-]\\d{1,2}\\b|\\b(jan|feb|mar|apr|june?|july?|aug|sep|oct|nov|dec)[a-z]*\\b|\\bnext week\\b`, "i").test(messageText);
+        if (ea.appointment_date && conversation.appointment_date && !dayInMsg) ea.appointment_date = conversation.appointment_date;
         if (ea.appointment_date) apptDate = toIsoDate(ea.appointment_date) ?? ea.appointment_date;
         if (ea.appointment_time) {
           // Half-hour slots (10:00, 10:30 … 6:30 PM): an in-between time goes to the next slot
@@ -1341,7 +1345,8 @@ export async function POST(req: NextRequest) {
         if (ea.appointment_date || ea.appointment_time) apptFromMsg = true;
         const dayPart = (messageText.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase()) as "morning" | "afternoon" | "evening" | undefined;
         if (apptTime && !toTime24(apptTime) && /\b(morning|afternoon|evening|noon)\b/i.test(apptTime)) { apptTime = ""; ea.appointment_time = undefined as any; }
-        if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) {
+        // A question ("can I come today?") gets a time question, not a default slot
+        if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate) && !/\?/.test(messageText)) {
           apptTime = await pickDefaultTime(apptDate, phone, dayPart); ea.appointment_time = apptTime;
           defaultedTime = true;
         }
