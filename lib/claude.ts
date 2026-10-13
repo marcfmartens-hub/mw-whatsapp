@@ -666,6 +666,27 @@ The message may also contain questions — never answer them, only extract the d
   return { appointment_date: day, appointment_time: times.length ? times[times.length - 1] : "" };
 }
 
+// ─── Wants a real person? (backstop for wordings the patterns miss) ──────────
+export async function wantsHuman(text: string): Promise<boolean> {
+  try {
+    const response = await anthropic.messages.create({
+      model: EXTRACTOR_MODEL,
+      max_tokens: 10,
+      ...NO_THINKING,
+      system: `You read one WhatsApp message a customer sent to Kaya, the AI assistant of a car-buying company.
+Answer "YES" if the customer wants to talk to a real person / human / staff member instead of the bot, wants a call from the team, doesn't want to talk to a bot or AI, or asks whether they are talking to a bot in a way that shows they'd rather have a person.
+Answer "NO" for everything else (questions about the car, price, location, booking, or the customer saying THEY will call or contact later).
+Reply with only YES or NO.`,
+      messages: [{ role: "user", content: `<<<${text}>>>` }],
+    });
+    const block = response.content.find((b) => b.type === "text");
+    return block?.type === "text" && /^\s*yes/i.test(block.text);
+  } catch (e) {
+    console.error("[wantsHuman] error:", e);
+    return false;
+  }
+}
+
 // ─── Vehicle info extractor ───────────────────────────────────────────────────
 
 /**

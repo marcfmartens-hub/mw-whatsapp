@@ -105,6 +105,9 @@ const SCRIPTS: Record<string, string[]> = {
   sentra: ["Hi", "I hv Nissan ssentra", "It's American spec", "Ok", "Nissan Sentra\nModel 2025\nKm 25000\nPrice 30000\nI can sent photos", "[photo]", "[photo]", "tomorrow", "afternoon", "ok"],
   ctx1: ["Hi", "Naveed", "Toyota Corolla 2019", "90000 km gcc", "today", "Where your location.", "Yes I can bring all. Tell me what about the price going normally.", "5pm", "ok"],
   panamera: ["🚘 What is your car make, model & Year?", "Porche Panamera 2013 model", "Gcc", "190k km", "Asap", "I need money", "On 16th or 17th Oct I can come please", "Hello", "Are you buying cars for export ???", "yes"],
+  human3: ["Hi", "Ali", "BMW X5 2017", "are you a bot?", "0559876543"],
+  human4: ["Hi", "John", "Audi A6 2016 gcc 140k", "I prefer dealing with an actual human being, these automated chats confuse me", "+44 7700 900123"],
+  human5: ["Hi", "Rita", "Lexus RX 2019 gcc 80k", "you can call me Rita", "tomorrow"],
   human1: ["Hi", "Omar", "Nissan Patrol 2020 gcc 90k", "I want to speak to a real person", "0501234567", "Thanks"],
   human2: ["Hi", "Lina", "Kia Sportage 2019", "can someone call me?", "this number", "ok thanks"],
   panamera2: ["Hi", "Sam", "Toyota Camry 2018 gcc 120k", "this week", "Friday or Saturday", "Do you resell the cars to other people?", "Ask anyone to contact me", "I want to speak human representative before I visit ?", "Thanks"],
@@ -124,7 +127,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["panamera2"];
+export const BATCH = ["human3", "human4", "human5"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });

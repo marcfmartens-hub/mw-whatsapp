@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { pickDefaultTime } from "@/lib/slots";
 import { classifyTiming } from "@/lib/timing";
-import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
+import { SAFE_PRICE_REPLY, getKayaReply, wantsHuman, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/lib/meta";
 import { createBiginContact, createChangeTask, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
@@ -1923,6 +1923,9 @@ export async function POST(req: NextRequest) {
     {
       const NAMED_PERSON = /\b(speak|talk|chat)\s+(to|with)\s+(mr\.?\s+|mrs\.?\s+|ms\.?\s+)?(?!(you|u|me|him|her|them|us|someone|somebody|anyone|people|the|a|an|your|my|our|his|their|this|that|it|later|again|soon|family|wife|husband|brother|sister|friend|father|mother|dad|mom|bank)\b)[a-z]{3,}\b/i;
       const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b|\b(ask|tell|have|get)\s+(any ?one|some ?one|somebody|anybody|your team|the team)\s+(to\s+)?(contact|call|ring|reach)\s+me\b|\b(any ?one|some ?one|somebody|anybody)\s+(can|could|should|to|please)?\s*(contact|call|ring|reach)\s+me\b|\b(speak|talk|chat)\s+(to|with)\s+(a\s+)?(human|real|live)\b|\b(human|customer service|sales)\s+(representative|rep|agent|person)\b/i;
+      // Marc (13 Oct): any sign they want a real person / not a bot
+      const HUMAN_ASK2 = /\b(real|actual|live|proper|normal)\s+(human|person|people|agent|guy|man|woman|staff|someone|somebody)\b|\b(not|no|don'?t want( to talk to)?( a)?|stop( the)?|without( a| the)?)\s+(a\s+|the\s+|an\s+|this\s+)?(bot|robot|ai|a\.i\.?|chat ?bot|machine|automated|auto ?reply|computer)\b|\b(are|r)\s+(you|u)\s+(a\s+|an\s+)?(bot|robot|ai|a\.i\.?|chat ?bot|machine|real|human|person|automated)\b|\b(is this|am i (talking|chatting|speaking) (to|with))\s+(a\s+|an\s+)?(bot|robot|ai|machine|real person|human)\b|\b(talk|speak|chat)\s+(to|with)\s+(a\s+|an\s+|your\s+|the\s+)?(human|person|agent|representative|rep|staff|employee|manager|supervisor|salesman|sales ?person|operator|someone real)\b|\b(connect|transfer|forward|pass)\s+me\s+(to|with)\b|\b(need|want|prefer)\s+(to\s+)?(talk|speak|chat)\s+(to|with)\s+(some ?one|somebody|a person|a human|your team)\b|\b(give|send|share)\s+(me\s+)?(a|the|your)\s+(phone|contact|mobile)\s+(number|no)\s+(of|for)\s+(your|a|the)\s+(team|agent|manager|staff|person)\b|\bplease\s+call\b|\bcan\s+(you|u|someone|somebody|anyone)\s+call\b/i;
+      const HUMAN_HINT = /\b(human|person|people|bot|robot|ai|a\.i|machine|automated|agent|representative|rep|staff|manager|someone|somebody|anyone|anybody|team|call|ring|phone|real)\b/i;
       const HUMAN_LINE = "I'll have someone from our team contact you";   // + timing, see below
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE))
@@ -1943,7 +1946,9 @@ export async function POST(req: NextRequest) {
       const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
         || (PRICE_WORDS.test(messageText) && priorPriceAsks >= 3); // 1st ask: short reply, 2nd: process explanation, 3rd: team
       const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP
-        && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText) || frustrated
+        && (HUMAN_ASK.test(messageText) || HUMAN_ASK2.test(messageText) || NAMED_PERSON.test(messageText) || frustrated
+          // wording the patterns don't know → quick AI check, only when the message hints at it
+          || (HUMAN_HINT.test(messageText) && messageText.length < 200 && await wantsHuman(messageText))
           // reply to the 5-minute nudge ("…or if you need a call back from our team") asking for a call
           || (lastA0.includes("need a call back from our team") && /\b(call|callback|ring|phone me)\b/i.test(messageText))
           // after the one home-visit explanation: any objection → understanding + call back (Marc)
