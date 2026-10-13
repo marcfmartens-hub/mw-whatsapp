@@ -76,6 +76,10 @@ const SCRIPTS: Record<string, string[]> = {
   homevisit3: ["Hi", "Sara", "Do you do home inspection?", "Kia Sportage 2021", "60000 km gcc", "no loan", "tomorrow", "ok"],
   expedition: ["🚘 What is your car make, model & Year?", "Ford expedition platinum 2020", "Abdul\n90000 km\nGCC", "No", "Today", "I can’t go during the week better during weekend", "The earliest possible", "ok"],
   expedition2: ["Hi", "Abdul", "Ford Expedition 2020", "90000 km GCC", "No", "this week", "Saturday", "afternoon please", "ok"],
+  wk1: ["Hi", "Omar", "Toyota Land Cruiser 2021", "70000 km GCC", "No", "weekend", "earliest possible", "ok"],
+  wk2: ["Hi", "Sami", "Nissan Patrol 2019", "120k gcc", "no loan", "this week", "Saturday", "as quick as possible", "ok"],
+  wk3: ["Hi", "Rashid", "Lexus LX 2018", "150000 km, GCC", "no", "asap", "I can only come on the weekend", "as quick as possible", "ok"],
+  wk4: ["Hi", "Faisal", "Mercedes G63 2020", "40k km gcc", "no", "this weekend please", "as soon as possible", "thanks"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
 };
 
@@ -90,7 +94,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["expedition", "expedition2", "daynotime"];
+export const BATCH = ["wk1", "wk2", "wk3", "wk4", "expedition"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });

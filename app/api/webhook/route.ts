@@ -1308,13 +1308,13 @@ export async function POST(req: NextRequest) {
       // X:15 times are only ever picked by Kaya (customer times round to :00/:30), so a :15 booking = our default
       const offeredChange = /if another time suits you better/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
       const dIso = String(conversation.appointment_date ?? "");
-      const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|as early as possible|first (slot|thing)|morning|afternoon|evening|later|earlier)\b/i.test(messageText);
+      const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|afternoon|evening|later|earlier)\b/i.test(messageText);
       if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && prefersTime && !CANCEL.test(messageText)) {
         let t: string | null = null;
         const ea2 = await extractAppointment(messageText).catch(() => ({ appointment_date: "", appointment_time: "" }));
         const t24 = toTime24(String(ea2.appointment_time ?? ""));
         if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
-        else if (/\b(earliest|as early as possible|first (slot|thing)|morning|earlier)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
+        else if (/\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|earlier)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
         else if (/\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "afternoon");
         else if (/\b(evening|later)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "evening");
         const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
@@ -1393,7 +1393,7 @@ export async function POST(req: NextRequest) {
         const dayPart = (messageText.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase()) as "morning" | "afternoon" | "evening" | undefined;
         if (apptTime && !toTime24(apptTime) && /\b(morning|afternoon|evening|noon)\b/i.test(apptTime)) { apptTime = ""; ea.appointment_time = undefined as any; }
         // "The earliest possible" / "first slot" once a day is known → the first free morning slot that day
-        if (!apptTime && /\b(earliest|as early as possible|first (slot|thing|available)|early morning|asap)\b/i.test(messageText)) {
+        if (!apptTime && /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing|available)|early morning|asap)\b/i.test(messageText)) {
           const knownDay = (apptDate && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) ? apptDate
             : (conversation.appointment_date && /^\d{4}-\d{2}-\d{2}$/.test(String(conversation.appointment_date)) ? String(conversation.appointment_date) : "");
           const todayIso = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
