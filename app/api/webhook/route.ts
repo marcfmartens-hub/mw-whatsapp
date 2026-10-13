@@ -509,6 +509,7 @@ interface IncomingMessage {
   document?: { caption?: string; filename?: string };
   video?: { caption?: string };
   type: string;
+  referral?: { source_url?: string; source_id?: string; source_type?: string; headline?: string; body?: string; ctwa_clid?: string };
 }
 
 function extractMessage(body: any): IncomingMessage | null {
@@ -518,7 +519,7 @@ function extractMessage(body: any): IncomingMessage | null {
     const value = change?.value;
     if (!value?.messages || value.messages.length === 0) return null;
     const message = value.messages[0];
-    return { from: message.from, id: message.id, text: message.text, image: message.image, document: message.document, video: message.video, type: message.type };
+    return { from: message.from, id: message.id, text: message.text, image: message.image, document: message.document, video: message.video, type: message.type, referral: message.referral };
   } catch (error) {
     console.error("extractMessage parse error:", error);
     return null;
@@ -567,6 +568,17 @@ export async function POST(req: NextRequest) {
     if (!messageText && message.type !== "text" && message.type !== "location") {
       await sendWhatsAppMessage(phone, "Thanks! Could you type your message so I can help?");
       return NextResponse.json({ status: "media_no_text" }, { status: 200 });
+    }
+
+    // ── Lead source: Click-to-WhatsApp ad (Meta adds the ad details to the first message) ──
+    if (message.referral && (message.referral.source_id || message.referral.headline || message.referral.source_url)) {
+      try {
+        const r = message.referral;
+        const ref = { source_type: r.source_type, source_id: r.source_id, headline: r.headline?.slice(0, 120), body: r.body?.slice(0, 200), source_url: r.source_url, ctwa_clid: r.ctwa_clid };
+        await getOrCreateConversation(phone);
+        await updateConversation(phone, { source_url: JSON.stringify(ref) } as any);
+        console.log(`[source] ${phone} came from ad ${r.source_id ?? "?"} "${r.headline ?? ""}"`);
+      } catch (e) { console.warn("[source] could not save the ad referral:", e); }
     }
 
     // ── English only ───────────────────────────────────────────────

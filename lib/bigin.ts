@@ -1,4 +1,5 @@
 import type { Conversation } from "./supabase";
+import { campaignOf, parseReferral } from "./campaigns";
 
 const BIGIN_CONTACTS_URL = "https://www.zohoapis.com/bigin/v1/Contacts";
 const ZOHO_TOKEN_URL = "https://accounts.zoho.com/oauth/v2/token";
@@ -311,6 +312,17 @@ export async function createBiginContact(
       Source_Url: "WhatsApp Bot",
       Sales_Inquiry: resolveSalesInquiry(conversation as any),
     };
+
+    // Lead source: which Meta ad / campaign the chat came from
+    {
+      const ref = parseReferral((conversation as any).source_url);
+      if (ref) {
+        record["Utm_Medium"] = "Meta ad (WhatsApp)";
+        record["Utm_Campaign"] = campaignOf(ref).slice(0, 250);
+        record["Utm_Content"] = [ref.source_id ? `Ad ${ref.source_id}` : "", ref.headline ?? ""].filter(Boolean).join(" | ").slice(0, 250);
+        if (ref.source_url) record["Source_Url"] = ref.source_url.slice(0, 250);
+      }
+    }
 
     // Inspection_Booked: Yes if appointment confirmed, No otherwise
     record["Inspection_Booked"] = conversation.inspection_booked ? "Yes" : "No";
