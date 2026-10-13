@@ -2664,6 +2664,8 @@ export async function POST(req: NextRequest) {
     for (const part of replyParts) {
       await sendWhatsAppMessage(phone, part);
     }
+    // Save exactly what was sent (openers, "Nice,", day-question fixes…) — the history is Kaya's context
+    reply = replyParts.join("\n[SPLIT]\n");
 
     if (appointmentConfirmedEarly) {
       if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
