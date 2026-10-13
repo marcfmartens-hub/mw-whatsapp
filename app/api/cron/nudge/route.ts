@@ -16,6 +16,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // TEMP one-off (Marc, 13 Oct): the Nissan X-Terra lead was booked by mistake → remove the booking
+  await supabase.from("mw_whatsapp").update({ appointment_date: null, appointment_time: null, model: "X-Terra" } as any)
+    .eq("phone", "971547218124").eq("appointment_date", "2026-10-14");
+
   const now = Date.now();
   const { data, error } = await supabase
     .from("mw_whatsapp")
