@@ -1312,6 +1312,15 @@ export async function POST(req: NextRequest) {
         const ea = await extractAppointment(messageText);
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
         // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
+        // "weekend" → Saturday (closed on Sunday); also when "Weekend" was saved earlier as the day
+        const nextSaturday = () => {
+          const n = new Date(Date.now() + 4 * 3600e3);
+          let add = (6 - n.getUTCDay() + 7) % 7;
+          if (add === 0 && n.getUTCHours() >= 18) add = 7;
+          return new Date(n.getTime() + add * 86400e3).toISOString().slice(0, 10);
+        };
+        if (/\bweek\s*-?\s*end\b/i.test(String(ea.appointment_date ?? "")) || (!ea.appointment_date && /\bweek\s*-?\s*end\b/i.test(messageText))) ea.appointment_date = nextSaturday();
+        if (conversation.appointment_date && /week\s*-?\s*end/i.test(String(conversation.appointment_date))) (conversation as any).appointment_date = nextSaturday();
         // "In the afternoon" after "tomorrow" must not move the day back to today: without a day word
         // (or a date) in this message, the day already agreed stays
         const dayInMsg = new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)\\b|\\b\\d{1,2}[/.-]\\d{1,2}\\b|\\b(jan|feb|mar|apr|june?|july?|aug|sep|oct|nov|dec)[a-z]*\\b|\\bnext week\\b`, "i").test(messageText);
@@ -1348,6 +1357,17 @@ export async function POST(req: NextRequest) {
         if (ea.appointment_date || ea.appointment_time) apptFromMsg = true;
         const dayPart = (messageText.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase()) as "morning" | "afternoon" | "evening" | undefined;
         if (apptTime && !toTime24(apptTime) && /\b(morning|afternoon|evening|noon)\b/i.test(apptTime)) { apptTime = ""; ea.appointment_time = undefined as any; }
+        // "The earliest possible" / "first slot" once a day is known → the first free morning slot that day
+        if (!apptTime && /\b(earliest|as early as possible|first (slot|thing|available)|early morning|asap)\b/i.test(messageText)) {
+          const knownDay = (apptDate && /^\d{4}-\d{2}-\d{2}$/.test(apptDate)) ? apptDate
+            : (conversation.appointment_date && /^\d{4}-\d{2}-\d{2}$/.test(String(conversation.appointment_date)) ? String(conversation.appointment_date) : "");
+          const todayIso = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+          if (knownDay && knownDay >= todayIso) {
+            apptDate = knownDay; ea.appointment_date = knownDay;
+            apptTime = await pickDefaultTime(knownDay, phone, "morning"); ea.appointment_time = apptTime;
+            apptFromMsg = true;
+          }
+        }
         // A question ("can I come today?") gets a time question, not a default slot
         if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate) && !/\?/.test(messageText)) {
           apptTime = await pickDefaultTime(apptDate, phone, dayPart); ea.appointment_time = apptTime;
