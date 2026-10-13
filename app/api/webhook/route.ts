@@ -71,7 +71,7 @@ const HANDOFF_SIGNALS = /\b(too many questions|call me(?=\s*(back|later|please|p
 // Special inquiry types
 const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
 const TRADE_IN_PATTERN    = /\b(trade[\s-]?in|trade\s*my|swap|exchange|part[\s-]?exchange|replace\s*(my|the)|get\s*(a\s*)?new\s*car|upgrade\s*(my|the)|in\s*exchange\s*for)\b/i;
-const DEFER_PATTERN = /\b(let (u|you) know|(will|i'?ll|i will) (inform|tell|update|confirm|revert|message|text|call)( (u|you))?|get back to (u|you)|i'?ll (check|think|see|decide)|will (check|think|decide)|think about it|not sure yet|let me (check|think|see))\b/i;
+const DEFER_PATTERN = /\b(let (u|you) know|(will|i'?ll|i will) (inform|tell|update|confirm|revert|message|text|call)( (u|you))?|get back to (u|you)|i'?ll (check|think|see|decide)|will (check|think|decide)|think about it|not sure yet|let me (check|think|see)|(i'?ll |i will |will )?confirm (to )?(you |u )?(later|tomorrow|the date|date|time|timing)|later i (will |'ll )?(confirm|tell|inform|let)|i confirm (to )?(you |u )?later|date i confirm)\b/i;
 const PRICE_OFFER_PATTERN = /\b(how\s*much|price|offer|estimate|valuation|value|worth|what\s*(will\s*you\s*pay|do\s*you\s*give|can\s*i\s*get)|give\s*me\s*(a\s*)?(price|number|figure|quote))\b/i;
 
 // Ownership detection
@@ -429,6 +429,8 @@ function getBookingSlot(): string {
 // When the team will contact the customer: "shortly" while open, otherwise the next opening morning.
 // Customer wants Sunday (closed) — the context is Sunday, not whether we're open right now (Marc):
 // today Friday → Saturday only · today Saturday → open again Monday · otherwise Friday or Saturday
+function appointmentConfirmedEarlyGuard(_d: string, _t: string): boolean { return false; }
+
 function sundayText(): string {
   const dow = new Date(Date.now() + 4 * 3600e3).getUTCDay();
   if (dow === 5) return "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM. Would Saturday work for you?";
@@ -1243,6 +1245,7 @@ export async function POST(req: NextRequest) {
     let apptTime = conversation.appointment_time ?? "";
     let defaultedTime = false; // time picked by us (day given without a time)
     let apptFromMsg = false;   // this message gave a day and/or time
+    let negatedDay = false;    // "today not possible" — the customer said which day does NOT work
     let altPhone: string | undefined;
 
     // Customer explicitly asks to book — from this message or earlier in the chat
@@ -1339,9 +1342,43 @@ export async function POST(req: NextRequest) {
         || /\b(another|different|other) (time|slot)\b|\bchange the time\b/i.test(messageText)
         || (/would .+ or .+ work for you/i.test(recentA) && /\b(first|1st|second|2nd|last|former|latter)\b/i.test(messageText))
         || /^\s*(at\s+)?(1[0-2]|[1-9])([:.]\d{2})?\s*(please|pls|ok)?\s*[?.!]*\s*$/i.test(messageText) || /\b(can we do|how about|what about|make it)\s+(1[0-2]|[1-9])([:.]\d{2})?\b/i.test(messageText);
-      if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && prefersTime && !CANCEL.test(messageText)) {
+      // Our own pick, and the customer puts it off ("later I confirm date and timing") or says that day
+      // doesn't work ("not today") → take the booking back out, don't push options
+      const putOff = DEFER_PATTERN.test(messageText) && !new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)?\\s*(oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep)`, "i").test(messageText);
+      const notThatDay = /\b(not today|today not|not possible|can'?t (today|come today|make it)|not tomorrow|not that day)\b/i.test(messageText) && !new RegExp(`\\b(?!today)${DAY}\\b`, "i").test(messageText.replace(/\btoday\b/gi, ""));
+      if (offeredChange && hasBooking && (putOff || notThatDay)) {
+        const ask = putOff ? "No problem, just let me know the day and time that suits you." : "No problem. Which day works better for you?";
+        await sendWhatsAppMessage(phone, ask);
+        await updateConversation(phone, { appointment_date: null, appointment_time: null, last_msg_id: message.id } as any).catch(() => {});
+        await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, ask);
+        await pushLead(phone, "default booking withdrawn", { inspectionBooked: false, clearAppointment: true });
+        return NextResponse.json({ status: "default_booking_withdrawn" }, { status: 200 });
+      }
+      const dayInMsgA = new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)?\\s*(of\\s+)?(oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep)[a-z]*\\b|\\bweek\\s*-?\\s*end\\b`, "i").test(messageText);
+      if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && (prefersTime || dayInMsgA) && !CANCEL.test(messageText)) {
         let t: string | null = null;
         const ea2 = await extractAppointment(messageText).catch(() => ({ appointment_date: "", appointment_time: "" }));
+        // A new day in this message ("I will come on Saturday", "Please book 17 Oct"), or the day Kaya just asked
+        // the time for ("What time would you like on Saturday?" → "3:15 PM") — never keep the old day by mistake
+        let newDay = "";
+        {
+          const todayIso = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+          const okDay = (d: string | null) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= todayIso && new Date(d + "T12:00:00Z").getUTCDay() !== 0;
+          let cand = /\bweek\s*-?\s*end\b/i.test(messageText) ? null : (ea2.appointment_date ? toIsoDate(String(ea2.appointment_date)) : null);
+          if (!cand && /\bweek\s*-?\s*end\b/i.test(messageText)) {
+            const n = new Date(Date.now() + 4 * 3600e3); let add = (6 - n.getUTCDay() + 7) % 7; if (add === 0) add = 7;
+            cand = new Date(n.getTime() + add * 86400e3).toISOString().slice(0, 10);
+          }
+          if (!cand) {
+            const la = lastAssistantMsg;
+            if (/\bwhat time\b|\bwhich time\b/i.test(la)) {
+              const m1 = la.match(/\b(\d{1,2})(st|nd|rd|th)?\s+(of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+              const m2 = la.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+              cand = m1 ? toIsoDate(`${m1[1]} ${m1[4]}`) : m2 ? toIsoDate(m2[1]) : null;
+            }
+          }
+          if (okDay(cand) && cand !== dIso) newDay = cand!;
+        }
         let t24 = toTime24(String(ea2.appointment_time ?? ""));
         // "11" / "at 11" / "11.30" without am/pm → 8–12 = morning, 1–7 = afternoon
         if (!t24) {
@@ -1383,16 +1420,18 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ status: "time_options" }, { status: 200 });
         }
         if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = m % 15 === 0 ? m : Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
-        else if (!t && /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
-        else if (!t && /\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "afternoon");
-        else if (!t && /\bevening\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "evening");
-        const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
+        else if (!t && /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning)\b/i.test(messageText)) t = await pickDefaultTime(newDay || dIso, phone, "morning");
+        else if (!t && /\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(newDay || dIso, phone, "afternoon");
+        else if (!t && /\bevening\b/i.test(messageText)) t = await pickDefaultTime(newDay || dIso, phone, "evening");
+        const finalDay = newDay || dIso;
+        if (newDay && !t) t = await pickDefaultTime(newDay, phone);   // new day, no time → our default slot that day
+        const dow = new Date(finalDay + "T12:00:00Z").getUTCDay();
         const mins = t ? +t.slice(0, 2) * 60 + +t.slice(3) : -1;
         if (t && mins >= (dow === 5 ? 12 * 60 : 10 * 60) && mins <= 18 * 60 + 30) {
-          const conf = formatBookingConfirmation(null, dIso, t);
+          const conf = formatBookingConfirmation(null, finalDay, t);
           const reply = `No problem, I've changed it.\n\n${conf ?? ""}`.trim();
           await sendWhatsAppMessage(phone, reply);
-          await updateConversation(phone, { appointment_time: t, last_msg_id: message.id } as any).catch(() => {});
+          await updateConversation(phone, { appointment_date: finalDay, appointment_time: t, last_msg_id: message.id } as any).catch(() => {});
           await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
           await pushLead(phone, "time adjusted after default", { inspectionBooked: true });
           return NextResponse.json({ status: "time_adjusted" }, { status: 200 });
@@ -1418,6 +1457,15 @@ export async function POST(req: NextRequest) {
         const ea = await extractAppointment(messageText);
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
         // Store the real date ("tomorrow" → "2026-10-10") so it stays correct later
+        // "Today not possible" / "not tomorrow" / "can't on Monday" → that day is NOT the booking day
+        {
+          const NEG = /\b(not possible|not today|today not|not tomorrow|tomorrow not|can'?t|cannot|not available|not free|busy|no time)\b/i;
+          const dayWords = (messageText.match(new RegExp(`\\b${DAY}\\b`, "gi")) ?? []).length;
+          if (NEG.test(messageText) && dayWords <= 1 && !/\b(but|instead|rather|only)\b/i.test(messageText)) {
+            ea.appointment_date = ""; ea.appointment_time = "";
+            negatedDay = true;
+          }
+        }
         // "weekend" → Saturday (closed on Sunday); also when "Weekend" was saved earlier as the day
         const nextSaturday = () => {
           const n = new Date(Date.now() + 4 * 3600e3);
@@ -2165,6 +2213,9 @@ export async function POST(req: NextRequest) {
         ? (saidUrgent ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "Which day works for you?") : "Which day this week works for you?")
         : "Which day would be good for you?";
       reply = `${pricePushCount === 0 ? PRICE_1 : PRICE_2}\n[SPLIT]\n${dayQ}`;
+    }
+    if (negatedDay && currentStep >= 5 && currentStep < CLOSING_STEP && !appointmentConfirmedEarlyGuard(apptDate, apptTime)) {
+      reply = "No problem. Which day works better for you?";
     }
     // Sunday (closed) → mention Saturday and Friday, never book a Sunday (Marc)
     if (/\bsun(day)?\b/i.test(messageText) && currentStep >= 5 && currentStep < CLOSING_STEP && action?.type !== "OFFER_CALLBACK") {
