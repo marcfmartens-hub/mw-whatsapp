@@ -1304,8 +1304,11 @@ export async function POST(req: NextRequest) {
     // Mentioning the time they're already booked for ("I'll be there at 3pm") is not a change
     const timeStr = messageText.match(new RegExp(`\\b${TIME}`, "i"))?.[0];
     const sameTime = !!timeStr && toTime24(timeStr) != null && toTime24(timeStr) === toTime24(String(conversation.appointment_time ?? ""));
+    // A day/time mentioned after a booking is only a change request with change words, or as a very short reply
+    // ("Thursday 3pm"); "my father can sign before Tuesday evening" is not a reschedule
+    const STRICT_CHANGE = /\b(instead|change|move|switch|make it|can we do|how about|what about|better|rather|reschedul\w*|postpone|shift)\b|\bonly\b.{0,20}\b(come|make it|available|free)\b|\bcan'?t (come|make it)\b|\bnot available\b/i;
     const newDayOrTime = ((timeInMsg && !sameTime) || differentDay) && !GOODBYE.test(messageText)
-      && (messageText.length <= 40 || CHANGE_WORDS.test(messageText));
+      && (messageText.trim().split(/\s+/).length <= 4 || STRICT_CHANGE.test(messageText));
     // Chat closed without a booking (e.g. after a team handoff) and they now want to come in → book it,
     // except for cases that never get an appointment (Hiyaza, buyer-only, multiple cars, non-GCC)
     const notesNow = String((conversation as any).car_conditions ?? "");
@@ -2426,6 +2429,10 @@ export async function POST(req: NextRequest) {
           return `${out ? out + "\n\n" : ""}Which day would be good for you?`;
         });
       }
+    }
+    // Already booked → never ask for a day/time again in answers to follow-up questions
+    if (!appointmentConfirmedEarly && hasBooking && currentStep >= CLOSING_STEP) {
+      replyParts = replyParts.map(p => p.replace(/[^.!?\n]*\b(what time (can|would|is best|works)|which (day|time) (would|works|do you)|when can you come)[^.!?\n]*\?/gi, "").trim()).filter(Boolean);
     }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
