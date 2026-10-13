@@ -45,6 +45,14 @@ const P: Record<string, string> = {
   afternoon:  "You are Eruj Ansari from Pakistan. First message: 'I want to sell my car. 2006 Honda Civic.' Then your name 'Eruj Ansari.' Mileage 'About 400k.' GCC. When to sell: 'I can come tomorrow.' Then 'In the afternoon.' After booking ask 'Are there charges for inspection?'. Your number 0547347576. Short answers.",
   fullauto:   "You are a customer with a Korean car. First message: 'To sell 21 model'. When asked make/model/specs: 'Not GCc Korean'. When asked details: 'Full aromatic' (you mean fully automatic). Then '2021 model and it's runs 170 k m'. Then 'Ok thanks'.",
   sameday:    "You are Tom, Toyota Corolla 2019 GCC 90k, no loan. First message 'Hi'. Give name Tom. Want to sell now and come today at 5pm. After booking say 'Ok thanks see you soon'.",
+  q1:         "You are Priya. Hyundai Tucson 2021, GCC, 55,000 km, no loan. Halfway through (after giving the car), ask: 'what documents do I need to bring?' and later 'do you pay cash or bank transfer?'. Book tomorrow 4pm. Short natural messages.",
+  q2:         "You are Imran. You answer several things at once: 'Kia Sorento 2020 gcc 80k no loan'. Later correct yourself: 'sorry mileage is 95k not 80k'. Want to sell this week. Book Thursday 1pm.",
+  q3:         "You are Linda. Before giving any car details ask 'where are you located?' and then 'how long does the inspection take?'. Then give: Mazda CX-5 2019, GCC, 90,000 km, no loan. Book Saturday 11am.",
+  q4:         "You are Ravi. Car: Honda Accord 2018, GCC, 140k km, no loan. The car is in your father's name. Ask 'my father is the owner, can I bring the car?'. Then book tomorrow 2pm.",
+  q5:         "You are Fatima. Nissan Altima 2022, GCC, 40k km, loan with ADCB around 50k. Ask 'how does the loan settlement work and how long does it take?'. Then book Friday 3pm.",
+  q6:         "You are Tariq. Very vague: answer 'maybe', 'depends', 'not sure yet' at first. Car: Toyota Camry 2020 GCC 100k km no loan. Ask 'what is consignment?' and 'do you charge any fees?'. Eventually say you'll come Saturday at noon.",
+  q7:         "You are Ahmed. Ask 'are you a bot or a real person?' early. Car: Chevrolet Tahoe 2019 GCC 120k km no loan. Ask 'can you also check my second car later?'. Book tomorrow 5pm.",
+  q8:         "You are Sam. First message: 'Hi I want to sell my Jeep Wrangler 2021 gcc 35k km no loan, can I come in 30 minutes?'. Answer anything else briefly.",
   cancel:     "You are Leo, VW Golf 2018 GCC 95k, no loan, cash. Book tomorrow 1pm. After booking say 'actually I sold it already, cancel please'.",
 };
 
@@ -100,7 +108,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["early3", "early4", "sun1", "sun2"];
+export const BATCH = ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
