@@ -1968,9 +1968,13 @@ export async function POST(req: NextRequest) {
         }
         if (!firstAsk && /best (number )?to reach you/i.test(lastA)) {
           const pm = messageText.match(/(?:\+?971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+          const intl = !pm ? messageText.match(/\+?\d[\d\s-]{7,16}\d/) : null;   // foreign numbers too
           if (pm) {
             const raw = pm[0].replace(/\D/g, "");
             const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
+            if (alt !== phone) updates.alternative_phone = alt;
+          } else if (intl) {
+            const alt = intl[0].replace(/\D/g, "").replace(/^00/, "");
             if (alt !== phone) updates.alternative_phone = alt;
           }
         }
@@ -1987,9 +1991,10 @@ export async function POST(req: NextRequest) {
         const phoneAsked = hist.some(m => m.role === "assistant" && /best (number )?to reach you/i.test(m.content));
 
         let nextQ: string | null = null;
-        if (missingCar) nextQ = missingCar === "make" ? "In the meantime, could you share the make, model and year of your car?" : `Could you share the ${missingCar} of the car?`;
+        // Marc (13 Oct): asked for a person → always ask the number first (UAE numbers too)
+        if (!phoneAsked) nextQ = "Which number is best to reach you on?";
+        else if (missingCar) nextQ = missingCar === "make" ? "In the meantime, could you share the make, model and year of your car?" : `Could you share the ${missingCar} of the car?`;
         else if (!c.name && !hist.some(m => m.role === "assistant" && /may i (have|know) your name/i.test(m.content))) nextQ = "May I have your name?";
-        else if (!isUAE && !phoneAsked) nextQ = "Which number is best to reach you on?";
         void topicDone;
 
         const parts: string[] = [];
