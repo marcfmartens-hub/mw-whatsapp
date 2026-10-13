@@ -39,16 +39,18 @@ export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: 
   }
 }
 
-export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
-  // Kaya's intro always opens with the time of day (whatever code path sent it)
+// Same wording fixes for what is sent and what is saved in the chat history (monitor shows what the customer got)
+export function polishOutgoing(body: string, forHistory = false): string {
   {
     const h = new Date(Date.now() + 4 * 3600e3).getUTCHours();
     const g = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
-    // Marc: never "Hi" or "Hello" — "Good evening! I'm Kaya…"
-    body = body.replace(/^(?:Hi|Hello|Hey|Good (?:morning|afternoon|evening))(?:,?\s+(?:good (?:morning|afternoon|evening)))?!(\s+I'm Kaya)/i, `${g}!$1`);
+    // Marc: never "Hi" or "Hello" — "Good evening! I'm Kaya…" (history: only replace Hi/Hello so old greetings keep their time of day)
+    body = forHistory
+      ? body.replace(/^(?:Hi|Hello|Hey)(?:,?\s+(?:good (?:morning|afternoon|evening)))?!(\s+I'm Kaya)/i, `${g}!$1`)
+      : body.replace(/^(?:Hi|Hello|Hey|Good (?:morning|afternoon|evening))(?:,?\s+(?:good (?:morning|afternoon|evening)))?!(\s+I'm Kaya)/i, `${g}!$1`);
   }
   // After 5 PM Dubai time: "Have a nice evening" instead of "Have a nice day"
-  if (new Date(Date.now() + 4 * 3600e3).getUTCHours() >= 17) body = body.replace(/Have a nice day/g, "Have a nice evening");
+  if (!forHistory && new Date(Date.now() + 4 * 3600e3).getUTCHours() >= 17) body = body.replace(/Have a nice day/g, "Have a nice evening");
   // The name is used once only (Marc) — never in thanks / goodbyes ("You're welcome, Marcio!")
   body = body.replace(/\b(You'?re welcome|Thanks|Thank you|See you (?:later|soon|tomorrow)|Have a nice (?:day|evening))(?:,?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?=\s*[!.,])/g, "$1");
   // "See you later/soon/tomorrow" already says goodbye — no "have a nice day/evening" on top (Marc)
@@ -58,6 +60,11 @@ export async function sendWhatsAppMessage(to: string, body: string): Promise<voi
       .replace(/\s*Have a nice (day|evening)[^!.]*[!.]/gi, "")
       .trim();
   }
+  return body;
+}
+
+export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
+  body = polishOutgoing(body);
   const log = simLog(to); if (log) { log.push(body); return; }
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   const accessToken = process.env.META_ACCESS_TOKEN;

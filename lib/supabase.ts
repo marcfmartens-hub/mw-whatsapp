@@ -94,6 +94,10 @@ export async function updateConversation(
   // A column missing from the table must never cost the whole save (make/model/step were lost
   // this way): drop just that column and retry.
   let fields: Record<string, unknown> = { ...updates };
+  if (Array.isArray((fields as any).messages)) {
+    const { polishOutgoing } = await import("@/lib/meta");
+    fields.messages = ((fields as any).messages as any[]).map(m => m?.role === "assistant" && typeof m.content === "string" ? { ...m, content: polishOutgoing(m.content, true) } : m);
+  }
   for (let tries = 0; tries < 8; tries++) {
     const { data, error } = await supabase
       .from(TABLE)

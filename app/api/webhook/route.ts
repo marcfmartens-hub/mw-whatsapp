@@ -1937,7 +1937,7 @@ export async function POST(req: NextRequest) {
       const capsRatio = (t: string) => { const l = t.replace(/[^A-Za-z]/g, ""); return l.length >= 8 ? l.replace(/[^A-Z]/g, "").length / l.length : 0; };
       const wroteNormallyBefore = hist.some(m => m.role === "user" && m.content.replace(/[^A-Za-z]/g, "").length >= 8 && capsRatio(m.content) < 0.5);
       const shouting = !carInfoInMsg && wroteNormallyBefore && capsRatio(messageText) >= 0.7 && /!/.test(messageText);
-      const FRUSTRATION_PHRASES = /(!!+|\?\?+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
+      const FRUSTRATION_PHRASES = /(!!!+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
       const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
       const lastA0 = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
       const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
@@ -2003,6 +2003,10 @@ export async function POST(req: NextRequest) {
           updates.car_conditions = conditions;
         } else if (firstAsk) {
           parts.push(`${HUMAN_LINE} ${teamWhen()}.`);
+          {
+            const dayMsg = [...hist].reverse().find(m => m.role === "user" && /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|\d{1,2}(st|nd|rd|th)\b|\d{1,2}\s*(oct|nov|dec|jan))/i.test(m.content))?.content;
+            if (dayMsg && !conditions.includes("Preferred day:")) conditions = conditions ? `${conditions} | Preferred day: "${dayMsg.slice(0, 60)}"` : `Preferred day: "${dayMsg.slice(0, 60)}"`;
+          }
           if (!conditions.includes("Asked to speak to the team")) {
             conditions = conditions ? `${conditions} | Asked to speak to the team` : "Asked to speak to the team";
             updates.car_conditions = conditions;
@@ -2013,7 +2017,9 @@ export async function POST(req: NextRequest) {
           const ans = await getKayaReply(CLOSING_STEP, hist, messageText, { name: c.name, make: c.make, model: c.model, year: c.year, team_when: teamWhen() } as any);
           parts.push(ans);
         } else {
-          parts.push(nextQ ?? `Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day${firstName((conversation as any).name)}!`);
+          if (nextQ) parts.push(nextQ);
+          else if (firstAsk) parts[parts.length - 1] = `${parts[parts.length - 1]} Have a nice day!`;   // one message, not two
+          else parts.push(`Thanks, I've passed everything on. Our team will be in touch ${teamWhen()}. Have a nice day${firstName((conversation as any).name)}!`);
         }
 
         for (const part of parts) await sendWhatsAppMessage(phone, part);
@@ -2326,6 +2332,16 @@ export async function POST(req: NextRequest) {
     }
     if (negatedDay && currentStep >= 5 && currentStep < CLOSING_STEP && !appointmentConfirmedEarlyGuard(apptDate, apptTime)) {
       reply = "No problem. Which day works better for you?";
+    }
+    // "Do you buy for export / for yourselves / to resell?" (Marc, 13 Oct)
+    {
+      const PURPOSE = /\b(export\w*|for (your ?self|yourselves|yourself|own use|personal use)|re-?sell\w*|sell (it )?(again|to (other|others|another|dealers?|people))|trade|dealers?|auction)\b/i;
+      if (PURPOSE.test(messageText) && /\?|\b(do|are|is|will|what)\b.{0,30}\b(you|u)\b/i.test(messageText) && !/\b(i|we)\s+(want|need|plan|am going)\s+to\s+export\b/i.test(messageText)) {
+        const kw = /export/i.test(messageText) ? "export" : /resell|re-sell|sell (it )?again|sell to/i.test(messageText) ? "reselling" : /yourself|yourselves|own use|personal/i.test(messageText) ? "using cars ourselves" : "export";
+        const ans = `We buy cars for different purposes, and ${kw} is one of them. This way we make sure we always get the highest price for your car.`;
+        const pend = pendingBookingQ(lastAssistantMsg) ?? (reply.match(/[^.!?\n]*\?\s*$/)?.[0]?.trim() ?? "");
+        reply = pend && currentStep < CLOSING_STEP ? `${ans}\n[SPLIT]\n${pend}` : ans;
+      }
     }
     if (askOrigin) reply = "No problem. GCC specs means the car was made for the Gulf market. Did you buy the car here in the UAE, or was it imported from another country?";
     // Sunday (closed) → mention Saturday and Friday, never book a Sunday (Marc)

@@ -38,6 +38,24 @@ export function classifyTiming(text: string, deferPattern: RegExp): Timing | nul
   const dayWord = t.match(/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday)\b/i)?.[1]?.toLowerCase();
   if (dayWord && !hasTime && /\b(maybe|may be|probably|might|perhaps|possibly|try to|i think|not sure)\b/i.test(t))
     return { kind: "F", day: dayWord };
+  // Two days ("On 16th or 17th Oct", "Friday or Saturday") → offer the earliest one (Marc, 13 Oct)
+  if (!hasTime) {
+    const MON = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+    const dd = t.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:or|\/|&|and)\s*(\d{1,2})(?:st|nd|rd|th)?\b(?:\s*(?:of\s*)?([a-z]{3})[a-z]*)?/i);
+    if (dd && +dd[1] >= 1 && +dd[1] <= 31) {
+      const a = Math.min(+dd[1], +dd[2]);
+      let mon = dd[3] && MON.includes(dd[3].toLowerCase()) ? dd[3].toLowerCase() : null;
+      if (!mon) mon = MON[a >= now.getUTCDate() ? now.getUTCMonth() : (now.getUTCMonth() + 1) % 12];
+      return { kind: "F", day: `${a} ${mon}` };
+    }
+    const DAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+    const wd = t.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b\s*(?:or|\/)\s*\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+    if (wd) {
+      const ahead = (w: string) => (DAYS.indexOf(w.toLowerCase()) - now.getUTCDay() + 7) % 7;
+      const pick = [wd[1], wd[2]].filter(w => w.toLowerCase() !== "sunday").sort((x, y) => ahead(x) - ahead(y))[0];
+      if (pick) return { kind: "F", day: pick.toLowerCase() };
+    }
+  }
   if (hasDay || hasTime) return null;   // a clear day or time → the normal booking flow
   // C — wants the location
   if (/\b(send|share|give|drop)( me)? (the |your )?(location|address|pin|map)\b|\bwhere (are you|is (the|your) (branch|office|showroom))\b|\b(location|address) (please|pls)\b|^\s*location\??\s*$/i.test(t))

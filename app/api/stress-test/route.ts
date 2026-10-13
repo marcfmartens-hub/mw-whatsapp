@@ -104,6 +104,8 @@ const SCRIPTS: Record<string, string[]> = {
   tG: ["Hi", "Ali", "Toyota Prado 2021", "60k gcc", "no", "after Eid"],
   sentra: ["Hi", "I hv Nissan ssentra", "It's American spec", "Ok", "Nissan Sentra\nModel 2025\nKm 25000\nPrice 30000\nI can sent photos", "[photo]", "[photo]", "tomorrow", "afternoon", "ok"],
   ctx1: ["Hi", "Naveed", "Toyota Corolla 2019", "90000 km gcc", "today", "Where your location.", "Yes I can bring all. Tell me what about the price going normally.", "5pm", "ok"],
+  panamera: ["🚘 What is your car make, model & Year?", "Porche Panamera 2013 model", "Gcc", "190k km", "Asap", "I need money", "On 16th or 17th Oct I can come please", "Hello", "Are you buying cars for export ???", "yes"],
+  panamera2: ["Hi", "Sam", "Toyota Camry 2018 gcc 120k", "this week", "Friday or Saturday", "Do you resell the cars to other people?", "Ask anyone to contact me", "I want to speak human representative before I visit ?", "Thanks"],
   sentra2: ["🚘 What is your car make, model & Year?", "I have Nissan Sentra 2019 Model I want sale it how Much u give", "201300km run", "I don't understand what GCC specs", "Malesiya", "Where your location.", "Yes I can bring all. Tell me what about the price going normally.", "Ok when I free I'll let you know thanks", "What time closed evening", "Maybe Thursday", "Can't book Time after 3 PM some time too much traffic."],
   sentra3: ["Hi", "Rafi", "Nissan Sentra 2019", "201300km", "I don't understand what GCC specs", "bought it in Dubai", "today", "Where your location.", "Tell me what about the price going normally.", "5pm"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
@@ -120,7 +122,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["sentra2"];
+export const BATCH = ["panamera", "panamera2"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
