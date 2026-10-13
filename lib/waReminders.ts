@@ -33,7 +33,7 @@ async function update(rows: Record<string, unknown>[], headers: Record<string, s
   return results;
 }
 
-export async function runWaReminders(req: NextRequest, job: "evening" | "night") {
+export async function runWaReminders(req: NextRequest, job: "evening" | "night" | "rebook") {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret && req.headers.get("authorization") !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -76,5 +76,27 @@ export async function runWaReminders(req: NextRequest, job: "evening" | "night")
     return NextResponse.json({ job, reminderSent: ticked.map(d => d.Deal_Name), noShows: noShow.map(d => d.Deal_Name), results: [...res, ...ns].map(r => r.status) });
   }
 
-  return NextResponse.json({ error: "job must be evening or night" }, { status: 400 });
+  // Rebooked from follow-up (Marc, 13 Oct): Booked | Follow-ups → back to the booking flow, NO SHOW tag removed.
+  // Sent through WhatsApp Standard / Booking Confirmed so the existing Bigin workflow creates the calendar
+  // event and moves the card to WA Appointments / Booked Appointments. Needs Appointment Date and Time.
+  if (job === "rebook") {
+    const deals = await stageDeals("Booked | Follow-ups", headers);
+    const ready = deals.filter(d => d.Appointment_Date_and_Time);
+    const waiting = deals.filter(d => !d.Appointment_Date_and_Time).map(d => d.Deal_Name);
+    const results: any[] = [];
+    for (const d of ready) {
+      await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/remove_tags?tag_names=${encodeURIComponent("NO SHOW")}`, { method: "POST", headers })
+        .catch(e => console.warn("[wa-reminders] untag error:", e));
+      const r = await fetch("https://www.zohoapis.com/bigin/v1/Pipelines", {
+        method: "PUT", headers,
+        body: JSON.stringify({ data: [{ id: d.id, Sub_Pipeline: "WhatsApp Standard", Stage: "Booking Confirmed", Followed_up_Today: false }], trigger: ["workflow"] }),
+      });
+      const j = await r.json().catch(() => ({}));
+      results.push(j.data?.[0]?.status ?? `http ${r.status}`);
+    }
+    console.log(`[wa-reminders] rebook: ${ready.length} → Booking Confirmed (workflow → Booked Appointments); waiting for a date: ${waiting.length}`, JSON.stringify(results));
+    return NextResponse.json({ job, rebooked: ready.map(d => d.Deal_Name), waitingForDate: waiting, results });
+  }
+
+  return NextResponse.json({ error: "job must be evening, night or rebook" }, { status: 400 });
 }

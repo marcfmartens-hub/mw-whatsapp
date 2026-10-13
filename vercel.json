@@ -17,6 +17,10 @@
     {
       "path": "/api/cron/wa-reminders/night",
       "schedule": "55 19 * * *"
+    },
+    {
+      "path": "/api/cron/wa-reminders/rebook",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
