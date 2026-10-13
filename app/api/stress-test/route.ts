@@ -105,6 +105,8 @@ const SCRIPTS: Record<string, string[]> = {
   sentra: ["Hi", "I hv Nissan ssentra", "It's American spec", "Ok", "Nissan Sentra\nModel 2025\nKm 25000\nPrice 30000\nI can sent photos", "[photo]", "[photo]", "tomorrow", "afternoon", "ok"],
   ctx1: ["Hi", "Naveed", "Toyota Corolla 2019", "90000 km gcc", "today", "Where your location.", "Yes I can bring all. Tell me what about the price going normally.", "5pm", "ok"],
   panamera: ["🚘 What is your car make, model & Year?", "Porche Panamera 2013 model", "Gcc", "190k km", "Asap", "I need money", "On 16th or 17th Oct I can come please", "Hello", "Are you buying cars for export ???", "yes"],
+  pajero: ["🚘 What is your car make, model & Year?", "Hi kaya I'm mohamed", "Mitsubishi Pajero 2018", "165K kms", "GCC", "Immediately. Ready for any inspection from early next week", "I am bit busy this week. Next week will be fine. Mondayvor Tuesday", "What time you start working in the morning", "Tuesday 10 am would be good for me"],
+  pajero2: ["Hi", "Mohamed", "Mitsubishi Pajero 2018 gcc 165k", "next week", "Tuesday 10 am"],
   human3: ["Hi", "Ali", "BMW X5 2017", "are you a bot?", "0559876543"],
   human4: ["Hi", "John", "Audi A6 2016 gcc 140k", "I prefer dealing with an actual human being, these automated chats confuse me", "+44 7700 900123"],
   human5: ["Hi", "Rita", "Lexus RX 2019 gcc 80k", "you can call me Rita", "tomorrow"],
@@ -127,7 +129,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["human4"];
+export const BATCH = ["pajero", "pajero2"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });

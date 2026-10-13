@@ -49,11 +49,11 @@ export function classifyTiming(text: string, deferPattern: RegExp): Timing | nul
       return { kind: "F", day: `${a} ${mon}` };
     }
     const DAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
-    const wd = t.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b\s*(?:or|\/)\s*\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+    const wd = t.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\w{0,2}\s*(?:or|\/|r)\s*\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
     if (wd) {
-      const ahead = (w: string) => (DAYS.indexOf(w.toLowerCase()) - now.getUTCDay() + 7) % 7;
+      const ahead = (w: string) => ((DAYS.indexOf(w.toLowerCase()) - now.getUTCDay() + 7) % 7) || 7;   // same weekday = next week
       const pick = [wd[1], wd[2]].filter(w => w.toLowerCase() !== "sunday").sort((x, y) => ahead(x) - ahead(y))[0];
-      if (pick) return { kind: "F", day: pick.toLowerCase() };
+      if (pick) return { kind: "F", day: (ahead(pick) === 7 ? "next " : "") + pick.toLowerCase() };
     }
   }
   if (hasDay || hasTime) return null;   // a clear day or time → the normal booking flow

@@ -1612,6 +1612,24 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.error("early appointment extraction error:", e);
       }
+      // "Tuesday 10 am" said on a Tuesday after 10 am (or after "next week") means NEXT Tuesday, not today
+      {
+        const nowD = new Date(Date.now() + 4 * 3600e3);
+        const todayIso = nowD.toISOString().slice(0, 10);
+        const todayName = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"][nowD.getUTCDay()];
+        if (String(apptDate) === todayIso && new RegExp(`\\b${todayName}\\b`, "i").test(messageText) && !/\b(today|tonight|now|this (morning|afternoon|evening))\b/i.test(messageText)) {
+          const nowMin = nowD.getUTCHours() * 60 + nowD.getUTCMinutes();
+          const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
+          const passed = t24 ? +t24.slice(0, 2) * 60 + +t24.slice(3) <= nowMin + 30 : nowMin >= 17 * 60;
+          const nextWeekCtx = [...((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content), messageText]
+            .some(t => /\bnext week\b/i.test(t));
+          if (passed || nextWeekCtx) {
+            apptDate = new Date(Date.parse(todayIso + "T12:00:00Z") + 7 * 86400e3).toISOString().slice(0, 10);
+            await updateConversation(phone, { appointment_date: apptDate } as any).catch(() => {});
+            console.log(`[kaya] "${todayName}" on a ${todayName} → next week ${apptDate} for ${phone}`);
+          }
+        }
+      }
       // "Shall I book you for Thursday 15th…?" → "after 3 PM" / "4pm" / "afternoon" keeps THAT day
       {
         const offerDay = lastAssistantMsg.match(/Shall I book you for \w+ (\d{1,2})(?:st|nd|rd|th) of (\w+) at/i);
