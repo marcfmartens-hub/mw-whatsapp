@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { pickDefaultTime } from "@/lib/slots";
+import { classifyTiming } from "@/lib/timing";
 import { SAFE_PRICE_REPLY, getKayaReply, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/lib/meta";
 import { createBiginContact, createChangeTask, toIsoDate, toTime24 } from "@/lib/bigin";
@@ -1452,7 +1453,13 @@ export async function POST(req: NextRequest) {
 
     const deferring = DEFER_PATTERN.test(messageText) && !/\b(\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\b/i.test(messageText)
       && !new RegExp(`\\b${DAY}\\b|\\bweek\\s*-?\\s*end\\b`, "i").test(messageText);
-    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring) {
+    // Not a clear day/time: undecided, vague window, location only, walk-in, depends on someone, a day with
+    // "maybe", or far away (Marc, 13 Oct) → handled with fixed replies below, never booked from this message.
+    // Plain "this week" / "next week" at the when-to-sell question keeps Marc's own reply.
+    const plainWeek = currentStep === 6 && /\b(this|next)\s+week\b/i.test(messageText) && !/\b(later|sometime|maybe|end of)\b/i.test(messageText);
+    const timing = (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !plainWeek) ? classifyTiming(messageText, DEFER_PATTERN) : null;
+    if (timing) console.log(`[kaya] timing ${timing.kind} for ${phone}`);
+    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring && !timing) {
       try {
         const ea = await extractAppointment(messageText);
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
@@ -1545,6 +1552,14 @@ export async function POST(req: NextRequest) {
           await updateConversation(phone, apptSave);
       } catch (e) {
         console.error("early appointment extraction error:", e);
+      }
+      // "Shall I book you for Saturday 17th of October at 12:15 PM?" → "yes" books exactly that
+      {
+        const offer = lastAssistantMsg.match(/Shall I book you for \w+ (\d{1,2})(?:st|nd|rd|th) of (\w+) at (\d{1,2}:\d{2} [AP]M)/i);
+        if (offer && /^\s*(yes|yeah|yep|ya|ok|okay|sure|please|pls|book( it)?|go ahead|fine|perfect|confirm|done|👍)\b/i.test(messageText)) {
+          const d = toIsoDate(`${offer[1]} ${offer[2]}`); const t = toTime24(offer[3]);
+          if (d && t) { apptDate = d; apptTime = t; apptFromMsg = true; defaultedTime = false; await updateConversation(phone, { appointment_date: d, appointment_time: t } as any).catch(() => {}); }
+        }
       }
 
       // Capture alternative phone number if customer provides one at booking step
@@ -2240,6 +2255,32 @@ export async function POST(req: NextRequest) {
         reply = nextQ ? `${HOME_LINE}\n[SPLIT]\n${nextQ}` : HOME_LINE;
       }
     }
+    if (timing && !action) {
+      const addNote = async (n: string) => {
+        const prev = String((conversation as any).car_conditions ?? "");
+        if (!prev.includes(n)) await updateConversation(phone, { car_conditions: prev ? `${prev} | ${n}` : n } as any).catch(() => {});
+      };
+      const fmtT = (x: string) => { const h = +x.slice(0, 2); return `${h % 12 || 12}:${x.slice(3)} ${h < 12 ? "AM" : "PM"}`; };
+      const fmtD = (d: string) => { const x = new Date(d + "T12:00:00Z"); const n = x.getUTCDate(); const sfx = n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th";
+        return `${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][x.getUTCDay()]} ${n}${sfx} of ${["January","February","March","April","May","June","July","August","September","October","November","December"][x.getUTCMonth()]}`; };
+      switch (timing.kind) {
+        case "A": reply = "No problem, just let me know the day and time that suits you."; await addNote("Will confirm the day himself"); break;
+        case "B": reply = timing.options && timing.options.length >= 2 ? `No problem. Would ${timing.options[0]} or ${timing.options[1]} work better for you?` : `No problem. Would ${timing.options?.[0] ?? "Saturday"} work for you?`; break;
+        case "C": reply = `${LOCATION_TEXT}\n[SPLIT]\nWhich day would you like to come?`; await addNote("Asked for location"); break;
+        case "D": reply = "You're welcome during our opening hours (Mon–Sat 10 AM–7 PM, Fri from 12 PM). If you tell me the day, I'll book a slot so we're ready for you. Which day suits you?"; await addNote("Walk-in, no fixed time"); break;
+        case "E": reply = "No problem. When do you think you'll know?"; break;
+        case "F": {
+          const d = toIsoDate(String(timing.day));
+          const dow = d ? new Date(d + "T12:00:00Z").getUTCDay() : -1;
+          if (d && dow !== 0) {
+            const t = await pickDefaultTime(d, phone);
+            reply = `No problem. Shall I book you for ${fmtD(d)} at ${fmtT(t)}? You can always change it.`;
+          } else reply = dow === 0 ? sundayText() : "No problem. Which day works best for you?";
+          break;
+        }
+        case "G": reply = "No problem. Our team will check in with you closer to the time."; if (timing.followUp) await addNote(`Follow-up: ${timing.followUp}`); break;
+      }
+    }
     // Putting it off ("ok i let u know tomorrow") is not a booking — never push, just leave the door open
     if (deferring && currentStep >= 5 && currentStep < CLOSING_STEP && !action && !(conversation.appointment_date && conversation.appointment_time)) {
       reply = "No problem, just let me know the day and time that suits you.";
@@ -2289,7 +2330,7 @@ export async function POST(req: NextRequest) {
     // booking, even if Kaya's text didn't read like a confirmation (stress test: "anything after 2pm"
     // was saved as 2:30 PM but Kaya said the team would call).
     const clearIntent = !defaultedTime || messageText.trim().length <= 30 || /\b(come|coming|visit|bring|book|inspection|see you|available|free|works|ok(ay)?)\b/i.test(messageText);
-    if (!appointmentConfirmedEarly && apptFromMsg && clearIntent && !deferring && currentStep >= 6 && !(currentStep === 6 && defaultedTime) && action?.type !== "OFFER_CALLBACK") {
+    if (!appointmentConfirmedEarly && apptFromMsg && clearIntent && !deferring && !timing && currentStep >= 6 && !(currentStep === 6 && defaultedTime) && action?.type !== "OFFER_CALLBACK") {
       const dIso = toIsoDate(String(apptDate || conversation.appointment_date || "")) ?? "";
       const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
       if (/^\d{4}-\d{2}-\d{2}$/.test(dIso) && t24) {
@@ -2308,7 +2349,7 @@ export async function POST(req: NextRequest) {
     }
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
     // Marc: no cash/consignment question — after "when do you want to sell?" always go to the appointment
-    if (currentStep === 6 && !action && !/\?/.test(messageText)) {
+    if (currentStep === 6 && !action && !timing && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
       void nm;

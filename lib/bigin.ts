@@ -420,6 +420,12 @@ export async function createBiginContact(
     }
     console.log(`[Bigin] contact ${existingId ? "updated" : "created"}:`, text);
     if (applyTag && savedId) await tagRecord(savedId, applyTag, headers);
+    // Far-away timing ("after Eid", "next month"): Next Follow up Date on the pipeline card → the
+    // night workflow moves it to Call Later, so the call center gets it back at the right time
+    {
+      const fu = String((conversation as any).car_conditions ?? "").match(/Follow-up: (\d{4}-\d{2}-\d{2})/)?.[1];
+      if (fu && savedId) await setFollowUpDate(savedId, fu, headers).catch(e => console.warn("[Bigin] follow-up date not set:", e));
+    }
     return true;
   } catch (error) {
     if (attempt < 3) {
@@ -505,5 +511,21 @@ export async function createChangeTask(
   } catch (e) {
     console.error("[Bigin] task create error:", e);
     return { ok: false, error: String(e) };
+  }
+}
+
+
+// The pipeline card is created from the contact by a Bigin workflow, so it can lag a few seconds
+async function setFollowUpDate(contactId: string, date: string, headers: Record<string, string>) {
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(`https://www.zohoapis.com/bigin/v1/Contacts/${contactId}/Pipelines?fields=Deal_Name,Stage,Created_Time`, { headers, cache: "no-store" });
+    const deals = r.status === 200 ? ((await r.json())?.data ?? []) : [];
+    const latest = deals.sort((a: any, b: any) => String(b.Created_Time).localeCompare(String(a.Created_Time)))[0];
+    if (latest?.id) {
+      const u = await fetch("https://www.zohoapis.com/bigin/v1/Pipelines", { method: "PUT", headers, body: JSON.stringify({ data: [{ id: latest.id, Next_Follow_up_Date: date }] }) });
+      console.log(`[Bigin] follow-up date ${date} on deal ${latest.id}: ${u.status}`);
+      return;
+    }
+    await new Promise(res => setTimeout(res, 4000));
   }
 }

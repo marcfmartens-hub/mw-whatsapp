@@ -96,6 +96,12 @@ const SCRIPTS: Record<string, string[]> = {
   early4: ["Hi", "Hamad", "Range Rover 2020", "70k gcc", "no", "Saturday", "as early as possible", "can I have another time?", "11:15", "thanks"],
   figo: ["🚘 What is your car make, model & Year?", "Ali", "I have Ford Figo 2016 model", "🚗 Ford Figo 2016\n\n🔹 Model: 2016\n🔹 Color: White\n🔹 Mileage: 158,800 KM\n🔹 Owner: 2nd Owner\n🔹 Condition: Excellent", "Yes", "I need to sell this week", "How much I can get this car approximately", "Date I confirm you later", "Today not possible", "Later I confirm you date and timing", "I will come on Saturday", "3:15 PM", "ok"],
   figo2: ["Hi", "Ali", "Ford Figo 2016", "158000 km gcc", "this week", "Today not possible", "Please book 17 Oct", "3:00 PM", "ok"],
+  tA: ["Hi", "Sami", "Toyota Camry 2020", "90000 km gcc", "no", "this week", "I will let you know when I come"],
+  tB: ["Hi", "Rami", "Nissan Patrol 2021", "60k gcc", "no loan", "soon", "Maybe later this week", "Saturday", "ok"],
+  tC: ["Hi", "Joe", "Kia Sportage 2021", "50000 km gcc", "no", "this week", "just give me the location", "Thursday", "ok"],
+  tD: ["Hi", "Vik", "Honda Civic 2019", "80k gcc", "no", "this week", "I'll just pass by when I'm free"],
+  tE: ["Hi", "Omar", "Lexus ES 2020", "70k gcc", "no", "this week", "need to check with my wife first", "probably Saturday", "yes"],
+  tG: ["Hi", "Ali", "Toyota Prado 2021", "60k gcc", "no", "after Eid"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
 };
 
@@ -110,7 +116,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["figo", "figo2", "early4", "wk1"];
+export const BATCH = ["tA", "tB", "tC", "tD", "tE", "tG"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
