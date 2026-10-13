@@ -1129,10 +1129,16 @@ export async function POST(req: NextRequest) {
       else if (/\b(it'?s|is)\s+gcc\b|\bgcc\s+not\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
     }
 
+    // "I don't understand what GCC specs" at any step before the booking → explain + ask where it was bought
+    if (currentStep < 8 && /\bgcc\b/i.test(messageText)
+        && /\b(don'?t|do not|didn'?t|dont)\s+(understand|know what|get)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b/i.test(messageText)) {
+      askOrigin = true;
+      delete (vehicleUpdates as any).specs;
+    }
     // Answer to "Did you buy the car here in the UAE, or was it imported from another country?" → country decides the specs (Malaysia, Japan, USA… = non-GCC)
     {
       const lastQo = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
-      if (lastQo.includes("imported from another country") && !alreadyKnown.specs) {
+      if (lastQo.includes("imported from another country")) {
         if (/\b(malays\w*|malesi\w*|japan\w*|usa|us|america\w*|canad\w*|korea\w*|china|chinese|europe\w*|german\w*|uk|england|singapore|thailand|australia|import\w*|outside|abroad)\b/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
         else if (/\b(uae|dubai|abu dhabi|sharjah|ajman|here|local|saudi|ksa|oman|qatar|kuwait|bahrain|gcc|agency|dealer|showroom)\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
         else vehicleUpdates.specs = "Unknown";
@@ -1156,7 +1162,7 @@ export async function POST(req: NextRequest) {
       {
         const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
         const askedGcc = /\bGCC\b[^?]{0,40}\?/i.test(lastQ);
-        if ((askedGcc || /\bgcc\b/i.test(messageText)) && !alreadyKnown.specs && GCC_CONFUSED) {
+        if ((askedGcc || /\bgcc\b/i.test(messageText)) && GCC_CONFUSED && !lastQ.includes("imported from another country")) {
           askOrigin = true;
         } else if (askedGcc && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
           if (/\b(not sure|no idea|don'?t know|idk)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
@@ -1610,8 +1616,14 @@ export async function POST(req: NextRequest) {
       {
         const offerDay = lastAssistantMsg.match(/Shall I book you for \w+ (\d{1,2})(?:st|nd|rd|th) of (\w+) at/i);
         const dayHere = new RegExp(`\\b${DAY}\\b`, "i").test(messageText);
-        if (offerDay && !dayHere) {
-          const d = toIsoDate(`${offerDay[1]} ${offerDay[2]}`);
+        // …or the customer named the day in their previous message ("Maybe Thursday" → "after 3 PM")
+        const prevUser = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "user" && m.content !== messageText)?.content ?? "";
+        const prevDayW = prevUser.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday)\b/i)?.[1];
+        const timeHere = /\b(after|before|around|at)\s+\d{1,2}|\b\d{1,2}(:\d{2})?\s*(am|pm)\b|\b(morning|afternoon|evening)\b/i.test(messageText);
+        const carryIso = offerDay ? toIsoDate(`${offerDay[1]} ${offerDay[2]}`)
+          : (prevDayW && timeHere && !/You're booked for/i.test(lastAssistantMsg)) ? toIsoDate(prevDayW) : null;
+        if (carryIso && !dayHere) {
+          const d = carryIso;
           if (d) {
             apptDate = d;
             let t: string | null = null;
