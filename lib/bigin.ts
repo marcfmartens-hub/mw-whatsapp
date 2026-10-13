@@ -3,7 +3,29 @@ import type { Conversation } from "./supabase";
 const BIGIN_CONTACTS_URL = "https://www.zohoapis.com/bigin/v1/Contacts";
 const ZOHO_TOKEN_URL = "https://accounts.zoho.com/oauth/v2/token";
 
+// Zoho allows only a few token refreshes per 10 minutes — reuse the access token (valid 1 hour) instead of
+// refreshing on every Bigin call (kept in memory per server instance; never stored anywhere readable).
+let tokenCache: { token: string; exp: number } | null = null;
+let tokenInflight: Promise<string> | null = null;
+
 export async function getAccessToken(): Promise<string> {
+  if (tokenCache && tokenCache.exp > Date.now()) return tokenCache.token;
+  if (tokenInflight) return tokenInflight;
+  tokenInflight = (async () => {
+    let lastErr: unknown;
+    for (let i = 0; i < 2; i++) {
+      try {
+        const token = await refreshAccessToken();
+        tokenCache = { token, exp: Date.now() + 50 * 60e3 };
+        return token;
+      } catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 3000)); }
+    }
+    throw lastErr;
+  })().finally(() => { tokenInflight = null; });
+  return tokenInflight;
+}
+
+async function refreshAccessToken(): Promise<string> {
   const refreshToken = process.env.BIGIN_REFRESH_TOKEN;
   const clientId = process.env.BIGIN_CLIENT_ID;
   const clientSecret = process.env.BIGIN_CLIENT_SECRET;
