@@ -2519,7 +2519,7 @@ export async function POST(req: NextRequest) {
       if (pend) reply = pend;
     }
     // Starting with "Nice," every time sounds robotic — once per chat is enough
-    if (/^Nice[,!.]?\s+/i.test(reply) && history.some(m => m.role === "assistant" && /(^|\n)Nice\b/i.test(m.content))) {
+    if (/^Nice[,!.]?\s+/i.test(reply) && ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && /\bnice\b/i.test(m.content))) {
       reply = reply.replace(/^Nice[,!.]?\s+/i, "");
       reply = reply.charAt(0).toUpperCase() + reply.slice(1);
     }
@@ -2610,7 +2610,7 @@ export async function POST(req: NextRequest) {
     }
     // A bit of emotion (Marc): once per chat, react to a very low mileage or a special car
     {
-      const said = history.some(m => m.role === "assistant" && /^nice,/i.test(m.content));
+      const said = currentStep >= 5 || ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && /\bnice\b/i.test(m.content));
       const yr = parseInt(String(estYear), 10);
       const km = estMileage ? parseInt(String(estMileage).replace(/\D/g, ""), 10) : NaN;
       const age = yr ? Math.max(1, new Date().getFullYear() - yr) : 0;
