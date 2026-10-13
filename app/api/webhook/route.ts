@@ -1286,7 +1286,9 @@ export async function POST(req: NextRequest) {
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
     const timeInMsg = new RegExp(`\\b${TIME}`, "i").test(messageText);
     const dayWord   = messageText.match(new RegExp(`\\b${DAY}\\b`, "i"))?.[0];
-    const differentDay = !!dayWord && toIsoDate(dayWord) !== conversation.appointment_date;
+    const satDow = conversation.appointment_date ? new Date(String(conversation.appointment_date) + "T12:00:00Z").getUTCDay() : -1;
+    const differentDay = (!!dayWord && toIsoDate(dayWord) !== conversation.appointment_date)
+      || (/\bweek\s*-?\s*end\b/i.test(messageText) && satDow !== 6);
     const GOODBYE = /\b(see you|thanks|thank you|great|perfect|cool|noted|got it)\b/i;
     // A day/time inside a longer question ("can the team confirm before tomorrow morning?") is not a new booking time
     const CHANGE_WORDS = /\b(come|coming|book|instead|change|move|switch|make it|can we do|how about|what about|better|rather)\b/i;
@@ -2182,13 +2184,29 @@ export async function POST(req: NextRequest) {
       // Marc: "asap / as early as possible / soon / quick…" → "No problem!" then the closed line + time question
       const SOON = /\b(when the price is (right|good)|if the price is (right|good)|depends on the price|asap|a\.s\.a\.p|as (early|soon|fast|quick)(ly)? as possible|soon|early|quick(ly)?|fast|urgent(ly)?|now|immediately|today|tomorrow|tonorrow|tmrw|this week)\b/i;
       // "within 10 days" / "in a few days" / "next few days" → same answer as "this week" (Marc)
-      const SOME_DAYS = /\b(with\s*in|in|next|coming)\s+(a\s+|the\s+)?(few|couple( of)?|\d+|two|three|four|five|ten)\s+(days|weeks)\b|\bfew days\b|\bend of (the )?week\b|\bweekend\b/i;
+      const SOME_DAYS = /\b(with\s*in|in|next|coming)\s+(a\s+|the\s+)?(few|couple( of)?|\d+|two|three|four|five|ten)\s+(days|weeks)\b|\bfew days\b|\bend of (the )?week\b/i;
       const weekWord = messageText.match(/\b(this|next)\s+week\b/i)?.[1]?.toLowerCase() ?? (SOME_DAYS.test(messageText) ? "this" : undefined);
       const firstDay = /\b(today|this afternoon)\b/i.test(q) ? "today" : "tomorrow";
       // "I can come tomorrow" / "Thursday" → that day, not today's slots
       const dayM = messageText.match(/\b(tomorrow|tmrw|tmr|monday|tuesday|wednesday|thursday|friday|saturday)\b/i)?.[1]?.toLowerCase();
       const dayLabel = dayM ? (/^(tomorrow|tmrw|tmr)$/.test(dayM) ? "tomorrow" : `on ${dayM.charAt(0).toUpperCase() + dayM.slice(1)}`) : "";
-      reply = dayLabel && !weekWord
+      // "weekend" → Saturday (closed on Sunday); never offer today/tomorrow after that (Marc)
+      const wantsWeekend = /\bweek\s*-?\s*end\b/i.test(messageText);
+      let satIso = "";
+      if (wantsWeekend) {
+        const n = new Date(Date.now() + 4 * 3600e3);
+        let add = (6 - n.getUTCDay() + 7) % 7; if (add === 0 && n.getUTCHours() >= 18) add = 7;
+        satIso = new Date(n.getTime() + add * 86400e3).toISOString().slice(0, 10);
+      }
+      // Remember the chosen day, so "earliest possible" / "afternoon" next books that day
+      const chosenDayIso = satIso || (dayM ? (toIsoDate(dayM) ?? "") : "");
+      if (/^\d{4}-\d{2}-\d{2}$/.test(chosenDayIso)) {
+        apptDate = chosenDayIso;
+        await updateConversation(phone, { appointment_date: chosenDayIso, appointment_time: null } as any).catch(() => {});
+      }
+      reply = wantsWeekend
+        ? "No problem, Saturday works. What time is best for you to bring the car on Saturday?"
+        : dayLabel && !weekWord
         ? `No problem, what time is best for you to bring the car ${dayLabel}?`
         : weekWord
         // Marc: "this week / next week" → offer the first possible day, or a day of their choice
