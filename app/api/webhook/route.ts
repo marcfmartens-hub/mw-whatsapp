@@ -2238,7 +2238,9 @@ export async function POST(req: NextRequest) {
       // Goodbye only in the very last message: not here if we still ask the name / number after the booking
       const conf = confRaw && (!nmForConf || !isUAE) ? confRaw.replace(/\s*(Have a nice (day|evening)|See you (later|tomorrow))[^!]*!/, "") : confRaw;
       if (conf) {
-        const summary = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
+        // Keep only the car-summary lines from Kaya's own text (her "booked you for 10:00" could contradict the slot)
+        const summaryRaw = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
+        const summary = summaryRaw?.split("\n").filter(l => /^(Make|Model|Year|Mileage|Specs|Loan):/i.test(l.trim())).join("\n");
         replyParts = [...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
