@@ -84,6 +84,14 @@ export async function runWaReminders(req: NextRequest, job: "evening" | "night" 
       await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/add_tags?tag_names=${encodeURIComponent(tag)}&over_write=false`, { method: "POST", headers })
         .catch(e => console.warn("[wa-reminders] tag error:", e));
     }
+    // A follow-up card that got a date later (Call Later) → CALL LATER tag instead of NO RESPONSE
+    for (const d of await stageDeals("Call Later", headers)) {
+      const tags = (d.Tag ?? []).map((t: any) => t.name);
+      if (d.Next_Follow_up_Date && !tags.includes("CALL LATER")) {
+        await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/add_tags?tag_names=${encodeURIComponent("CALL LATER")}&over_write=false`, { method: "POST", headers }).catch(() => {});
+        if (tags.includes("NO RESPONSE")) await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/remove_tags?tag_names=${encodeURIComponent("NO RESPONSE")}`, { method: "POST", headers }).catch(() => {});
+      }
+    }
     console.log(`[wa-reminders] night: ${noResp.length} no response → WA Follow-ups / Day 1`, JSON.stringify(nr.map(r => r.status)));
     return NextResponse.json({ job, reminderSent: ticked.map(d => d.Deal_Name), noShows: noShow.map(d => d.Deal_Name), noResponse: noResp.map(d => d.Deal_Name), results: [...res, ...ns, ...nr].map(r => r.status) });
   }
