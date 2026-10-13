@@ -9,18 +9,6 @@
     {
       "path": "/api/cron/nudge",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/wa-reminders/evening",
-      "schedule": "0 14-19 * * *"
-    },
-    {
-      "path": "/api/cron/wa-reminders/night",
-      "schedule": "55 19 * * *"
-    },
-    {
-      "path": "/api/cron/wa-reminders/rebook",
-      "schedule": "*/10 * * * *"
     }
   ]
 }
