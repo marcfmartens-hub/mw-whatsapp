@@ -434,6 +434,21 @@ function appointmentConfirmedEarlyGuard(_d: string, _t: string): boolean { retur
 
 // The booking question Kaya asked last ("What time can you come in this afternoon?") — to pick up where
 // we left off after a side question (location, price), instead of starting a new "which day" question
+// "Tuesday 10 am" said on a Tuesday after 10 am (or the customer said "next week") means NEXT Tuesday
+function rollSameWeekday(iso: string | null, text: string, timeRaw: string, userHistory: string[]): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const nowD = new Date(Date.now() + 4 * 3600e3);
+  const todayIso = nowD.toISOString().slice(0, 10);
+  if (iso !== todayIso) return iso;
+  const todayName = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"][nowD.getUTCDay()];
+  if (!new RegExp(`\\b${todayName}\\b`, "i").test(text) || /\b(today|tonight|now|this (morning|afternoon|evening))\b/i.test(text)) return iso;
+  const nowMin = nowD.getUTCHours() * 60 + nowD.getUTCMinutes();
+  const t24 = toTime24(timeRaw || "");
+  const passed = t24 ? +t24.slice(0, 2) * 60 + +t24.slice(3) <= nowMin + 30 : nowMin >= 17 * 60;
+  const nextWeekCtx = [...userHistory, text].some(t => /\bnext week\b/i.test(t));
+  return passed || nextWeekCtx ? new Date(Date.parse(todayIso + "T12:00:00Z") + 7 * 86400e3).toISOString().slice(0, 10) : iso;
+}
+
 function pendingBookingQ(lastAssistant: string): string | null {
   const qs = lastAssistant.split(/\n+|\[SPLIT\]|(?<=[.!?])\s+/).map(x => x.trim()).filter(x => /\?\s*$/.test(x));
   const q = [...qs].reverse().find(x => /\b(shall i book you|what time|which day|which time|when would you like to (come|bring)|would .+ or .+ work)\b/i.test(x));
@@ -1437,6 +1452,8 @@ export async function POST(req: NextRequest) {
               cand = m1 ? toIsoDate(`${m1[1]} ${m1[4]}`) : m2 ? toIsoDate(m2[1]) : null;
             }
           }
+          cand = rollSameWeekday(cand, messageText, String(ea2.appointment_time ?? ""),
+            ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content));
           if (okDay(cand) && cand !== dIso) newDay = cand!;
         }
         let t24 = toTime24(String(ea2.appointment_time ?? ""));
@@ -1614,20 +1631,12 @@ export async function POST(req: NextRequest) {
       }
       // "Tuesday 10 am" said on a Tuesday after 10 am (or after "next week") means NEXT Tuesday, not today
       {
-        const nowD = new Date(Date.now() + 4 * 3600e3);
-        const todayIso = nowD.toISOString().slice(0, 10);
-        const todayName = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"][nowD.getUTCDay()];
-        if (String(apptDate) === todayIso && new RegExp(`\\b${todayName}\\b`, "i").test(messageText) && !/\b(today|tonight|now|this (morning|afternoon|evening))\b/i.test(messageText)) {
-          const nowMin = nowD.getUTCHours() * 60 + nowD.getUTCMinutes();
-          const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
-          const passed = t24 ? +t24.slice(0, 2) * 60 + +t24.slice(3) <= nowMin + 30 : nowMin >= 17 * 60;
-          const nextWeekCtx = [...((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content), messageText]
-            .some(t => /\bnext week\b/i.test(t));
-          if (passed || nextWeekCtx) {
-            apptDate = new Date(Date.parse(todayIso + "T12:00:00Z") + 7 * 86400e3).toISOString().slice(0, 10);
-            await updateConversation(phone, { appointment_date: apptDate } as any).catch(() => {});
-            console.log(`[kaya] "${todayName}" on a ${todayName} → next week ${apptDate} for ${phone}`);
-          }
+        const rolled = rollSameWeekday(String(apptDate || ""), messageText, String(apptTime || conversation.appointment_time || ""),
+          ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content));
+        if (rolled && rolled !== String(apptDate || "")) {
+          apptDate = rolled;
+          await updateConversation(phone, { appointment_date: apptDate } as any).catch(() => {});
+          console.log(`[kaya] same weekday → next week ${apptDate} for ${phone}`);
         }
       }
       // "Shall I book you for Thursday 15th…?" → "after 3 PM" / "4pm" / "afternoon" keeps THAT day
@@ -1640,7 +1649,8 @@ export async function POST(req: NextRequest) {
         const timeHere = /\b(after|before|around|at)\s+\d{1,2}|\b\d{1,2}(:\d{2})?\s*(am|pm)\b|\b(morning|afternoon|evening)\b/i.test(messageText);
         const carryIso = offerDay ? toIsoDate(`${offerDay[1]} ${offerDay[2]}`)
           : (prevDayW && timeHere && !/You're booked for/i.test(lastAssistantMsg)) ? toIsoDate(prevDayW) : null;
-        if (carryIso && !dayHere) {
+        const isQuestion = /\?|^\s*(what|when|how|do|does|are|is|can|which|where|till|until)\b/i.test(messageText);
+        if (carryIso && !dayHere && !isQuestion) {
           const d = carryIso;
           if (d) {
             apptDate = d;
