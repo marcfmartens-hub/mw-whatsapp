@@ -1922,7 +1922,7 @@ export async function POST(req: NextRequest) {
     // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
     {
       const NAMED_PERSON = /\b(speak|talk|chat)\s+(to|with)\s+(mr\.?\s+|mrs\.?\s+|ms\.?\s+)?(?!(you|u|me|him|her|them|us|someone|somebody|anyone|people|the|a|an|your|my|our|his|their|this|that|it|later|again|soon|family|wife|husband|brother|sister|friend|father|mother|dad|mom|bank)\b)[a-z]{3,}\b/i;
-      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b/i;
+      const HUMAN_ASK  = /\b((speak|talk|chat)\s+(to|with)\s+(a\s+|your\s+|the\s+|one of your\s+)?(real\s+|actual\s+)?(someone|somebody|person|human|agent|manager|staff|team|people|guys)|(want|need|prefer)\s+(a\s+)?(real|actual)\s+person|human agent|call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?])))\b|\b(ask|tell|have|get)\s+(any ?one|some ?one|somebody|anybody|your team|the team)\s+(to\s+)?(contact|call|ring|reach)\s+me\b|\b(any ?one|some ?one|somebody|anybody)\s+(can|could|should|to|please)?\s*(contact|call|ring|reach)\s+me\b|\b(speak|talk|chat)\s+(to|with)\s+(a\s+)?(human|real|live)\b|\b(human|customer service|sales)\s+(representative|rep|agent|person)\b/i;
       const HUMAN_LINE = "I'll have someone from our team contact you";   // + timing, see below
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const inHumanMode = hist.some(m => m.role === "assistant" && m.content.includes(HUMAN_LINE))
