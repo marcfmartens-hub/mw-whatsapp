@@ -84,6 +84,8 @@ const SCRIPTS: Record<string, string[]> = {
   sun2: ["Hi", "Majid", "Nissan Patrol 2022", "45k gcc", "no loan", "this week", "Sunday 11am", "Friday afternoon", "ok"],
   early1: ["Hi", "Yousef", "Lexus LX 2021", "50000 km gcc", "no", "weekend", "earliest possible", "that's too early, do you have something later?", "ok"],
   early2: ["Hi", "Hamad", "Range Rover 2020", "70k gcc", "no", "Saturday", "as early as possible", "can we do 11?", "actually 11:30 is better", "thanks"],
+  early3: ["Hi", "Yousef", "Lexus LX 2021", "50000 km gcc", "no", "weekend", "earliest possible", "that's too early, do you have something later?", "the second one", "ok"],
+  early4: ["Hi", "Hamad", "Range Rover 2020", "70k gcc", "no", "Saturday", "as early as possible", "can I have another time?", "11:15", "thanks"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
 };
 
@@ -98,7 +100,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["sun1", "sun2"];
+export const BATCH = ["early3", "early4", "sun1", "sun2"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });

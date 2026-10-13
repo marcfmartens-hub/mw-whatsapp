@@ -427,6 +427,15 @@ function getBookingSlot(): string {
 }
 
 // When the team will contact the customer: "shortly" while open, otherwise the next opening morning.
+// Customer wants Sunday (closed) — the context is Sunday, not whether we're open right now (Marc):
+// today Friday → Saturday only · today Saturday → open again Monday · otherwise Friday or Saturday
+function sundayText(): string {
+  const dow = new Date(Date.now() + 4 * 3600e3).getUTCDay();
+  if (dow === 5) return "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM. Would Saturday work for you?";
+  if (dow === 6) return "Sorry, we're closed on Sundays. We're open again on Monday from 10 AM to 7 PM. Would Monday work for you?";
+  return "Sorry, we're closed on Sundays. We're open on Friday from 12 PM to 7 PM and on Saturday from 10 AM to 7 PM. Which day works best for you?";
+}
+
 function teamWhen(): string {
   const OPEN: Record<number, number | null> = { 0: null, 1: 10, 2: 10, 3: 10, 4: 10, 5: 12, 6: 10 };
   const now = new Date(Date.now() + 4 * 60 * 60 * 1000);
@@ -1308,10 +1317,12 @@ export async function POST(req: NextRequest) {
     {
       const recentA = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-2).map(m => m.content).join("\n");
       // X:15 times are only ever picked by Kaya (customer times round to :00/:30), so a :15 booking = our default
-      const offeredChange = /if another time suits you better|I've changed it/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
+      const offeredChange = /if another time suits you better|I've changed it|would .+ or .+ work for you/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
       const dIso = String(conversation.appointment_date ?? "");
       const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|afternoon|evening|too early|too late)\b/i.test(messageText)
         || /\b(a bit|little|bit|any(thing)?|something|slot|time)\s+(later|earlier)\b|\b(later|earlier)\s*(slot|time|please|pls|\?)|^\s*(later|earlier)\b/i.test(messageText)
+        || /\b(another|different|other) (time|slot)\b|\bchange the time\b/i.test(messageText)
+        || (/would .+ or .+ work for you/i.test(recentA) && /\b(first|1st|second|2nd|last|former|latter)\b/i.test(messageText))
         || /^\s*(at\s+)?(1[0-2]|[1-9])([:.]\d{2})?\s*(please|pls|ok)?\s*[?.!]*\s*$/i.test(messageText) || /\b(can we do|how about|what about|make it)\s+(1[0-2]|[1-9])([:.]\d{2})?\b/i.test(messageText);
       if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && prefersTime && !CANCEL.test(messageText)) {
         let t: string | null = null;
@@ -1325,9 +1336,38 @@ export async function POST(req: NextRequest) {
         const curT = toTime24(String(conversation.appointment_time ?? "")) ?? "12:15";
         const curM = +curT.slice(0, 2) * 60 + +curT.slice(3);
         const LADDER = ["10:15", "11:15", "12:15", "13:15", "14:15", "15:15", "16:15", "17:15", "18:15"];
-        if (!t24 && /\btoo early\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+later\b|\blater\s*(slot|time|please|pls|\?)|^\s*later\b/i.test(messageText)) t = LADDER.find(x => +x.slice(0, 2) * 60 + +x.slice(3) > curM) ?? null;
-        else if (!t24 && /\btoo late\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+earlier\b|\bearlier\s*(slot|time|please|pls|\?)|^\s*earlier\b/i.test(messageText) && !/\b(earliest|as early as possible)\b/i.test(messageText)) t = [...LADDER].reverse().find(x => +x.slice(0, 2) * 60 + +x.slice(3) < curM) ?? null;
-        if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
+        // Picking one of the two options we offered ("the first one", "2nd")
+        const offered = [...recentA.matchAll(/\*?(\d{1,2}:\d{2}\s*[AP]M)\*?/gi)].map(m => toTime24(m[1])).filter(Boolean) as string[];
+        if (!t24 && /would .+ or .+ work for you/i.test(recentA) && offered.length >= 2) {
+          if (/\b(first|1st|earlier one|former)\b/i.test(messageText)) t24 = offered[offered.length - 2];
+          else if (/\b(second|2nd|last|later one|latter)\b/i.test(messageText)) t24 = offered[offered.length - 1];
+        }
+        // "later" / "too early" / "earlier" / "another time" → give TWO options, don't pick one (Marc)
+        const minsOf = (x: string) => +x.slice(0, 2) * 60 + +x.slice(3);
+        const dowA = new Date(dIso + "T12:00:00Z").getUTCDay();
+        const openA = dowA === 5 ? 12 * 60 : 10 * 60;
+        const ladder = LADDER.filter(x => minsOf(x) >= openA && x !== curT);
+        let options: string[] = [];
+        if (!t24 && /\btoo early\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+later\b|\blater\s*(slot|time|please|pls|\?)|^\s*later\b/i.test(messageText)) {
+          const later = ladder.filter(x => minsOf(x) > curM);
+          options = later.length >= 2 ? [later[0], later[Math.min(later.length - 1, 3)]] : later;
+        } else if (!t24 && /\btoo late\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+earlier\b|\bearlier\s*(slot|time|please|pls|\?)|^\s*earlier\b/i.test(messageText) && !/\b(earliest|as early as possible)\b/i.test(messageText)) {
+          const earlier = ladder.filter(x => minsOf(x) < curM);
+          options = earlier.length >= 2 ? [earlier[0], earlier[earlier.length - 1]] : earlier;
+        } else if (!t24 && /\b(another|different|other) (time|slot)\b|\bchange the time\b|\bnot (that|this) time\b/i.test(messageText)) {
+          options = ["11:15", "14:15"].filter(x => x !== curT && minsOf(x) >= openA);
+          if (options.length < 2) options = ladder.filter(x => !options.includes(x)).slice(0, 2 - options.length).concat(options).sort();
+        }
+        if (options.length === 1) t = options[0];
+        else if (options.length >= 2) {
+          const fmt = (x: string) => { const h = +x.slice(0, 2); return `${h % 12 || 12}:${x.slice(3)} ${h < 12 ? "AM" : "PM"}`; };
+          const ask = `No problem. Would ${fmt(options[0])} or ${fmt(options[1])} work for you?`;
+          await sendWhatsAppMessage(phone, ask);
+          await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
+          await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, ask);
+          return NextResponse.json({ status: "time_options" }, { status: 200 });
+        }
+        if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = m % 15 === 0 ? m : Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
         else if (!t && /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
         else if (!t && /\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "afternoon");
         else if (!t && /\bevening\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "evening");
@@ -2114,7 +2154,7 @@ export async function POST(req: NextRequest) {
       const dIsoS = String(apptDate || "");
       const isSun = !dIsoS || (/^\d{4}-\d{2}-\d{2}$/.test(dIsoS) && new Date(dIsoS + "T12:00:00Z").getUTCDay() === 0);
       if (isSun) {
-        reply = "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM, and on Friday from 12 PM to 7 PM. Which day works best for you?";
+        reply = sundayText();
         apptDate = ""; apptTime = ""; apptFromMsg = false;
         await updateConversation(phone, { appointment_date: null, appointment_time: null } as any).catch(() => {});
       }
@@ -2229,7 +2269,7 @@ export async function POST(req: NextRequest) {
       const saysSunday = /\bsun(day)?\b/i.test(messageText);
       if (saysSunday) await updateConversation(phone, { appointment_date: null, appointment_time: null } as any).catch(() => {});
       reply = saysSunday
-        ? "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM, and on Friday from 12 PM to 7 PM. Which day works best for you?"
+        ? sundayText()
         : wantsWeekend
         ? "No problem, Saturday works. What time is best for you to bring the car on Saturday?"
         : dayLabel && !weekWord
