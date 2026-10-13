@@ -1308,17 +1308,29 @@ export async function POST(req: NextRequest) {
     {
       const recentA = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-2).map(m => m.content).join("\n");
       // X:15 times are only ever picked by Kaya (customer times round to :00/:30), so a :15 booking = our default
-      const offeredChange = /if another time suits you better/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
+      const offeredChange = /if another time suits you better|I've changed it/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
       const dIso = String(conversation.appointment_date ?? "");
-      const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|afternoon|evening|later|earlier)\b/i.test(messageText);
+      const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|afternoon|evening|too early|too late)\b/i.test(messageText)
+        || /\b(a bit|little|bit|any(thing)?|something|slot|time)\s+(later|earlier)\b|\b(later|earlier)\s*(slot|time|please|pls|\?)|^\s*(later|earlier)\b/i.test(messageText)
+        || /^\s*(at\s+)?(1[0-2]|[1-9])([:.]\d{2})?\s*(please|pls|ok)?\s*[?.!]*\s*$/i.test(messageText) || /\b(can we do|how about|what about|make it)\s+(1[0-2]|[1-9])([:.]\d{2})?\b/i.test(messageText);
       if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && prefersTime && !CANCEL.test(messageText)) {
         let t: string | null = null;
         const ea2 = await extractAppointment(messageText).catch(() => ({ appointment_date: "", appointment_time: "" }));
-        const t24 = toTime24(String(ea2.appointment_time ?? ""));
+        let t24 = toTime24(String(ea2.appointment_time ?? ""));
+        // "11" / "at 11" / "11.30" without am/pm → 8–12 = morning, 1–7 = afternoon
+        if (!t24) {
+          const bare = messageText.match(/\b(?:at\s+)?(1[0-2]|[1-9])(?:[:.](\d{2}))?\b(?!\s*(km|k\b|%|aed|dhs))/i);
+          if (bare) { let h = +bare[1]; if (h >= 1 && h <= 7) h += 12; t24 = `${String(h).padStart(2, "0")}:${bare[2] ?? "00"}`; }
+        }
+        const curT = toTime24(String(conversation.appointment_time ?? "")) ?? "12:15";
+        const curM = +curT.slice(0, 2) * 60 + +curT.slice(3);
+        const LADDER = ["10:15", "11:15", "12:15", "13:15", "14:15", "15:15", "16:15", "17:15", "18:15"];
+        if (!t24 && /\btoo early\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+later\b|\blater\s*(slot|time|please|pls|\?)|^\s*later\b/i.test(messageText)) t = LADDER.find(x => +x.slice(0, 2) * 60 + +x.slice(3) > curM) ?? null;
+        else if (!t24 && /\btoo late\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+earlier\b|\bearlier\s*(slot|time|please|pls|\?)|^\s*earlier\b/i.test(messageText) && !/\b(earliest|as early as possible)\b/i.test(messageText)) t = [...LADDER].reverse().find(x => +x.slice(0, 2) * 60 + +x.slice(3) < curM) ?? null;
         if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
-        else if (/\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|earlier)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
-        else if (/\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "afternoon");
-        else if (/\b(evening|later)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "evening");
+        else if (!t && /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
+        else if (!t && /\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "afternoon");
+        else if (!t && /\bevening\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "evening");
         const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
         const mins = t ? +t.slice(0, 2) * 60 + +t.slice(3) : -1;
         if (t && mins >= (dow === 5 ? 12 * 60 : 10 * 60) && mins <= 18 * 60 + 30) {
@@ -2096,6 +2108,16 @@ export async function POST(req: NextRequest) {
         ? (saidUrgent ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "Which day works for you?") : "Which day this week works for you?")
         : "Which day would be good for you?";
       reply = `${pricePushCount === 0 ? PRICE_1 : PRICE_2}\n[SPLIT]\n${dayQ}`;
+    }
+    // Sunday (closed) → mention Saturday and Friday, never book a Sunday (Marc)
+    if (/\bsun(day)?\b/i.test(messageText) && currentStep >= 5 && currentStep < CLOSING_STEP && action?.type !== "OFFER_CALLBACK") {
+      const dIsoS = String(apptDate || "");
+      const isSun = !dIsoS || (/^\d{4}-\d{2}-\d{2}$/.test(dIsoS) && new Date(dIsoS + "T12:00:00Z").getUTCDay() === 0);
+      if (isSun) {
+        reply = "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM, and on Friday from 12 PM to 7 PM. Which day works best for you?";
+        apptDate = ""; apptTime = ""; apptFromMsg = false;
+        await updateConversation(phone, { appointment_date: null, appointment_time: null } as any).catch(() => {});
+      }
     }
     // First home-visit question → one explanation, then carry on with the next question
     {
