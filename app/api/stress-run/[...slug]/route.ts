@@ -17,10 +17,25 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
   const [key, action, job] = params.slug ?? [];
   if (key !== KEY) return NextResponse.json({ error: "no" }, { status: 404 });
 
+  // Every result link can be used once (the fetch tool caches by URL), so each link does the next step:
+  // no run / last result already read → start a new run · running → status · finished → show (once)
   if (action === "res" && job) {
-    const { data } = await supabase.from("mw_whatsapp").select("car_conditions").eq("phone", `stress_${job}`).maybeSingle();
-    const out = String(data?.car_conditions ?? "");
-    return txt(out ? (out.startsWith("RUNNING") ? `job ${job}: still running` : out) : `job ${job}: not found`);
+    const ROW = "stress_latest";
+    const { data } = await supabase.from("mw_whatsapp").select("car_conditions, step").eq("phone", ROW).maybeSingle();
+    const state = data ? Number(data.step) : -1; // 0 running · 1 done unread · 2 read
+    if (state === 0) return txt("still running — try the next link in a minute");
+    if (state === 1) {
+      await supabase.from("mw_whatsapp").update({ step: 2 } as any).eq("phone", ROW);
+      return txt(String(data!.car_conditions ?? ""));
+    }
+    hookConsole();
+    if (data) await supabase.from("mw_whatsapp").update({ step: 0, car_conditions: "RUNNING" } as any).eq("phone", ROW);
+    else await supabase.from("mw_whatsapp").insert({ phone: ROW, step: 0, car_conditions: "RUNNING" } as any);
+    waitUntil((async () => {
+      const outs = await Promise.all(BATCH.map(n => runScenario(n).catch(e => `SCENARIO ${n}: CRASH ${e}`)));
+      await supabase.from("mw_whatsapp").update({ step: 1, car_conditions: outs.join("\n\n==========\n\n") } as any).eq("phone", ROW);
+    })());
+    return txt(`started a new run (${BATCH.length} scenarios) — results on the next link in ~4 minutes`);
   }
 
   if (action === "start") {
