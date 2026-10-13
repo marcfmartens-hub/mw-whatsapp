@@ -655,6 +655,22 @@ export async function POST(req: NextRequest) {
     // ──────────────────────────────────────────────────────────────
 
     const conversation = await getOrCreateConversation(phone);
+    if (/^\[(photo|file)\]\s*$/.test(messageText)) {
+      const cc = conversation as any;
+      const carDone = ["make", "model", "year", "mileage"].every(k => cc[k] && cc[k] !== "Unknown");
+      if (carDone) {
+        const hist0 = (cc.messages ?? []) as ConversationMessage[];
+        const ACK = "Thanks, I've passed the photos on to our team.";
+        const lastA = [...hist0].reverse().find(m => m.role === "assistant")?.content ?? "";
+        if (!hist0.slice(-6).some(m => m.role === "assistant" && m.content.includes(ACK)) && !lastA.includes(ACK)) {
+          await sendWhatsAppMessage(phone, ACK);
+          await appendHistory(phone, hist0, messageText, ACK);
+        } else {
+          await updateConversation(phone, { messages: [...hist0, { role: "user", content: messageText }].slice(-40), last_message_at: new Date().toISOString() } as any).catch(() => {});
+        }
+        return NextResponse.json({ status: "photos_ack" }, { status: 200 });
+      }
+    }
 
     // Stale-state guard: if step > 1 but no message history, the conversation
     // is in a corrupt/leftover state. Silently reset before continuing.
@@ -1291,7 +1307,7 @@ export async function POST(req: NextRequest) {
     }
     const notesEarly = String((conversation as any).car_conditions ?? "");
     const noBookingCase = /(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:|NOT A CAR:)/.test(notesEarly)
-      || (conversation as any).non_gcc_handoff === true || conversation.specs === "Non-GCC";
+      || (((conversation as any).non_gcc_handoff === true || conversation.specs === "Non-GCC") && !String((conversation as any).car_conditions ?? "").includes("Non-GCC: booking offered"));
     // "call me after 6pm" / "call tomorrow morning" is about a phone call, not a visit
     const aboutCall = (t: string) => /\bcall(s|ed|ing)?\b/i.test(t) && !/\b(come|coming|book|visit|bring|inspection|drop)\b/i.test(t);
     const wantsBooking = !noBookingCase && currentStep >= 1 && currentStep < FINAL_STEP &&
@@ -1340,7 +1356,7 @@ export async function POST(req: NextRequest) {
     // except for cases that never get an appointment (Hiyaza, buyer-only, multiple cars, non-GCC)
     const notesNow = String((conversation as any).car_conditions ?? "");
     const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:)/.test(notesNow)
-      && (conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC";
+      && ((String((conversation as any).car_conditions ?? "").includes("Non-GCC: booking offered")) || ((conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC"));
     const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
     // We picked the time ourselves ("If another time suits you better, just let me know") and the customer now
     // says which time they prefer → adjust it right away (that's not a reschedule for the call center)
@@ -1981,7 +1997,8 @@ export async function POST(req: NextRequest) {
     }
     const isNonGcc = (vehicleUpdates.specs ?? carSpecs) === "Non-GCC" && carSpecs === "Non-GCC";
     const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
-    if (((isNonGcc && currentStep >= 1) || alreadyHandedOff) && currentStep < CLOSING_STEP) {
+    const ngBookingOffered = String((conversation as any).car_conditions ?? "").includes("Non-GCC: booking offered");
+    if (((isNonGcc && currentStep >= 1) || alreadyHandedOff) && currentStep < CLOSING_STEP && !ngBookingOffered) {
       const firstTime = !alreadyHandedOff;
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const vDb = vehicleDbFields(vehicleUpdates);
@@ -1996,7 +2013,7 @@ export async function POST(req: NextRequest) {
       const missingCar  = (["make", "model", "year", "mileage"] as const).find(k => !c[k] || c[k] === "Unknown");
 
       // A question instead of an answer → purchasing team will discuss it; repeat the open question
-      const ngQuestion = !firstTime && /\?|\b(do|does|can|could|will|would)\s+(you|u)\b|\bhow much\b|\bprice\b|\boffer\b|\bhome\s*(visit|service)/i.test(messageText)
+      const ngQuestion = !firstTime && /\?|\b(do|does|can|could|will|would)\s+(you|u)\b|\bhow much\b|\bwhat.{0,15}\b(price|offer)\b|\bhome\s*(visit|service)/i.test(messageText)
         && !/\b(difference|explain|which is better)\b/i.test(messageText);
       // Save this message as the answer to the question we asked last time
       let explainMethod = false;
@@ -2049,10 +2066,17 @@ export async function POST(req: NextRequest) {
       if (ngQuestion && !saidTeamWillDiscuss) parts.push("That's something our team will discuss with you directly.");
       if (firstTime) parts.push(`Thanks for letting me know. We don't buy every non-GCC car, so I'll have our team contact you${nextQ ? "." : " " + teamWhen() + "."}${nextQ ? " " + nextQ : ""}`);
       else if (nextQ) parts.push(nextQ);
-      if (!nextQ && !firstTime) parts.push(`Thanks, I've got all the details. Our team will be in touch ${teamWhen()}. Have a nice day${firstName(c.name)}!`);
+      // Marc (13 Oct): once the details are in, continue straight to booking the inspection
+      const goBooking = !nextQ && !firstTime;
+      if (goBooking) {
+        parts.push("Thanks, I've got all the details. Our team will review them, and you're welcome to bring the car in for a quick inspection. When would you like to come?");
+        const prevN = String(c.car_conditions ?? "");
+        updates.car_conditions = prevN ? `${prevN} | Non-GCC: booking offered` : "Non-GCC: booking offered";
+        updates.step = 6;
+      }
 
       for (const part of parts) await sendWhatsAppMessage(phone, part);
-      if (!nextQ) updates.step = CLOSING_STEP;
+      if (!nextQ && !goBooking) updates.step = CLOSING_STEP;
       await updateConversation(phone, updates as any).catch(e => console.error("non-GCC save error:", e));
       await appendHistory(phone, hist, messageText, parts.join("\n\n"));
 

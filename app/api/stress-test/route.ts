@@ -102,6 +102,7 @@ const SCRIPTS: Record<string, string[]> = {
   tD: ["Hi", "Vik", "Honda Civic 2019", "80k gcc", "no", "this week", "I'll just pass by when I'm free"],
   tE: ["Hi", "Omar", "Lexus ES 2020", "70k gcc", "no", "this week", "need to check with my wife first", "probably Saturday", "yes"],
   tG: ["Hi", "Ali", "Toyota Prado 2021", "60k gcc", "no", "after Eid"],
+  sentra: ["Hi", "I hv Nissan ssentra", "It's American spec", "Ok", "Nissan Sentra\nModel 2025\nKm 25000\nPrice 30000\nI can sent photos", "[photo]", "[photo]", "tomorrow", "afternoon", "ok"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
 };
 
@@ -116,7 +117,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["tC", "tD"];
+export const BATCH = ["sentra", "nongcc", "fullauto"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
