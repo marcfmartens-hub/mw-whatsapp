@@ -978,6 +978,12 @@ export async function POST(req: NextRequest) {
         if (n) (coreUpdates as any).name = n;
       }
     }
+    // Name sent later as its own line in a burst ("Abdul\n90000 km\nGCC") after we asked for it earlier
+    if (!conversation.name && !(coreUpdates as any).name
+        && ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && /may i (have|know) your name/i.test(m.content))) {
+      const line = messageText.split(/\n+/).map(l => l.trim()).find(l => /^[A-Za-z]{2,15}( [A-Za-z]{2,15})?$/.test(l) && looksLikeName(l) && !CAR_WORDS.has(l.toLowerCase()));
+      if (line && messageText.includes("\n")) (coreUpdates as any).name = nameCase(line);
+    }
     if (!conversation.name && !(coreUpdates as any).name && currentStep < 2) {
       // Early in the chat only a clear "I'm Marc." / "my name is Marc," — never "I'm tied up most of the week"
       const em = messageText.match(/\b(?:my\s+name\s+is|my\s+name'?s|i'?m|i\s+am|this\s+is)\s+([A-Za-z]{2,15})(?=\s*(?:[.,!]|$|\band\b|\bhere\b))/i);
@@ -1295,6 +1301,34 @@ export async function POST(req: NextRequest) {
     const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:)/.test(notesNow)
       && (conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC";
     const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
+    // We picked the time ourselves ("If another time suits you better, just let me know") and the customer now
+    // says which time they prefer → adjust it right away (that's not a reschedule for the call center)
+    {
+      const recentA = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-2).map(m => m.content).join("\n");
+      const offeredChange = /if another time suits you better/i.test(recentA);
+      const dIso = String(conversation.appointment_date ?? "");
+      const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|as early as possible|first (slot|thing)|morning|afternoon|evening|later|earlier)\b/i.test(messageText);
+      if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && prefersTime && !CANCEL.test(messageText)) {
+        let t: string | null = null;
+        const ea2 = await extractAppointment(messageText).catch(() => ({ appointment_date: "", appointment_time: "" }));
+        const t24 = toTime24(String(ea2.appointment_time ?? ""));
+        if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
+        else if (/\b(earliest|as early as possible|first (slot|thing)|morning|earlier)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "morning");
+        else if (/\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "afternoon");
+        else if (/\b(evening|later)\b/i.test(messageText)) t = await pickDefaultTime(dIso, phone, "evening");
+        const dow = new Date(dIso + "T12:00:00Z").getUTCDay();
+        const mins = t ? +t.slice(0, 2) * 60 + +t.slice(3) : -1;
+        if (t && mins >= (dow === 5 ? 12 * 60 : 10 * 60) && mins <= 18 * 60 + 30) {
+          const conf = formatBookingConfirmation(null, dIso, t);
+          const reply = `No problem, I've changed it.\n\n${conf ?? ""}`.trim();
+          await sendWhatsAppMessage(phone, reply);
+          await updateConversation(phone, { appointment_time: t, last_msg_id: message.id } as any).catch(() => {});
+          await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+          await pushLead(phone, "time adjusted after default", { inspectionBooked: true });
+          return NextResponse.json({ status: "time_adjusted" }, { status: 200 });
+        }
+      }
+    }
     const wantsReschedule = !noBookingCase && !aboutCall(messageText) && currentStep >= CLOSING_STEP && hasBooking &&
       (RESCHEDULE.test(messageText) || newDayOrTime);
     if (wantsReschedule) {
