@@ -1766,7 +1766,8 @@ export async function POST(req: NextRequest) {
 
     // ── Answer to "Which UAE number…?" that isn't a phone number (e.g. a plate "Dubai X68212") → ask once more ──
     if (/best (number )?to reach you/i.test(lastAssistantMsg) && currentStep < CLOSING_STEP + 1) {
-      const hasPhone = /(?:\+?971|00971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b5\d{8}\b/.test(messageText);
+      const hasPhone = /(?:\+?971|00971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b5\d{8}\b/.test(messageText)
+        || /(?:\+|\b00)\d[\d\s-]{7,16}\d/.test(messageText);   // foreign numbers (+44 …, 0044 …) are fine too
       const pointsToThis = /\b(this|same|that|here|current|whatsapp|yes|yeah|yep|ok|okay|sure|it'?s fine|use (it|this))\b/i.test(messageText);
       const looksLikePlate = /\b(dubai|dxb|abu dhabi|auh|sharjah|shj|ajman|rak|fujairah|uaq)\b.{0,6}\b[a-z]{0,2}\s*\d{2,5}\b|^\s*[a-z]{1,2}\s*\d{3,5}\s*$/i.test(messageText);
       const alreadyAskedAgain = /that looks like a plate number|mobile number is best/i.test(lastAssistantMsg);
