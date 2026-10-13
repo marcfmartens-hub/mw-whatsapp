@@ -2128,7 +2128,12 @@ export async function POST(req: NextRequest) {
       const SOME_DAYS = /\b(with\s*in|in|next|coming)\s+(a\s+|the\s+)?(few|couple( of)?|\d+|two|three|four|five|ten)\s+(days|weeks)\b|\bfew days\b|\bend of (the )?week\b|\bweekend\b/i;
       const weekWord = messageText.match(/\b(this|next)\s+week\b/i)?.[1]?.toLowerCase() ?? (SOME_DAYS.test(messageText) ? "this" : undefined);
       const firstDay = /\b(today|this afternoon)\b/i.test(q) ? "today" : "tomorrow";
-      reply = weekWord
+      // "I can come tomorrow" / "Thursday" → that day, not today's slots
+      const dayM = messageText.match(/\b(tomorrow|tmrw|tmr|monday|tuesday|wednesday|thursday|friday|saturday)\b/i)?.[1]?.toLowerCase();
+      const dayLabel = dayM ? (/^(tomorrow|tmrw|tmr)$/.test(dayM) ? "tomorrow" : `on ${dayM.charAt(0).toUpperCase() + dayM.slice(1)}`) : "";
+      reply = dayLabel && !weekWord
+        ? `No problem, what time is best for you to bring the car ${dayLabel}?`
+        : weekWord
         // Marc: "this week / next week" → offer the first possible day, or a day of their choice
         ? `No problem, I can arrange an inspection for you ${firstDay} if you want, or else later ${weekWord === "next" ? "or next week" : "this week"}. Which day do you prefer?`
         : SOON.test(messageText) ? `No problem, ${q.charAt(0).toLowerCase() + q.slice(1)}`.replace(/\. What time is best/, ".\n\nWhat time is best") : q;
@@ -2187,6 +2192,9 @@ export async function POST(req: NextRequest) {
       replyParts = replyParts.map(p => {
         let out = p;
         for (const re of CLOSERS) { re.lastIndex = 0; if (re.test(prevA)) { re.lastIndex = 0; out = out.replace(re, ""); } }
+        // "Take care, and have a nice day!" → "Take care!" (never leave a dangling ", and")
+        out = out.replace(/[,\s]+(and|&)\s*$/i, "").trim();
+        if (out && out !== p.trim() && !/[.!?)]$/.test(out)) out += "!";
         return out.trim() || p;
       });
     }
