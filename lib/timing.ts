@@ -89,7 +89,14 @@ function farDate(t: string, now: Date): { target: string } | null {
 function vagueWindow(t: string, now: Date): string[] | null {
   const dow = now.getUTCDay();
   let days: number[] = [];
-  if (/\bnext week\b/i.test(t)) days = [8 - dow, 8 - dow + 1, 8 - dow + 2, 8 - dow + 3, 8 - dow + 4, 8 - dow + 5].map(n => n % 7 === 0 ? n : n); // Mon..Sat next week (offsets)
+  if (/\bnext week\b/i.test(t)) {
+    // Mon..Sat next week, with the date so a bare weekday can't be read as this week
+    const mon = ((8 - dow) % 7) || 7;
+    const early = /\b(early|start of|beginning of)\b.{0,6}next week/i.test(t);
+    const offs = early ? [mon, mon + 1] : [mon + 1, mon + 5];
+    const lab = (n: number) => { const d = new Date(now.getTime() + n * 86400e3); const x = d.getUTCDate(); const sfx = x % 10 === 1 && x !== 11 ? "st" : x % 10 === 2 && x !== 12 ? "nd" : x % 10 === 3 && x !== 13 ? "rd" : "th"; const nm = DAYS[d.getUTCDay()]; return `${nm.charAt(0).toUpperCase() + nm.slice(1)} ${x}${sfx}`; };
+    return offs.map(lab);
+  }
   else if (/\b(later|sometime|maybe)\s+(this )?week\b|\bthis week sometime\b|\bend of (the )?week\b|\b(in )?(a )?few days\b|\bcoming days\b|\bafter (my )?salary\b|\bthis week\b/i.test(t)) {
     for (let n = 1; n <= 6; n++) { const d = (dow + n) % 7; if (d === 0) break; days.push(n); }
     if (!days.length) days = [2, 3, 4, 5, 6, 7].filter(n => (dow + n) % 7 !== 0); // Saturday today → next week

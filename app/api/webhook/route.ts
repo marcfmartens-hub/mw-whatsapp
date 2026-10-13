@@ -439,6 +439,16 @@ function rollSameWeekday(iso: string | null, text: string, timeRaw: string, user
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const nowD = new Date(Date.now() + 4 * 3600e3);
   const todayIso = nowD.toISOString().slice(0, 10);
+  // Customer talked about "next week" (recently) and now names just a weekday → that weekday NEXT week
+  {
+    const recent = [...userHistory.slice(-3), text];
+    const wdOnly = /\b(monday|tuesday|wednesday|thursday|friday|saturday)\b/i.test(text) && !/\b\d{1,2}(st|nd|rd|th)?\s*(of\s*)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\b(this|tomorrow|today)\b/i.test(text);
+    const dow = nowD.getUTCDay();
+    const nextMon = new Date(Date.parse(todayIso + "T12:00:00Z") + ((((8 - dow) % 7) || 7) * 86400e3)).toISOString().slice(0, 10);
+    if (wdOnly && recent.some(t => /\bnext week\b/i.test(t)) && iso < nextMon) {
+      return new Date(Date.parse(iso + "T12:00:00Z") + 7 * 86400e3).toISOString().slice(0, 10);
+    }
+  }
   if (iso !== todayIso) return iso;
   const todayName = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"][nowD.getUTCDay()];
   if (!new RegExp(`\\b${todayName}\\b`, "i").test(text) || /\b(today|tonight|now|this (morning|afternoon|evening))\b/i.test(text)) return iso;
@@ -2420,7 +2430,8 @@ export async function POST(req: NextRequest) {
         case "D": reply = "You're welcome during our opening hours (Mon–Sat 10 AM–7 PM, Fri from 12 PM). If you tell me the day, I'll book a slot so we're ready for you. Which day suits you?"; await addNote("Walk-in, no fixed time"); break;
         case "E": reply = "No problem. When do you think you'll know?"; break;
         case "F": {
-          const d = toIsoDate(String(timing.day));
+          const d = rollSameWeekday(toIsoDate(String(timing.day)), messageText, "",
+            ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content));
           const dow = d ? new Date(d + "T12:00:00Z").getUTCDay() : -1;
           if (d && dow !== 0) {
             const t = await pickDefaultTime(d, phone);
