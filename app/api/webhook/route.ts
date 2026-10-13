@@ -1951,14 +1951,14 @@ export async function POST(req: NextRequest) {
 
     // If customer pushes on price a second time (and consignment not yet explained) → let Claude pivot to consignment
     // If customer gives up / not interested after consignment was explained → offer callback
-    // Marc: asked for a price AND a home visit, and all car details are in → stop pushing for an
-    // appointment, arrange a call back from the team right away
-    const HOME_VISIT = /\bhome\s*(visit|inspection|service|check|pick\s*up)|\b(come|visit)\s+(to\s+)?(my|me|our)\b|\bat my (house|home|place|location|villa|apartment|office)\b|\bpick\s*(it\s*)?up\b|\bdoorstep\b/i;
-    const allUserText = [...history.filter(m => m.role === "user").map(m => m.content), messageText];
-    const carComplete = !!((vehicleUpdates.make ?? conversation.make) && (vehicleUpdates.model ?? conversation.model) && (vehicleUpdates.year ?? conversation.year)
-      && (vehicleUpdates.mileage ?? conversation.mileage) && (vehicleUpdates.specs ?? conversation.specs));
-    const priceAndHome = carComplete && allUserText.some(t => PRICE_PUSH.test(t)) && allUserText.some(t => HOME_VISIT.test(t))
-      && !(conversation.appointment_date && conversation.appointment_time);
+    // Home service (Marc): explain ONCE that all inspections are at our branch; any objection after
+    // that (home visit again, busy / can't come / too far, price, refusal) → understanding + call back
+    const HOME_VISIT = /\bhome\s*(visit|inspection|service|check|pick\s*up|collection)|\b(come|visit)\s+(to\s+)?(my|me|our)\b|\bat my (house|home|place|location|villa|apartment|office)\b|\bpick\s*(it\s*)?up\b|\bdoorstep\b|\bcollect\s*(from|at)\b|\bmobile inspection\b/i;
+    const homeExplained = history.some(m => m.role === "assistant" && /inspections at our branch|All our inspections are done at/i.test(m.content));
+    const OBJECTION = /\b(busy|no time|don'?t have time|can'?t (come|make it|bring)|cannot (come|bring)|unable to (come|bring|drive)|too far|far away|not possible|difficult|working|at work|office hours)\b/i;
+    const homeObjection = homeExplained && !(conversation.appointment_date && conversation.appointment_time)
+      && (HOME_VISIT.test(messageText) || OBJECTION.test(messageText) || PRICE_PUSH.test(messageText) || BOOKING_REFUSAL.test(messageText));
+    const priceAndHome = homeObjection;
     const callbackSignal = handoffSignal || priceAndHome;
     if (!action && currentStep >= 5 && currentStep < CLOSING_STEP && callbackSignal) {
       action = { type: "OFFER_CALLBACK" };
@@ -2027,6 +2027,18 @@ export async function POST(req: NextRequest) {
         ? (saidUrgent ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "Which day works for you?") : "Which day this week works for you?")
         : "Which day would be good for you?";
       reply = `${pricePushCount === 0 ? PRICE_1 : PRICE_2}\n[SPLIT]\n${dayQ}`;
+    }
+    // First home-visit question → one explanation, then carry on with the next question
+    {
+      const HOME_ASK = /\bhome\s*(visit|inspection|service|check|pick\s*up|collection)|\b(come|visit)\s+(to\s+)?(my|me|our)\s+(house|home|place|location|villa|apartment|office)\b|\bat my (house|home|place|location|villa|apartment|office)\b|\bpick\s*(it\s*)?up\b|\bdoorstep\b|\bmobile inspection\b/i;
+      const explained = history.some(m => m.role === "assistant" && /inspections at our branch|All our inspections are done at/i.test(m.content));
+      if (HOME_ASK.test(messageText) && !explained && currentStep >= 1 && currentStep < CLOSING_STEP && action?.type !== "OFFER_CALLBACK") {
+        const HOME_LINE = "We do all our inspections at our branch. It only takes 10–15 minutes, and once we agree on the price we pay you cash on the spot.";
+        const nextQ = action
+          ? buildDirectResponse(action, (knownFields.name ?? conversation.name) as string | null, knownFields)
+          : (currentStep >= 6 ? "Which day would be good for you?" : (reply.match(/[^.!?\n]*\?\s*$/)?.[0]?.trim() ?? ""));
+        reply = nextQ ? `${HOME_LINE}\n[SPLIT]\n${nextQ}` : HOME_LINE;
+      }
     }
     // Putting it off ("ok i let u know tomorrow") is not a booking — never push, just leave the door open
     if (deferring && currentStep >= 5 && currentStep < CLOSING_STEP && !action && !(conversation.appointment_date && conversation.appointment_time)) {

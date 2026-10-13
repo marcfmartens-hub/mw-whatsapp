@@ -72,6 +72,8 @@ const SCRIPTS: Record<string, string[]> = {
   callback: ["Hi", ".", "can I talk to a real person", "Nissan Patrol 2021", "50k", "Omar"],
   nissan: ["🚘 What is your car make, model & Year?", "Nissan X terra platinum\n2025", "GCC\nMILEAGE 16000 km only", "First owner\nNo", "With in 10 days", "I need first your rough estimate before coming for inspection", "Car has 10years warranty complete ppf", "I need rough estimate before coming\n\nFinal price may vary upon inspection but i need an estimate before coming\n\nI dont want silly prices after checking\n\nThe car is brand new scract less\n\nRecently did 20k km service from nissan\n\nStill under service contract up to 50k kms", "Do you provide home inspection?", "Ok i let u know tomorrow"],
   nissanlater: ["🚘 What is your car make, model & Year?", "Nissan X terra platinum 2025", "GCC 16000 km", "No", "With in 10 days", "Ok i let u know tomorrow", "Thursday I can come"],
+  homevisit2: ["Hi", "Ali", "Toyota Camry 2020", "80k gcc", "no", "this week", "Do you do home inspection?", "I'm busy, can you come to my house?", "ok"],
+  homevisit3: ["Hi", "Sara", "Do you do home inspection?", "Kia Sportage 2021", "60000 km gcc", "no loan", "tomorrow", "ok"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
 };
 
@@ -86,7 +88,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["nissan", "nissanlater", "lakh", "roughoffer", "daynotime", "afternoon", "fullauto", "sameday", "price", "nongcc", "happy", "messy"];
+export const BATCH = ["homevisit2", "homevisit3", "homevisit", "nissan", "nissanlater", "afternoon", "messy", "fullauto", "sameday", "roughoffer"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
