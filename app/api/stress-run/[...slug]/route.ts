@@ -21,19 +21,27 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
   // no run / last result already read → start a new run · running → status · finished → show (once)
   if (action === "res" && job) {
     const ROW = "stress_latest";
-    const { data } = await supabase.from("mw_whatsapp").select("car_conditions, step").eq("phone", ROW).maybeSingle();
-    const state = data ? Number(data.step) : -1; // 0 running · 1 done unread · 2 read
+    const { data } = await supabase.from("mw_whatsapp").select("car_conditions, step, last_msg_id").eq("phone", ROW).maybeSingle();
+    let state = data ? Number(data.step) : -1; // 0 running · 1 done unread · 2 read
+    // A run that got cut off (function time limit) still shows what finished
+    if (state === 0 && Date.now() - Number(data?.last_msg_id ?? 0) > 6 * 60e3) state = 1;
     if (state === 0) return txt("still running — try the next link in a minute");
     if (state === 1) {
       await supabase.from("mw_whatsapp").update({ step: 2 } as any).eq("phone", ROW);
-      return txt(String(data!.car_conditions ?? ""));
+      return txt(String(data!.car_conditions ?? "").replace(/^RUNNING\n?/, ""));
     }
     hookConsole();
-    if (data) await supabase.from("mw_whatsapp").update({ step: 0, car_conditions: "RUNNING" } as any).eq("phone", ROW);
-    else await supabase.from("mw_whatsapp").insert({ phone: ROW, step: 0, car_conditions: "RUNNING" } as any);
+    const start = { step: 0, car_conditions: "RUNNING", last_msg_id: String(Date.now()) };
+    if (data) await supabase.from("mw_whatsapp").update(start as any).eq("phone", ROW);
+    else await supabase.from("mw_whatsapp").insert({ phone: ROW, ...start } as any);
     waitUntil((async () => {
-      const outs = await Promise.all(BATCH.map(n => runScenario(n).catch(e => `SCENARIO ${n}: CRASH ${e}`)));
-      await supabase.from("mw_whatsapp").update({ step: 1, car_conditions: outs.join("\n\n==========\n\n") } as any).eq("phone", ROW);
+      const done: string[] = [];
+      await Promise.all(BATCH.map(async n => {
+        const out = await runScenario(n).catch(e => `SCENARIO ${n}: CRASH ${e}`);
+        done.push(out);
+        await supabase.from("mw_whatsapp").update({ car_conditions: "RUNNING\n" + done.join("\n\n==========\n\n") } as any).eq("phone", ROW);
+      }));
+      await supabase.from("mw_whatsapp").update({ step: 1, car_conditions: done.join("\n\n==========\n\n") } as any).eq("phone", ROW);
     })());
     const n0 = Number(params.slug?.[3] ?? 0);
     const more = Array.from({ length: 25 }, (_, i) => `${req.nextUrl.origin}/api/stress-run/${KEY}/res/${job}/${n0 + 1 + i}`).join("\n");

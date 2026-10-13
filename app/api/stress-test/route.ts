@@ -154,7 +154,7 @@ export async function runScenario(name: string): Promise<string> {
   return als.run(log, async () => { try {
     await supabase.from("mw_whatsapp").delete().eq("phone", phone);
     for (let i = 0; i < 14; i++) {
-      if (Date.now() - t0 > 240000) { chat.push({ who: "x", text: "[stopped: time limit]" }); break; }
+      if (Date.now() - t0 > 200000) { chat.push({ who: "x", text: "[stopped: time limit]" }); break; }
       const text = SCRIPTS[name] ? (SCRIPTS[name][i] ?? "[END]") : await customerSays(P[name], chat);
       if (text.includes("[END]")) break;
       chat.push({ who: "c", text });
