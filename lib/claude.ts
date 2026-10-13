@@ -702,7 +702,8 @@ ${Object.entries(CAR_MODELS).map(([m, ms]) => `${m}: ${ms.join(", ")}`).join("\n
 
 Strict rules:
 - If the make looks like a typo or phonetic variation of a known make (e.g. "Toyata" → "Toyota", "Mercedez" → "Mercedes-Benz"), set make to the canonical spelling and add a typo_check entry. Only use "Unknown" if you genuinely cannot determine which make was meant.
-- If the model looks like a typo or phonetic variation of a known model for that make (e.g. "Landcrusier" → "Land Cruiser", "Corolle" → "Corolla"), set model to the canonical model name and add a typo_check entry. Only use "Unknown" if you genuinely cannot determine which model was meant.
+- If the model looks like a typo or phonetic variation of a known model for that make (e.g. "Landcrusier" → "Land Cruiser", "Corolle" → "Corolla"), set model to the canonical model name and add a typo_check entry.
+- If the customer clearly names a model you don't recognise (many regional / GCC-only models exist, e.g. Ford Figo, Nissan Sunny, Toyota Rush, Chevrolet Groove), keep EXACTLY what they wrote as the model — never "Unknown" and never a guess.
 - Never put model name in "make" or vice versa. Never put year in "model".
 - Do NOT overwrite fields listed as already known in the message.
 - If nothing vehicle-related is in the message, return {}.
@@ -715,7 +716,7 @@ Examples:
 "it's a Patrol"           → {"make":"Nissan","model":"Patrol"}
 "125k km gcc"             → {"mileage":"125000","specs":"GCC"}
 "Mercedes C200 2022 GCC"  → {"make":"Mercedes-Benz","model":"C-Class","year":"2022","specs":"GCC"}
-"BMW X9 2020"             → {"make":"BMW","model":"Unknown","year":"2020","typo_check":[{"field":"model","input":"X9","suggestion":"X5 or X7?"}]}
+"Ford Figo 2016"          → {"make":"Ford","model":"Figo","year":"2016"}
 "Toyata Camry"            → {"make":"Toyota","model":"Camry","typo_check":[{"field":"make","input":"Toyata","suggestion":"Toyota"}]}
 "Mercedez GLC"            → {"make":"Mercedes-Benz","model":"GLC","typo_check":[{"field":"make","input":"Mercedez","suggestion":"Mercedes-Benz"}]}
 "Toyota Landcrusier 2020" → {"make":"Toyota","model":"Land Cruiser","year":"2020","typo_check":[{"field":"model","input":"Landcrusier","suggestion":"Land Cruiser"}]}

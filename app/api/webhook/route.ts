@@ -2038,7 +2038,8 @@ export async function POST(req: NextRequest) {
     if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
       for (const tc of vehicleUpdates.typo_check) {
         if (tc.field === "model" && (!vehicleUpdates.model || vehicleUpdates.model === "Unknown")) {
-          vehicleUpdates.model = tc.suggestion;
+          // An unsure guess ("Fiesta or Focus?") is never saved — keep what the customer wrote ("Figo")
+          vehicleUpdates.model = /\?|\bor\b|unverified/i.test(String(tc.suggestion)) ? String(tc.input) : tc.suggestion;
           console.log(`[kaya] typo auto-corrected: model "${tc.input}" → "${tc.suggestion}"`);
         }
         if (tc.field === "make" && (!vehicleUpdates.make || vehicleUpdates.make === "Unknown")) {
