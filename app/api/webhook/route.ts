@@ -1253,7 +1253,8 @@ export async function POST(req: NextRequest) {
     // "call me after 6pm" / "call tomorrow morning" is about a phone call, not a visit
     const aboutCall = (t: string) => /\bcall(s|ed|ing)?\b/i.test(t) && !/\b(come|coming|book|visit|bring|inspection|drop)\b/i.test(t);
     const wantsBooking = !noBookingCase && currentStep >= 1 && currentStep < FINAL_STEP &&
-      ((isBookingMsg(messageText) && !aboutCall(messageText)) || priorUserMsgs.some(t => isBookingMsg(t) && !aboutCall(t)));
+      ((isBookingMsg(messageText) && !aboutCall(messageText) && !HOME_VISIT_PATTERN.test(messageText) && !/\bhome\s*(inspection|service|check)\b/i.test(messageText))
+        || priorUserMsgs.some(t => isBookingMsg(t) && !aboutCall(t) && !HOME_VISIT_PATTERN.test(t) && !/\bhome\s*(inspection|service|check)\b/i.test(t)));
 
     // ── After booking: cancel or reschedule ───────────────────────────
     const hasBooking = !!(conversation.appointment_date || conversation.appointment_time);
@@ -1352,6 +1353,11 @@ export async function POST(req: NextRequest) {
         }
         // Time without a day ("5pm" in reply to "What time can you come in this afternoon?") → infer the
         // day from Kaya's question, so the booking never ends up with a time but no date.
+        // …but a day already agreed ("tomorrow", then "in the afternoon") always wins
+        const todayIsoNow = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+        if (!apptDate && apptTime && conversation.appointment_date && /^\d{4}-\d{2}-\d{2}$/.test(String(conversation.appointment_date)) && String(conversation.appointment_date) >= todayIsoNow) {
+          apptDate = String(conversation.appointment_date); ea.appointment_date = apptDate;
+        }
         if (!apptDate && apptTime && toTime24(apptTime)) {
           const inferred = inferApptDate(toTime24(apptTime)!, lastAssistantMsg);
           if (inferred) { apptDate = inferred; ea.appointment_date = inferred; }
@@ -1666,7 +1672,11 @@ export async function POST(req: NextRequest) {
       const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP
         && (HUMAN_ASK.test(messageText) || NAMED_PERSON.test(messageText) || frustrated
           // reply to the 5-minute nudge ("…or if you need a call back from our team") asking for a call
-          || (lastA0.includes("need a call back from our team") && /\b(call|callback|ring|phone me)\b/i.test(messageText)));
+          || (lastA0.includes("need a call back from our team") && /\b(call|callback|ring|phone me)\b/i.test(messageText))
+          // after the one home-visit explanation: any objection → understanding + call back (Marc)
+          || (hist.some(m => m.role === "assistant" && /inspections at our branch|All our inspections are done at/i.test(m.content))
+              && !(conversation.appointment_date && conversation.appointment_time)
+              && /\bhome\b|\b(come|visit)\s+(to\s+)?(my|me)\b|\bmy (place|house|villa|office)\b|\bbusy\b|\bno time\b|\bcan'?t (come|make it|bring)\b|\bnot bringing\b|\btoo far\b|\bnot possible\b|\bprice\b|\brange\b|\bhow much\b|\boffer\b|\bestimate\b|\bnumber\b/i.test(messageText)));
       if ((firstAsk || inHumanMode) && currentStep < CLOSING_STEP && !(carSpecs === "Non-GCC")) {
         const vDb = vehicleDbFields(vehicleUpdates);
         const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
@@ -2250,6 +2260,8 @@ export async function POST(req: NextRequest) {
         replyParts = replyParts.map(p => {
           if (!/\btoday\b/i.test(p) || !/\?/.test(p) || /or else later/i.test(p)) return p;
           const out = p.replace(/[^.!?\n]*\btoday\b[^.!?\n]*\?/gi, "").replace(/[^.!?\n]*\btoday\b[^.!?\n]*[.!]/gi, "").trim();
+          const lastSentA = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
+          if (out && /which day (would be good|works|do you prefer)/i.test(lastSentA)) return out; // don't ask the same day question twice in a row
           return `${out ? out + "\n\n" : ""}Which day would be good for you?`;
         });
       }
