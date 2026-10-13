@@ -635,9 +635,20 @@ export async function POST(req: NextRequest) {
       if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const convForLocation = await getOrCreateConversation(phone);
-      if ((convForLocation.step ?? 0) >= FINAL_STEP - 1) {
-        const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
+      const bookedAlready = !!(convForLocation.appointment_date && convForLocation.appointment_time);
+      if ((convForLocation.step ?? 0) >= FINAL_STEP - 1 && !bookedAlready) {
+        // Location only → ask the DAY (Marc); "send location, I'll come today" → today's time question
+        const q = /\b(today|now|right now|asap)\b/i.test(messageText)
+          ? (getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in today?")
+          : "Which day would you like to come?";
         await sendWhatsAppMessage(phone, q);
+        const prev = String((convForLocation as any).car_conditions ?? "");
+        const hist = ((convForLocation as any).messages ?? []) as ConversationMessage[];
+        await updateConversation(phone, {
+          ...(prev.includes("Asked for location") ? {} : { car_conditions: prev ? `${prev} | Asked for location` : "Asked for location" }),
+          messages: [...hist, { role: "user", content: messageText }, { role: "assistant", content: `${LOCATION_TEXT}\n[SPLIT]\n${q}` }].slice(-40),
+          last_message_at: new Date().toISOString(), last_msg_id: message.id,
+        } as any).catch(() => {});
       }
       return NextResponse.json({ status: "location_sent" }, { status: 200 });
     }
@@ -1456,7 +1467,7 @@ export async function POST(req: NextRequest) {
     // Not a clear day/time: undecided, vague window, location only, walk-in, depends on someone, a day with
     // "maybe", or far away (Marc, 13 Oct) → handled with fixed replies below, never booked from this message.
     // Plain "this week" / "next week" at the when-to-sell question keeps Marc's own reply.
-    const plainWeek = currentStep === 6 && /\b(this|next)\s+week\b/i.test(messageText) && !/\b(later|sometime|maybe|end of)\b/i.test(messageText);
+    const plainWeek = currentStep <= 6 && /\b(this|next)\s+week\b/i.test(messageText) && !/\b(later|sometime|maybe|end of)\b/i.test(messageText);
     const timing = (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !plainWeek) ? classifyTiming(messageText, DEFER_PATTERN) : null;
     if (timing) console.log(`[kaya] timing ${timing.kind} for ${phone}`);
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring && !timing) {
