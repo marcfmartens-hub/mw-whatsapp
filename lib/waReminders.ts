@@ -53,11 +53,27 @@ export async function runWaReminders(req: NextRequest, job: "evening" | "night")
   }
 
   if (job === "night") {
-    const deals = await stageDeals(READY, headers);
-    const ticked = deals.filter(d => d.Followed_up_Today === true);
+    const today = now.toISOString().slice(0, 10);
+    const ready = await stageDeals(READY, headers);
+    const ticked = ready.filter(d => d.Followed_up_Today === true && String(d.Appointment_Date_and_Time ?? "").slice(0, 10) > today);
     const res = ticked.length ? await update(ticked.map(d => ({ id: d.id, Stage: SENT, Followed_up_Today: false })), headers) : [];
     console.log(`[wa-reminders] night: ${ticked.length} → ${SENT}`, JSON.stringify(res.map(r => r.status)));
-    return NextResponse.json({ job, moved: ticked.map(d => d.Deal_Name), results: res.map(r => r.status) });
+
+    // No-shows (Marc, 13 Oct): everything left in Confirmed Today / Not Confirmed Today / No-show | WA, plus any
+    // other appointment card whose day has passed → WA Follow-ups / Day 1 with the NO SHOW tag
+    const noShow: any[] = [];
+    for (const st of ["Confirmed Today", "Not Confirmed Today", "No-show | WA"]) noShow.push(...await stageDeals(st, headers));
+    for (const st of [BOOKED, READY, SENT]) {
+      const list = await stageDeals(st, headers);
+      noShow.push(...list.filter(d => { const day = String(d.Appointment_Date_and_Time ?? "").slice(0, 10); return day && day <= today; }));
+    }
+    const ns = noShow.length ? await update(noShow.map(d => ({ id: d.id, Sub_Pipeline: "WA Follow-ups", Stage: "Day 1", Followed_up_Today: false })), headers) : [];
+    for (const d of noShow) {
+      await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/add_tags?tag_names=${encodeURIComponent("NO SHOW")}&over_write=false`, { method: "POST", headers })
+        .catch(e => console.warn("[wa-reminders] tag error:", e));
+    }
+    console.log(`[wa-reminders] night: ${noShow.length} no-shows → WA Follow-ups / Day 1`, JSON.stringify(ns.map(r => r.status)));
+    return NextResponse.json({ job, reminderSent: ticked.map(d => d.Deal_Name), noShows: noShow.map(d => d.Deal_Name), results: [...res, ...ns].map(r => r.status) });
   }
 
   return NextResponse.json({ error: "job must be evening or night" }, { status: 400 });
