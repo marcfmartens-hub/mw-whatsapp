@@ -1305,7 +1305,8 @@ export async function POST(req: NextRequest) {
     // says which time they prefer → adjust it right away (that's not a reschedule for the call center)
     {
       const recentA = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-2).map(m => m.content).join("\n");
-      const offeredChange = /if another time suits you better/i.test(recentA);
+      // X:15 times are only ever picked by Kaya (customer times round to :00/:30), so a :15 booking = our default
+      const offeredChange = /if another time suits you better/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
       const dIso = String(conversation.appointment_date ?? "");
       const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|as early as possible|first (slot|thing)|morning|afternoon|evening|later|earlier)\b/i.test(messageText);
       if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && prefersTime && !CANCEL.test(messageText)) {
@@ -2223,7 +2224,7 @@ export async function POST(req: NextRequest) {
         replyParts = [...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
-      if (defaultedTime) replyParts[replyParts.length - 1] += "\n\nIf another time suits you better, just let me know.";
+      if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nIf another time suits you better, just let me know."; reply = replyParts.join("\n[SPLIT]\n"); }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     // Loan on the car → reassure first, then the next question as its own message (Marc)

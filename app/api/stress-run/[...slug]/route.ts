@@ -35,7 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
       const outs = await Promise.all(BATCH.map(n => runScenario(n).catch(e => `SCENARIO ${n}: CRASH ${e}`)));
       await supabase.from("mw_whatsapp").update({ step: 1, car_conditions: outs.join("\n\n==========\n\n") } as any).eq("phone", ROW);
     })());
-    return txt(`started a new run (${BATCH.length} scenarios) — results on the next link in ~4 minutes`);
+    const n0 = Number(params.slug?.[3] ?? 0);
+    const more = Array.from({ length: 25 }, (_, i) => `${req.nextUrl.origin}/api/stress-run/${KEY}/res/${job}/${n0 + 1 + i}`).join("\n");
+    return txt(`started a new run (${BATCH.length} scenarios) — results on the next link in ~4 minutes\nNext links:\n${more}`);
   }
 
   if (action === "start") {
