@@ -74,11 +74,14 @@ export async function runWaReminders(req: NextRequest, job: "evening" | "night" 
     }
     console.log(`[wa-reminders] night: ${noShow.length} no-shows → WA Follow-ups / Day 1`, JSON.stringify(ns.map(r => r.status)));
 
-    // No Response (Marc, 13 Oct): WhatsApp Standard / No Response → WA Follow-ups / Day 1 with the NO RESPONSE tag
+    // No Response (Marc, 13 Oct): WhatsApp Standard / No Response → WA Follow-ups with a tag:
+    //  • Next Follow up Date filled → Call Later + CALL LATER tag
+    //  • otherwise                  → Day 1 + NO RESPONSE tag
     const noResp = (await stageDeals("No Response", headers)).filter(d => !d.Sub_Pipeline || d.Sub_Pipeline === "WhatsApp Standard");
-    const nr = noResp.length ? await update(noResp.map(d => ({ id: d.id, Sub_Pipeline: "WA Follow-ups", Stage: "Day 1", Followed_up_Today: false })), headers) : [];
+    const nr = noResp.length ? await update(noResp.map(d => ({ id: d.id, Sub_Pipeline: "WA Follow-ups", Stage: d.Next_Follow_up_Date ? "Call Later" : "Day 1", Followed_up_Today: false })), headers) : [];
     for (const d of noResp) {
-      await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/add_tags?tag_names=${encodeURIComponent("NO RESPONSE")}&over_write=false`, { method: "POST", headers })
+      const tag = d.Next_Follow_up_Date ? "CALL LATER" : "NO RESPONSE";
+      await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/add_tags?tag_names=${encodeURIComponent(tag)}&over_write=false`, { method: "POST", headers })
         .catch(e => console.warn("[wa-reminders] tag error:", e));
     }
     console.log(`[wa-reminders] night: ${noResp.length} no response → WA Follow-ups / Day 1`, JSON.stringify(nr.map(r => r.status)));
@@ -94,7 +97,7 @@ export async function runWaReminders(req: NextRequest, job: "evening" | "night" 
     const waiting = deals.filter(d => !d.Appointment_Date_and_Time).map(d => d.Deal_Name);
     const results: any[] = [];
     for (const d of ready) {
-      await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/remove_tags?tag_names=${encodeURIComponent("NO SHOW,NO RESPONSE")}`, { method: "POST", headers })
+      await fetch(`https://www.zohoapis.com/bigin/v1/Pipelines/${d.id}/actions/remove_tags?tag_names=${encodeURIComponent("NO SHOW,NO RESPONSE,CALL LATER")}`, { method: "POST", headers })
         .catch(e => console.warn("[wa-reminders] untag error:", e));
       const r = await fetch("https://www.zohoapis.com/bigin/v1/Pipelines", {
         method: "PUT", headers,
