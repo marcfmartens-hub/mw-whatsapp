@@ -2221,12 +2221,16 @@ export async function POST(req: NextRequest) {
         satIso = new Date(n.getTime() + add * 86400e3).toISOString().slice(0, 10);
       }
       // Remember the chosen day, so "earliest possible" / "afternoon" next books that day
-      const chosenDayIso = satIso || (dayM ? (toIsoDate(dayM) ?? "") : "");
+      const chosenDayIso = /\bsun(day)?\b/i.test(messageText) ? "" : (satIso || (dayM ? (toIsoDate(dayM) ?? "") : ""));
       if (/^\d{4}-\d{2}-\d{2}$/.test(chosenDayIso)) {
         apptDate = chosenDayIso;
         await updateConversation(phone, { appointment_date: chosenDayIso, appointment_time: null } as any).catch(() => {});
       }
-      reply = wantsWeekend
+      const saysSunday = /\bsun(day)?\b/i.test(messageText);
+      if (saysSunday) await updateConversation(phone, { appointment_date: null, appointment_time: null } as any).catch(() => {});
+      reply = saysSunday
+        ? "Sorry, we're closed on Sundays. We're open on Saturday from 10 AM to 7 PM, and on Friday from 12 PM to 7 PM. Which day works best for you?"
+        : wantsWeekend
         ? "No problem, Saturday works. What time is best for you to bring the car on Saturday?"
         : dayLabel && !weekWord
         ? `No problem, what time is best for you to bring the car ${dayLabel}?`
