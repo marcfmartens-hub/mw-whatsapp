@@ -1384,7 +1384,8 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    const wantsReschedule = !noBookingCase && !aboutCall(messageText) && currentStep >= CLOSING_STEP && hasBooking &&
+    const plainQuestion = /\?/.test(messageText) && !/\b(change|move|reschedul\w*|instead|another (time|day)|different (time|day)|postpone|can we (do|make it)|earlier|later)\b/i.test(messageText);
+    const wantsReschedule = !noBookingCase && !aboutCall(messageText) && currentStep >= CLOSING_STEP && hasBooking && !plainQuestion &&
       (RESCHEDULE.test(messageText) || newDayOrTime);
     if (wantsReschedule) {
       await sendWhatsAppMessage(phone, CHANGE_REPLY);
@@ -1395,7 +1396,8 @@ export async function POST(req: NextRequest) {
     }
     const isRebook = bookFromClosed;
 
-    const deferring = DEFER_PATTERN.test(messageText) && !/\b(\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\b/i.test(messageText);
+    const deferring = DEFER_PATTERN.test(messageText) && !/\b(\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\b/i.test(messageText)
+      && !new RegExp(`\\b${DAY}\\b|\\bweek\\s*-?\\s*end\\b`, "i").test(messageText);
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring) {
       try {
         const ea = await extractAppointment(messageText);
@@ -2307,7 +2309,15 @@ export async function POST(req: NextRequest) {
         // Keep only the car-summary lines from Kaya's own text (her "booked you for 10:00" could contradict the slot)
         const summaryRaw = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
         const summary = summaryRaw?.split("\n").filter(l => /^(Make|Model|Year|Mileage|Specs|Loan):/i.test(l.trim())).join("\n");
-        replyParts = [...(summary ? [summary] : []), conf];
+        // The customer asked something in the same message → keep Kaya's answer (without any times/booking talk)
+        let answer = "";
+        if (/\?/.test(messageText)) {
+          answer = replyParts.filter(p => p !== summaryRaw).join(" ")
+            .split(/(?<=[.!?])\s+/)
+            .filter(sen => sen.trim() && !/\d{1,2}(:\d{2})?\s*(am|pm)\b|\bbook(ed|ing)?\b|\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b|\bsee you\b|\?\s*$|^(make|model|year|mileage|specs):/i.test(sen))
+            .join(" ").trim();
+        }
+        replyParts = [...(answer ? [answer] : []), ...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
       if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nIf another time suits you better, just let me know."; reply = replyParts.join("\n[SPLIT]\n"); }

@@ -525,7 +525,10 @@ export function containsPrice(text: string): boolean {
     .replace(/\b\d[\d,.]*\s*k?\s*(km|kms|kilomet\w*|miles?)\b/gi, " ")                    // mileage is fine
     .replace(/(\+?971|00971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b9715\d{8}\b/g, " ")       // UAE phone numbers are fine
     .replace(/(\+|\b00)\d{1,3}[\s-]?\(?\d{1,4}\)?([\s-]?\d{2,5}){2,4}\b/g, " ")               // international numbers too
-    .replace(/\b(19[89]\d|20[0-3]\d)\b/g, " ");                                             // years are fine
+    .replace(/\b(19[89]\d|20[0-3]\d)\b/g, " ")                                              // years are fine
+    // the customer's own loan amount ("your 50k ADCB loan", "outstanding AED 50,000") is not a price
+    .replace(/\b(loan|outstanding|balance|settle\w*|bank|mortgage|finance|adcb|enbd|fab|mashreq|dib|adib|rakbank|cbd)\b[^.?!\n]{0,40}?(aed|dhs)?\s*\d[\d,.]*\s*(k|thousand|aed|dhs)?/gi, " ")
+    .replace(/(aed|dhs)?\s*\d[\d,.]*\s*(k|thousand|aed|dhs)?\s+(loan|outstanding|left on the loan|remaining)\b/gi, " ");
   return /\b(aed|dhs?|dirhams?)\s*\.?\s*\d/i.test(t)
       || /\d[\d,.]*\s*(k|thousand|aed|dhs|dirhams?)\b/i.test(t)
       || /\b\d{1,3}(,\d{3})+\b/.test(t)
