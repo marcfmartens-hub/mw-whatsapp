@@ -2365,7 +2365,7 @@ export async function POST(req: NextRequest) {
     // booking, even if Kaya's text didn't read like a confirmation (stress test: "anything after 2pm"
     // was saved as 2:30 PM but Kaya said the team would call).
     const clearIntent = !defaultedTime || messageText.trim().length <= 30 || /\b(come|coming|visit|bring|book|inspection|see you|available|free|works|ok(ay)?)\b/i.test(messageText);
-    if (!appointmentConfirmedEarly && apptFromMsg && clearIntent && !deferring && !timing && currentStep >= 6 && !(currentStep === 6 && defaultedTime) && action?.type !== "OFFER_CALLBACK") {
+    if (!appointmentConfirmedEarly && apptFromMsg && clearIntent && !deferring && !timing && currentStep >= 6 && !(currentStep === 6 && defaultedTime && !/\bwhat time\b/i.test(lastAssistantMsg)) && action?.type !== "OFFER_CALLBACK") {
       const dIso = toIsoDate(String(apptDate || conversation.appointment_date || "")) ?? "";
       const t24 = toTime24(String(apptTime || conversation.appointment_time || ""));
       if (/^\d{4}-\d{2}-\d{2}$/.test(dIso) && t24) {
