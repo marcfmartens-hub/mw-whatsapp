@@ -9,6 +9,7 @@ import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 import { MULKIYA_QUESTION, mulkiyaAnswer, specsStatement } from "@/lib/specs";
 import { asksBestWayToSell, isSellingOptionAnswer, isStandaloneOffTopicQuestion } from "@/lib/topic";
+import { visitAvailability } from "@/lib/availability";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -1603,6 +1604,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "booking_inquiry_task" }, { status: 200 });
     }
     const isRebook = bookFromClosed;
+    const visitWindow = !hasBooking && currentStep >= 6 && currentStep <= FINAL_STEP
+      && !/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(messageText)
+      ? visitAvailability(messageText) : null;
+    if (visitWindow?.date) {
+      await updateConversation(phone, { appointment_date: visitWindow.date, appointment_time: null } as any).catch(() => {});
+      (conversation as any).appointment_date = visitWindow.date;
+    }
 
     const answeringSellingOption = lastAssistantMsg.includes("Is a quick transfer with cash payment more important")
       && isSellingOptionAnswer(messageText);
@@ -1614,7 +1622,7 @@ export async function POST(req: NextRequest) {
     const plainWeek = currentStep <= 6 && /\b(this|next)\s+week\b/i.test(messageText) && !/\b(later|sometime|maybe|end of)\b/i.test(messageText);
     const timing = (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !plainWeek && !answeringSellingOption) ? classifyTiming(messageText, DEFER_PATTERN) : null;
     if (timing) console.log(`[kaya] timing ${timing.kind} for ${phone}`);
-    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring && !timing) {
+    if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring && !timing && !visitWindow) {
       try {
         const ea = await extractAppointment(messageText);
         if (nowSlot) { ea.appointment_date = nowSlot.date; ea.appointment_time = nowSlot.time; }
@@ -2153,7 +2161,7 @@ export async function POST(req: NextRequest) {
       const decidingSellingOption = lastA.includes("Is a quick transfer with cash payment more important")
         && isSellingOptionAnswer(messageText);
       if (!offeredBefore && !hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
-          && !askedForTeam && !decidingSellingOption && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText)
+          && !askedForTeam && !visitWindow && !decidingSellingOption && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText)
             || repeatedPriceRequest || priceRefusal || consignmentDeclined || priceFrustration)) {
         await fin(`I understand. ${OFFER_FWD}`);
         return NextResponse.json({ status: "forward_offer" }, { status: 200 });
@@ -2538,7 +2546,7 @@ export async function POST(req: NextRequest) {
         reply = nextQ ? `${HOME_LINE}\n[SPLIT]\n${nextQ}` : HOME_LINE;
       }
     }
-    if (timing && !action) {
+    if (timing && !action && !visitWindow) {
       const addNote = async (n: string) => {
         const prev = String((conversation as any).car_conditions ?? "");
         if (!prev.includes(n)) await updateConversation(phone, { car_conditions: prev ? `${prev} | ${n}` : n } as any).catch(() => {});
@@ -2633,7 +2641,7 @@ export async function POST(req: NextRequest) {
     }
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
     // Marc: no cash/consignment question — after "when do you want to sell?" always go to the appointment
-    if (currentStep === 6 && !action && !timing && !askOrigin && !asksBestWayToSell(messageText) && !lastAssistantMsg.includes("imported from another country") && !/\?/.test(messageText)) {
+    if (currentStep === 6 && !action && !timing && !visitWindow && !askOrigin && !asksBestWayToSell(messageText) && !lastAssistantMsg.includes("imported from another country") && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
       void nm;
@@ -2676,6 +2684,7 @@ export async function POST(req: NextRequest) {
         reply = `The purchaser can discuss quick cash and consignment with you immediately after the free inspection. ${reply}`;
       }
     }
+    if (visitWindow && !action) reply = visitWindow.reply;
     // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
     // With a valid date + time → make it a real booking (Bigin, location); otherwise never send a fake one.
     if (!appointmentConfirmedEarly && /you'?re booked for|booking is (saved|confirmed)/i.test(reply)) {
