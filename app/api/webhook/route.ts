@@ -60,6 +60,7 @@ const FINAL_STEP  = 7;
 const POST_NAME_Q  = "May I have your name for the booking?";
 const POST_PHONE_Q = "Which number is best to reach you on?";
 const CLOSING_STEP = 8;
+const BOOKING_OR_TEAM_CHOICE = "Would you like to continue with the booking, or shall I forward your details to our purchasing team so they can discuss it with you by phone?";
 
 // Sell method detection
 const SELL_METHOD_CASH        = /\b(cash|direct|buy now|sell now|sell fast|quick sale|immediately|instant)\b/i;
@@ -1994,10 +1995,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Second "I'll let you know" / "it's difficult" → offer the team (Marc, 14 Oct) ──
+    // ── Repeated price request or booking hesitation → offer a clear choice ──
     // Kaya: "How about I forward your details to our team…?" → yes → double-check car + number → hand over.
     {
-      const OFFER_FWD = "Would you like to continue with the booking, or shall I forward your details to our team so you can discuss it with them in person?";
+      const OFFER_FWD = BOOKING_OR_TEAM_CHOICE;
+      const LEGACY_OFFER_FWD = "Would you like to continue with the booking, or shall I forward your details to our team so you can discuss it with them in person?";
       const CONFIRM_MARK = "Just to double-check";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
@@ -2019,15 +2021,16 @@ export async function POST(req: NextRequest) {
         const pm = messageText.match(/(?:\+|\b00)\d[\d\s-]{7,16}\d|(?:\+?971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b5\d{8}\b/);
         if (pm) { let alt = pm[0].replace(/\D/g, "").replace(/^00/, ""); if (/^05/.test(alt)) alt = "971" + alt.slice(1); else if (/^5\d{8}$/.test(alt)) alt = "971" + alt; if (alt !== phone) upd.alternative_phone = alt; }
         if (!YES.test(messageText) && !pm) notes.push(`Customer correction: ${messageText.slice(0, 120)}`);
-        notes.push("Forwarded to the team after 'I'll let you know'");
+        const priceChoice = hist.some(m => m.role === "user" && /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i.test(m.content));
+        notes.push(priceChoice ? "Forwarded to the team after repeated price requests" : "Forwarded to the team after booking hesitation");
         if (!notes.join(" | ").includes("Asked to speak to the team")) notes.push("Asked to speak to the team");
         upd.car_conditions = notes.join(" | ");
         await fin(`Thanks! I've passed everything on to our team. They'll be in touch ${teamWhen()}. Have a nice day!`, upd);
-        await pushLead(phone, "forwarded to team", { salesInquiry: "Other", inspectionBooked: false, milestone: "FOLLOW UP" });
+        await pushLead(phone, "forwarded to team", { salesInquiry: priceChoice ? "Price Offer Inquiry" : "Other", inspectionBooked: false, milestone: "FOLLOW UP" });
         return NextResponse.json({ status: "forwarded_to_team" }, { status: 200 });
       }
 
-      if (lastA.includes(OFFER_FWD) && currentStep < CLOSING_STEP) {
+      if ((lastA.includes(OFFER_FWD) || lastA.includes(LEGACY_OFFER_FWD)) && currentStep < CLOSING_STEP) {
         const WANT_BOOK = /\b(continue|book|booking|first|1st|option 1|appointment|inspection|come in|visit)\b/i;
         const WANT_TEAM = /\b(forward|team|second|2nd|option 2|call|discuss|person|talk|speak)\b/i;
         if (WANT_BOOK.test(messageText) && !WANT_TEAM.test(messageText)) {
@@ -2066,11 +2069,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const offeredBefore = hist.some(m => m.role === "assistant" && m.content.includes(OFFER_FWD));
+      const offeredBefore = hist.some(m => m.role === "assistant" && (m.content.includes(OFFER_FWD) || m.content.includes(LEGACY_OFFER_FWD)));
       const priorDefers = hist.filter(m => m.role === "user" && DEFER_ANY(m.content)).length;
       const DIFFICULT = /\b(difficult|hard|not possible|impossible|can'?t (make it|come|manage)|cannot (come|make it)|no time|too busy|very busy|not easy|(i )?don'?t know|not sure|no idea|confused)\b/i;
+      const priorPriceRequests = hist.filter(m => m.role === "user" && /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i.test(m.content)).length;
+      const repeatedPriceRequest = priorPriceRequests >= 3 && /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i.test(messageText);
+      const priceRefusal = priorPriceRequests > 0 && /\b(no\s*,?\s*thanks?|not interested|maybe later|i'?ll pass|don'?t want (to|it)|forget it|not for me|never mind|nevermind)\b/i.test(messageText);
+      const consignmentDeclined = priorPriceRequests > 0 && hist.some(m => m.role === "assistant" && /consignment/i.test(m.content))
+        && /\b(cash only|only cash|just cash|not consignment|no consignment|don'?t want consignment)\b/i.test(messageText);
+      const priceFrustration = priorPriceRequests > 0 && /\b(just tell me|answer my question|i already told you|waste of time|ridiculous|frustrat\w*|stop asking|too many questions)\b/i.test(messageText);
+      const askedForTeam = /\b(call me|call back|callback|speak to|speak with|talk to|talk with|contact me|human|real person|your team|purchasing team)\b/i.test(messageText);
       if (!offeredBefore && !hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
-          && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText))) {
+          && !askedForTeam && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText)
+            || repeatedPriceRequest || priceRefusal || consignmentDeclined || priceFrustration)) {
         await fin(`I understand. ${OFFER_FWD}`);
         return NextResponse.json({ status: "forward_offer" }, { status: 200 });
       }
@@ -2101,8 +2112,7 @@ export async function POST(req: NextRequest) {
       const FRUSTRATION_PHRASES = /(!!!+|\bsimple question\b|\banswer (me|my question|the question)\b|\b(just|simply) (tell|give) me\b|\bi (already )?(told|said) (you|that|it)\b|\bare you (even )?(listening|reading)\b|\bwaste of (my )?time\b|\bridiculous\b|\bannoying\b|\bfrustrat\w*|\bwtf\b|\bseriously\b|\bstop asking\b|\btoo many questions\b)/i;
       const priorPriceAsks = hist.filter(m => m.role === "user" && PRICE_WORDS.test(m.content)).length;
       const lastA0 = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
-      const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText)
-        || (PRICE_WORDS.test(messageText) && priorPriceAsks >= 3); // 1st ask: short reply, 2nd: process explanation, 3rd: team
+      const frustrated = frustratedByInsult || shouting || FRUSTRATION_PHRASES.test(messageText);
       const firstAsk = !inHumanMode && currentStep >= 1 && currentStep < CLOSING_STEP
         && (HUMAN_ASK.test(messageText) || HUMAN_ASK2.test(messageText) || NAMED_PERSON.test(messageText) || frustrated
           // wording the patterns don't know → quick AI check, only when the message hints at it
@@ -2607,7 +2617,7 @@ export async function POST(req: NextRequest) {
     if (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !/\?/.test(reply)
         && !/\b(team will|be in touch|have a nice|see you|take care|passed (it|everything)|contact you|call you|you'?re booked)\b/i.test(reply)) {
       const askedSomething = /\?|^\s*(what|when|how|do|does|are|is|can|which|where)\b/i.test(messageText);
-      const choice = "Would you like to continue with the booking, or shall I forward your details to our team so you can discuss it with them in person?";
+      const choice = BOOKING_OR_TEAM_CHOICE;
       const pend = pendingBookingQ(lastAssistantMsg);
       reply = `${reply.trim()}\n[SPLIT]\n${askedSomething && pend ? pend : choice}`;
     }
