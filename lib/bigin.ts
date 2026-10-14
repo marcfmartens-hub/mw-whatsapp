@@ -440,7 +440,7 @@ export async function createBiginContact(
   }
 }
 
-// ── Reschedule / cancel requests → a task for the call centre (Kaya never changes bookings herself) ──
+// ── Booked customer requests → a task on the existing Bigin contact ──
 // Linked to the customer's latest WhatsApp pipeline card, with a link, car details, name and all phone numbers.
 export async function createChangeTask(
   conversation: Record<string, any>,
@@ -462,6 +462,10 @@ export async function createChangeTask(
       if (r.status === 200) { contacts = ((await r.json().catch(() => null))?.data ?? []); if (contacts.length) break; }
     }
     contacts.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
+    if (!contacts.length && !simLog) {
+      console.error("[Bigin] cannot link booking task: existing contact not found for", phone);
+      return { ok: false, error: "Existing Bigin contact not found" };
+    }
 
     // Their latest pipeline card
     let deal: any = null;
@@ -486,8 +490,8 @@ export async function createChangeTask(
     const history = (Array.isArray(conversation.messages) ? conversation.messages : [])
       .slice(-20).map((m: any) => `${m.role === "assistant" ? "Kaya" : "Customer"}: ${String(m.content ?? "").slice(0, 550)}`);
     const description = [
-      kind === "RESCHEDULE" ? "Customer requested RESCHEDULE. Kaya released the original appointment and confirmed receipt of the request; call to arrange and confirm the new slot."
-        : kind === "CANCEL" ? "Customer CANCELLED the inspection. Kaya confirmed cancellation and released the slot; call to reconfirm the decision or reverse it if the customer wants to keep the booking."
+      kind === "RESCHEDULE" ? "Customer requested RESCHEDULE. Call to confirm a new slot and update the existing booking record; the original time is no longer confirmed with the customer."
+        : kind === "CANCEL" ? "Customer CANCELLED the inspection. Call to reconfirm the decision or reverse the cancellation if the customer wants to keep the booking, and update the existing record."
         : "Customer has an inquiry about a confirmed appointment — team action required.",
       `Customer wrote: "${request.slice(0, 300)}"`,
       appt ? `Current appointment: ${appt}` : "",
