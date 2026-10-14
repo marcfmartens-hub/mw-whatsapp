@@ -64,6 +64,12 @@ export async function GET(req: NextRequest) {
       // Determine Sales_Inquiry label based on what we know
       let salesInquiry = "No Communication yet";
       const notesC = String(conv.car_conditions ?? "");
+      const lastReply = [...(Array.isArray(conv.messages) ? conv.messages : [])].reverse()
+        .find((m: any) => m.role === "assistant")?.content ?? "";
+      // Existing booked leads get a linked task for changes and inquiries. Do not
+      // push another lead when the conversation becomes inactive afterward.
+      if (/\b(CANCELLED:|RESCHEDULE REQUESTED:)/.test(notesC)
+          || /Your appointment inquiry is recorded\./i.test(lastReply)) continue;
       const st = conv.sell_timeline ?? "";
       if (st.includes("cash"))        salesInquiry = "Cash Deal";
       else if (st.includes("consignment")) salesInquiry = "Consignment";
