@@ -393,9 +393,9 @@ export async function createBiginContact(
     const fields = await getContactFields(accessToken);
     const data = adaptRecord(record, fields);
     if ((conversation as any).clear_appointment) {
-      for (const label of ["Appointment Date", "Appointment Time"]) {
+      for (const label of ["Appointment Date", "Appointment Time", "Appointment Date and Time"]) {
         const f = fields?.find(x => norm(x.field_label) === norm(label));
-        data[f?.api_name ?? label.replace(" ", "_")] = null;
+        data[f?.api_name ?? label.replace(/ /g, "_")] = null;
       }
     }
     data["First_Name"] = null; // never used — clears leftovers like "Unknown" on existing contacts
@@ -486,8 +486,8 @@ export async function createChangeTask(
     const history = (Array.isArray(conversation.messages) ? conversation.messages : [])
       .slice(-20).map((m: any) => `${m.role === "assistant" ? "Kaya" : "Customer"}: ${String(m.content ?? "").slice(0, 550)}`);
     const description = [
-      kind === "RESCHEDULE" ? "Customer wants to RESCHEDULE the inspection — call to arrange the new time. Kaya has not changed the appointment."
-        : kind === "CANCEL" ? "Customer wants to CANCEL the inspection — call to confirm. Kaya has not cancelled the appointment."
+      kind === "RESCHEDULE" ? "Customer requested RESCHEDULE. Kaya released the original appointment and confirmed receipt of the request; call to arrange and confirm the new slot."
+        : kind === "CANCEL" ? "Customer CANCELLED the inspection. Kaya confirmed cancellation and released the slot; call to reconfirm the decision or reverse it if the customer wants to keep the booking."
         : "Customer has an inquiry about a confirmed appointment — team action required.",
       `Customer wrote: "${request.slice(0, 300)}"`,
       appt ? `Current appointment: ${appt}` : "",
