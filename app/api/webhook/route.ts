@@ -8,7 +8,7 @@ import { createBiginContact, createChangeTask, moveLeadToCallBack, toIsoDate, to
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 import { MULKIYA_QUESTION, mulkiyaAnswer, specsStatement } from "@/lib/specs";
-import { asksBestWayToSell, isStandaloneOffTopicQuestion } from "@/lib/topic";
+import { asksBestWayToSell, isStandaloneOffTopicQuestion, isUnsureAboutSellingOption } from "@/lib/topic";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -1043,7 +1043,7 @@ export async function POST(req: NextRequest) {
     // Advice is a question, not a choice of consignment or consent to book.
     if ((currentStep === 6 || currentStep === FINAL_STEP) && asksBestWayToSell(messageText)
         && !/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday)\b.*\b(\d{1,2}\s*(am|pm)|noon)\b/i.test(messageText)) {
-      const reply = "If speed matters most, a direct cash sale is usually the simpler route. If you're comfortable waiting, consignment may bring a higher return, though it takes longer. We can advise on your particular car after a free inspection. Which matters more to you: selling quickly or the potential return?";
+      const reply = "We can help you sell quickly with cash payment on the spot after we inspect the car and agree on a price. Or, with consignment, we put the car for sale in our showroom and sell it directly to an end user. That usually puts more money in your pocket; allow at least 3–4 weeks. Is a quick transfer with cash payment more important, or do you have 3–4 weeks to sell?";
       await sendWhatsAppMessage(phone, reply);
       await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
@@ -1481,7 +1481,9 @@ export async function POST(req: NextRequest) {
     if (!hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP) {
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
-      const isDeferred = DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|don'?t (want|need) (to )?book|maybe later)\b/i.test(messageText);
+      const answeringSellingAdvice = lastA.includes("Is a quick transfer with cash payment more important")
+        && isUnsureAboutSellingOption(messageText);
+      const isDeferred = !answeringSellingAdvice && (DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|don'?t (want|need) (to )?book|maybe later)\b/i.test(messageText));
       const declinesCallback = /\b(no|don'?t|do not|not now|no thanks|no need)\b.{0,24}\b(call\s*back|callback|call|contact|follow[\s-]?up)\b|\b(call\s*back|callback|call|contact|follow[\s-]?up)\b.{0,20}\b(no thanks|not now|not needed)\b/i.test(messageText);
       const explicitBranchVisit = /\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText);
       const answerToChoice = !explicitBranchVisit && (lastA.includes(NOT_READY_CHOICE) || lastA.includes("personal call from our team"));
@@ -2145,8 +2147,11 @@ export async function POST(req: NextRequest) {
         && /\b(cash only|only cash|just cash|not consignment|no consignment|don'?t want consignment)\b/i.test(messageText);
       const priceFrustration = priorPriceRequests > 0 && /\b(just tell me|answer my question|i already told you|waste of time|ridiculous|frustrat\w*|stop asking|too many questions)\b/i.test(messageText);
       const askedForTeam = /\b(call me|call back|callback|speak to|speak with|talk to|talk with|contact me|human|real person|your team|purchasing team)\b/i.test(messageText);
+      // "Not sure" here means unsure about cash versus consignment, not refusal to visit.
+      const decidingSellingOption = lastA.includes("Is a quick transfer with cash payment more important")
+        && isUnsureAboutSellingOption(messageText);
       if (!offeredBefore && !hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
-          && !askedForTeam && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText)
+          && !askedForTeam && !decidingSellingOption && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText)
             || repeatedPriceRequest || priceRefusal || consignmentDeclined || priceFrustration)) {
         await fin(`I understand. ${OFFER_FWD}`);
         return NextResponse.json({ status: "forward_offer" }, { status: 200 });
@@ -2665,6 +2670,9 @@ export async function POST(req: NextRequest) {
         // Marc: "this week / next week" → offer the first possible day, or a day of their choice
         ? `No problem, I can arrange an inspection for you ${firstDay} if you want, or else later ${weekWord === "next" ? "or next week" : "this week"}. Which day do you prefer?`
         : SOON.test(messageText) ? `No problem, ${q.charAt(0).toLowerCase() + q.slice(1)}`.replace(/\. What time is best/, ".\n\nWhat time is best") : q;
+      if (lastAssistantMsg.includes("Is a quick transfer with cash payment more important")) {
+        reply = `The purchaser can discuss quick cash and consignment with you immediately after the free inspection. ${reply}`;
+      }
     }
     // Safety net: Kaya wrote a booking confirmation but the flow didn't register one.
     // With a valid date + time → make it a real booking (Bigin, location); otherwise never send a fake one.
