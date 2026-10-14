@@ -442,7 +442,7 @@ export async function createBiginContact(
 // Linked to the customer's latest WhatsApp pipeline card, with a link, car details, name and all phone numbers.
 export async function createChangeTask(
   conversation: Record<string, any>,
-  kind: "RESCHEDULE" | "CANCEL",
+  kind: "RESCHEDULE" | "CANCEL" | "OTHER",
   request: string,
 ): Promise<{ ok: boolean; taskId?: string; dealId?: string; error?: string }> {
   try {
@@ -480,15 +480,21 @@ export async function createChangeTask(
     const dubai = new Date(Date.now() + 4 * 3600e3);
     const due = dubai.getUTCHours() >= 19 || dubai.getUTCDay() === 0
       ? new Date(dubai.getTime() + (dubai.getUTCDay() === 6 && dubai.getUTCHours() >= 19 ? 2 : 1) * 86400e3) : dubai;
-    const subject = `${kind}: ${name} | ${car}`;
+    const subject = `${kind === "OTHER" ? "BOOKING INQUIRY" : kind}: ${name} | ${car}`;
+    const history = (Array.isArray(conversation.messages) ? conversation.messages : [])
+      .slice(-20).map((m: any) => `${m.role === "assistant" ? "Kaya" : "Customer"}: ${String(m.content ?? "").slice(0, 550)}`);
     const description = [
-      kind === "RESCHEDULE" ? "Customer wants to RESCHEDULE the inspection — call to arrange the new time." : "Customer wants to CANCEL the inspection — call to confirm.",
+      kind === "RESCHEDULE" ? "Customer wants to RESCHEDULE the inspection — call to arrange the new time. Kaya has not changed the appointment."
+        : kind === "CANCEL" ? "Customer wants to CANCEL the inspection — call to confirm. Kaya has not cancelled the appointment."
+        : "Customer has an inquiry about a confirmed appointment — team action required.",
       `Customer wrote: "${request.slice(0, 300)}"`,
       appt ? `Current appointment: ${appt}` : "",
       "",
       `Name: ${name}`,
       `Phone: ${phones.join(" / ")}`,
       `Car: ${car}${km ? ", " + km : ""}${conversation.specs ? ", " + conversation.specs : ""}`,
+      conversation.car_conditions ? `Car and conversation notes: ${String(conversation.car_conditions).slice(0, 1200)}` : "",
+      "Recent conversation:", ...history,
       "",
       deal ? `Pipeline record: ${ORG}/deals/${deal.id}` : "",
       contacts[0] ? `Contact: ${ORG}/contacts/${contacts[0].id}` : "",
@@ -497,6 +503,7 @@ export async function createChangeTask(
     if (simLog) { simLog.push(`[TASK] ${subject}\n${description}`); return { ok: true, taskId: "sim", dealId: deal?.id }; }
 
     const task: Record<string, unknown> = { Subject: subject, Due_Date: due.toISOString().slice(0, 10), Priority: "High", Description: description };
+    if (contacts[0]) task["Who_Id"] = { id: contacts[0].id };
     if (deal) { task["$related_module"] = "Deals"; task["Related_To"] = { id: deal.id }; }
     else if (contacts[0]) { task["$related_module"] = "Contacts"; task["Related_To"] = { id: contacts[0].id }; }
     const res = await fetch("https://www.zohoapis.com/bigin/v1/Tasks", { method: "POST", headers, body: JSON.stringify({ data: [task] }) });
@@ -511,6 +518,47 @@ export async function createChangeTask(
   } catch (e) {
     console.error("[Bigin] task create error:", e);
     return { ok: false, error: String(e) };
+  }
+}
+
+// Move a newly handed-off lead into the Call Back card column after Bigin's
+// contact-to-pipeline workflow creates its card. Never creates a task.
+export async function moveLeadToCallBack(phone: string): Promise<boolean> {
+  try {
+    const sim = (globalThis as any).__kayaSim as Map<string, string[]> | undefined;
+    const simLog = sim?.get(phone);
+    if (simLog) { simLog.push("[BIGIN] move lead to Call Back"); return true; }
+    const token = await getAccessToken();
+    const headers = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" };
+    let contacts: any[] = [];
+    for (const q of [plusPhone(phone), phone.replace(/\D/g, "")]) {
+      const r = await fetch(`${BIGIN_CONTACTS_URL}/search?phone=${encodeURIComponent(q)}`, { headers, cache: "no-store" });
+      if (r.status === 200) { contacts = (await r.json())?.data ?? []; if (contacts.length) break; }
+    }
+    contacts.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
+    const contact = contacts[0];
+    if (!contact) return false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const r = await fetch(`https://www.zohoapis.com/bigin/v1/Contacts/${contact.id}/Pipelines?fields=Stage,Created_Time`, { headers, cache: "no-store" });
+      const deals = r.status === 200 ? ((await r.json())?.data ?? []) as any[] : [];
+      deals.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
+      if (deals[0]?.id) {
+        if (String(deals[0].Stage ?? "").toLowerCase() === "call back") return true;
+        const u = await fetch("https://www.zohoapis.com/bigin/v1/Pipelines", {
+          method: "PUT", headers, body: JSON.stringify({ data: [{ id: deals[0].id, Stage: "Call Back" }] }),
+        });
+        const body = await u.json().catch(() => null);
+        const ok = u.ok && body?.data?.[0]?.status === "success";
+        if (!ok) console.error("[Bigin] Call Back stage update failed:", u.status, JSON.stringify(body).slice(0, 400));
+        return ok;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    console.warn("[Bigin] Call Back card not created yet for", phone);
+    return false;
+  } catch (e) {
+    console.error("[Bigin] Call Back move error:", e);
+    return false;
   }
 }
 

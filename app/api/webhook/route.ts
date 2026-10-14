@@ -4,7 +4,7 @@ import { pickDefaultTime } from "@/lib/slots";
 import { classifyTiming } from "@/lib/timing";
 import { SAFE_PRICE_REPLY, getKayaReply, wantsHuman, extractVehicleInfo, extractAppointment, generateInquirySummary, VehicleFields, ConversationMessage } from "@/lib/claude";
 import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/lib/meta";
-import { createBiginContact, createChangeTask, toIsoDate, toTime24 } from "@/lib/bigin";
+import { createBiginContact, createChangeTask, moveLeadToCallBack, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 import { MULKIYA_QUESTION, mulkiyaAnswer, specsStatement } from "@/lib/specs";
@@ -61,6 +61,7 @@ const POST_NAME_Q  = "May I have your name for the booking?";
 const POST_PHONE_Q = "Which number is best to reach you on?";
 const CLOSING_STEP = 8;
 const BOOKING_OR_TEAM_CHOICE = "Would you like to continue with the booking, or shall I forward your details to our purchasing team so they can discuss it with you by phone?";
+const NOT_READY_CHOICE = "No problem. Would you like someone from our team to contact you personally to discuss your car?";
 
 // Sell method detection
 const SELL_METHOD_CASH        = /\b(cash|direct|buy now|sell now|sell fast|quick sale|immediately|instant)\b/i;
@@ -257,6 +258,7 @@ async function pushLead(
     const buyerNote = [
       /BUYER:/.test(notesAll) ? "BUYER — wants to buy a car, not selling." : /Trade-in:/.test(notesAll) ? "TRADE-IN — customer also wants to buy a car." : "",
       /OPTED OUT:/.test(notesAll) ? "OPTED OUT — customer asked not to be messaged. Do not contact." : "",
+      /NOT READY YET/.test(notesAll) ? `NOT READY YET — ${/Declined personal call/.test(notesAll) ? "customer declined a call; do not call." : /Accepted personal call/.test(notesAll) ? "customer requested a personal call." : "call preference pending."}` : "",
       /Prefers WhatsApp/.test(notesAll) ? "Prefers WhatsApp — no phone calls." : "",
       /HIYAZA:/.test(notesAll) ? "HIYAZA ONLY — no plates/insurance, no appointment booked." : "",
       /TRUCK\/BUS:/.test(notesAll) ? "TRUCK / BUS — needs filtering by the team, no appointment booked." : "",
@@ -1136,7 +1138,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Saved mileage/specs are only overwritten when the customer is correcting them
-    const CORRECTION = /\b(sorry|actually|correction|correct (one|is)|i mean|i meant|my mistake|mistake|wrong|typo|instead|not\s+\d)/i;
+    const CORRECTION = /\b(sorry|actually|correction|correct (one|is)|i mean|i meant|my mistake|mistake|wrong|typo|instead|not\s+\d|not\s+(?:in\s+)?(?:km|kms|kilometers?|kilometres?))\b/i;
     const isCorrection = CORRECTION.test(messageText);
     if (alreadyKnown.mileage && vehicleUpdates.mileage && !isCorrection) delete vehicleUpdates.mileage;
     // Make / model / year are never overwritten by later messages ("Still under service contract" became
@@ -1163,7 +1165,7 @@ export async function POST(req: NextRequest) {
     }
     // Deterministic backup for specs + mileage — never re-ask something the customer already said
     if (currentStep >= 1 && currentStep <= 4) {
-      const IN_MILES = /\d\s*k?\s*miles?\b/i.test(messageText);
+      const IN_MILES = /\d\s*k?\s*(?:miles?|mills?)\b/i.test(messageText);
       // "I don't understand what GCC specs" mentions GCC but is not an answer
       const GCC_CONFUSED = /\b(don'?t|do not|didn'?t|dont)\s+(understand|know what|get)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b|^\s*\?+\s*$|\bwhat\?\s*$/i.test(messageText);
       if (GCC_CONFUSED && !alreadyKnown.specs) vehicleUpdates.specs = "Unknown";
@@ -1213,7 +1215,7 @@ export async function POST(req: NextRequest) {
       if (!alreadyKnown.mileage && !vehicleUpdates.mileage) {
         const mk = messageText.match(/\b(\d+(?:\.\d+)?)\s*k\s*(?:km|kms|kilomet\w*)?\b/i);
         const mf = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s*(?:km|kms|kilomet\w*)\b/i);
-        const mm = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?\s*k?)\s*miles?\b/i);
+        const mm = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?\s*k?)\s*(?:miles?|mills?)\b/i);
         if (mk) vehicleUpdates.mileage = String(Math.round(parseFloat(mk[1]) * 1000));
         else if (mf) vehicleUpdates.mileage = mf[1].replace(/[,.]/g, "");
         else if (mm) {
@@ -1222,8 +1224,28 @@ export async function POST(req: NextRequest) {
         }
       }
       // Miles → km (US imports): the extractor stores the number as-is
-      if (IN_MILES && vehicleUpdates.mileage && !alreadyKnown.mileage) {
-        vehicleUpdates.mileage = String(Math.round(parseFloat(vehicleUpdates.mileage) * 1.609));
+      if (IN_MILES && (!alreadyKnown.mileage || isCorrection)) {
+        const rawMiles = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?\s*k?)\s*(?:miles?|mills?)\b/i)?.[1];
+        if (rawMiles) {
+          const raw = rawMiles.replace(/[,.](?=\d{3}\b)/g, "").trim();
+          const miles = parseFloat(raw) * (/k$/i.test(raw) ? 1000 : 1);
+          vehicleUpdates.mileage = String(Math.round(miles * 1.609344));
+          const note = `Mileage reported: ${Math.round(miles)} miles (converted to ${vehicleUpdates.mileage} km)`;
+          const ex = String((conversation as any).car_conditions ?? "").split(" | ").filter(x => !x.startsWith("Mileage reported:"));
+          (conversation as any).car_conditions = [...ex, note].join(" | ");
+          await updateConversation(phone, { car_conditions: (conversation as any).car_conditions } as any).catch(() => {});
+        }
+      }
+    }
+    if (currentStep > 4 && isCorrection && /\b(?:miles?|mills?)\b/i.test(messageText)) {
+      const rawMiles = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?\s*k?)\s*(?:miles?|mills?)\b/i)?.[1];
+      if (rawMiles) {
+        const raw = rawMiles.replace(/[,.](?=\d{3}\b)/g, "").trim();
+        const miles = parseFloat(raw) * (/k$/i.test(raw) ? 1000 : 1);
+        vehicleUpdates.mileage = String(Math.round(miles * 1.609344));
+        const old = String((conversation as any).car_conditions ?? "").split(" | ").filter(x => !x.startsWith("Mileage reported:"));
+        (conversation as any).car_conditions = [...old, `Mileage reported: ${Math.round(miles)} miles (converted to ${vehicleUpdates.mileage} km)`].join(" | ");
+        await updateConversation(phone, { car_conditions: (conversation as any).car_conditions } as any).catch(() => {});
       }
     }
 
@@ -1413,21 +1435,80 @@ export async function POST(req: NextRequest) {
     // Only a booking Kaya actually confirmed counts (a day saved while chatting is not a booking to change/cancel)
     const hasBooking = !!(conversation.appointment_date && conversation.appointment_time)
       && ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content));
-    const CANCEL = /\b(cancel|already sold|sold it|sold the car|don'?t need (it|the appointment)|not coming|won'?t (be )?com\w*|can'?t (make it|come)|call (it )?off)\b/i;
-    const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can we make it|make it)\b/i;
+    if (!hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
+        && HOME_VISIT_PATTERN.test(messageText)
+        && !/\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText)) {
+      const reply = `We do all inspections at our branch in Al Quoz. ${NOT_READY_CHOICE}`;
+      const prev = String((conversation as any).car_conditions ?? "");
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { ...vehicleDbFields(vehicleUpdates),
+        car_conditions: [prev, "NOT READY YET: Cannot visit branch; call preference pending"].filter(Boolean).join(" | "),
+        appointment_date: null, appointment_time: null, last_msg_id: message.id } as any);
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      await pushLead(phone, "cannot visit branch", { inspectionBooked: false, milestone: "FOLLOW UP", topNote: "NOT READY YET" });
+      await moveLeadToCallBack(phone);
+      return NextResponse.json({ status: "branch_visit_objection" }, { status: 200 });
+    }
+    // No booking requested: offer a personal call once. The lead goes into Call Back,
+    // with no Bigin task (tasks are reserved for already-confirmed appointments).
+    if (!hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP) {
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const isDeferred = DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|don'?t (want|need) (to )?book|maybe later)\b/i.test(messageText);
+      const explicitBranchVisit = /\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText);
+      const answerToChoice = !explicitBranchVisit && (lastA.includes(NOT_READY_CHOICE) || lastA.includes("personal call from our team"));
+      if (isDeferred || answerToChoice) {
+        const yes = /\b(yes|yeah|sure|please|call|contact|phone|team)\b/i.test(messageText) && !/^\s*(no|don'?t|not)\b/i.test(messageText);
+        const no = /^\s*(no|nope|nah|no thanks|not now|don'?t|not interested)\b/i.test(messageText);
+        if (answerToChoice && !yes && !no) {
+          const ask = "Just to confirm, would you like a personal call from our team, or would you prefer to contact us when you're ready?";
+          await sendWhatsAppMessage(phone, ask);
+          await appendHistory(phone, hist, messageText, ask);
+          return NextResponse.json({ status: "not_ready_clarify" }, { status: 200 });
+        }
+        const note = answerToChoice && yes ? "NOT READY YET: Accepted personal call"
+          : answerToChoice && no ? "NOT READY YET: Declined personal call"
+          : "NOT READY YET: Call preference pending";
+        const previous = String((conversation as any).car_conditions ?? "").split(" | ").filter(n => !n.startsWith("NOT READY YET:"));
+        const notes = [...previous, note].join(" | ");
+        const reply = answerToChoice && yes
+          ? (isUAE ? "Thanks. Our team can contact you on this WhatsApp number. Have a nice day!" : `Thanks. ${POST_PHONE_Q}`)
+          : answerToChoice && no
+            ? "No problem. Whenever you're ready to sell your car, we'll be ready for you. I'll share our details and location below. Have a nice day!"
+            : NOT_READY_CHOICE;
+        await sendWhatsAppMessage(phone, reply);
+        if (answerToChoice && no) {
+          if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
+          await sendWhatsAppMessage(phone, LOCATION_TEXT);
+        }
+        await updateConversation(phone, { ...vehicleDbFields(vehicleUpdates), car_conditions: notes,
+          step: answerToChoice ? CLOSING_STEP : currentStep, appointment_date: null, appointment_time: null,
+          last_msg_id: message.id, last_message_at: new Date().toISOString() } as any);
+        await appendHistory(phone, hist, messageText, answerToChoice && no ? `${reply}\n[SPLIT]\n${LOCATION_TEXT}` : reply);
+        await pushLead(phone, "not ready yet", { inspectionBooked: false,
+          milestone: answerToChoice ? undefined : "FOLLOW UP", topNote: "NOT READY YET" });
+        await moveLeadToCallBack(phone);
+        return NextResponse.json({ status: answerToChoice ? "not_ready_answer" : "not_ready_offer" }, { status: 200 });
+      }
+    }
+    const CANCEL = /\b(cancel|already sold|sold it|sold the car|don'?t need (it|the appointment|the booking)|no need (for )?(the |a )?booking|not coming|won'?t (be )?com\w*|can'?t (make it|come)|call (it )?off)\b/i;
+    const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can (we|i) (make it|do)|could do|make it)\b/i;
     const lastAssistantMsg = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
     const mentionsDayOrTime = new RegExp(`\\b${DAY}\\b|\\b${TIME}`, "i").test(messageText);
     // "I'm not coming for nothing / unless you answer" is a condition, not a cancellation
     const CONDITIONAL = /\b(unless|if|without|before|for nothing|until|otherwise)\b/i;
-    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText) && !mentionsDayOrTime
+    const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText)
+      && !/\b(but|instead|rather|can we|how about)\b/i.test(messageText)
       && !(CONDITIONAL.test(messageText) && !/\b(cancel|sold)\b/i.test(messageText));
     // Marc: Kaya never changes bookings — cancel / reschedule requests become a task for the call centre
-    const CHANGE_REPLY = "No problem, I'll pass this on to our team and they will contact you to arrange it.";
+    const CHANGE_REPLY = "I’ve passed your booking request to our team. They’ll contact you to confirm it. Your existing appointment remains in place until they do.";
+    const CHANGE_ERROR = "I couldn't forward your booking request right now. Please call our customer service team on 058 582 5543. Your existing appointment remains in place until they confirm a change.";
     if (isCancel) {
-      await sendWhatsAppMessage(phone, CHANGE_REPLY);
+      const task = await createChangeTask({ ...conversation, phone }, "CANCEL", messageText);
+      const answer = task.ok ? CHANGE_REPLY : CHANGE_ERROR;
+      await sendWhatsAppMessage(phone, answer);
       await updateConversation(phone, { step: CLOSING_STEP, last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, CHANGE_REPLY);
-      await createChangeTask({ ...conversation, phone }, "CANCEL", messageText);
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
       return NextResponse.json({ status: "cancel_task" }, { status: 200 });
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
@@ -1453,125 +1534,28 @@ export async function POST(req: NextRequest) {
     const bookingAllowed = !/(HIYAZA:|BUYER:|Multiple cars:|TRUCK\/BUS:)/.test(notesNow)
       && ((String((conversation as any).car_conditions ?? "").includes("Non-GCC: booking offered")) || ((conversation as any).non_gcc_handoff !== true && conversation.specs !== "Non-GCC"));
     const bookFromClosed = currentStep >= CLOSING_STEP && !hasBooking && bookingAllowed && isBookingMsg(messageText);
-    // We picked the time ourselves ("If another time suits you better, just let me know") and the customer now
-    // says which time they prefer → adjust it right away (that's not a reschedule for the call center)
-    {
-      const recentA = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-2).map(m => m.content).join("\n");
-      // X:15 times are only ever picked by Kaya (customer times round to :00/:30), so a :15 booking = our default
-      const offeredChange = /if another time suits you better|I've changed it|would .+ or .+ work for you/i.test(recentA) || /:15$/.test(toTime24(String(conversation.appointment_time ?? "")) ?? "");
-      const dIso = String(conversation.appointment_date ?? "");
-      const prefersTime = new RegExp(`\\b${TIME}`, "i").test(messageText) || /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning|afternoon|evening|too early|too late)\b/i.test(messageText)
-        || /\b(a bit|little|bit|any(thing)?|something|slot|time)\s+(later|earlier)\b|\b(later|earlier)\s*(slot|time|please|pls|\?)|^\s*(later|earlier)\b/i.test(messageText)
-        || /\b(another|different|other) (time|slot)\b|\bchange the time\b/i.test(messageText)
-        || (/would .+ or .+ work for you/i.test(recentA) && /\b(first|1st|second|2nd|last|former|latter)\b/i.test(messageText))
-        || /^\s*(at\s+)?(1[0-2]|[1-9])([:.]\d{2})?\s*(please|pls|ok)?\s*[?.!]*\s*$/i.test(messageText) || /\b(can we do|how about|what about|make it)\s+(1[0-2]|[1-9])([:.]\d{2})?\b/i.test(messageText);
-      // Our own pick, and the customer puts it off ("later I confirm date and timing") or says that day
-      // doesn't work ("not today") → take the booking back out, don't push options
-      const putOff = DEFER_PATTERN.test(messageText) && !new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)?\\s*(oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep)`, "i").test(messageText);
-      const notThatDay = /\b(not today|today not|not possible|can'?t (today|come today|make it)|not tomorrow|not that day)\b/i.test(messageText) && !new RegExp(`\\b(?!today)${DAY}\\b`, "i").test(messageText.replace(/\btoday\b/gi, ""));
-      if (offeredChange && hasBooking && (putOff || notThatDay)) {
-        const ask = putOff ? "No problem, just let me know the day and time that suits you." : "No problem. Which day works better for you?";
-        await sendWhatsAppMessage(phone, ask);
-        await updateConversation(phone, { appointment_date: null, appointment_time: null, last_msg_id: message.id } as any).catch(() => {});
-        await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, ask);
-        await pushLead(phone, "default booking withdrawn", { inspectionBooked: false, clearAppointment: true });
-        return NextResponse.json({ status: "default_booking_withdrawn" }, { status: 200 });
-      }
-      const dayInMsgA = new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)?\\s*(of\\s+)?(oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep)[a-z]*\\b|\\bweek\\s*-?\\s*end\\b`, "i").test(messageText);
-      if (offeredChange && hasBooking && /^\d{4}-\d{2}-\d{2}$/.test(dIso) && (prefersTime || dayInMsgA) && !CANCEL.test(messageText)) {
-        let t: string | null = null;
-        const ea2 = await extractAppointment(messageText).catch(() => ({ appointment_date: "", appointment_time: "" }));
-        // A new day in this message ("I will come on Saturday", "Please book 17 Oct"), or the day Kaya just asked
-        // the time for ("What time would you like on Saturday?" → "3:15 PM") — never keep the old day by mistake
-        let newDay = "";
-        {
-          const todayIso = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
-          const okDay = (d: string | null) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= todayIso && new Date(d + "T12:00:00Z").getUTCDay() !== 0;
-          let cand = /\bweek\s*-?\s*end\b/i.test(messageText) ? null : (ea2.appointment_date ? toIsoDate(String(ea2.appointment_date)) : null);
-          if (!cand && /\bweek\s*-?\s*end\b/i.test(messageText)) {
-            const n = new Date(Date.now() + 4 * 3600e3); let add = (6 - n.getUTCDay() + 7) % 7; if (add === 0) add = 7;
-            cand = new Date(n.getTime() + add * 86400e3).toISOString().slice(0, 10);
-          }
-          if (!cand) {
-            const la = lastAssistantMsg;
-            if (/\bwhat time\b|\bwhich time\b/i.test(la)) {
-              const m1 = la.match(/\b(\d{1,2})(st|nd|rd|th)?\s+(of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
-              const m2 = la.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
-              cand = m1 ? toIsoDate(`${m1[1]} ${m1[4]}`) : m2 ? toIsoDate(m2[1]) : null;
-            }
-          }
-          cand = rollSameWeekday(cand, messageText, String(ea2.appointment_time ?? ""),
-            ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "user").map(m => m.content));
-          if (okDay(cand) && cand !== dIso) newDay = cand!;
-        }
-        let t24 = toTime24(String(ea2.appointment_time ?? ""));
-        // "11" / "at 11" / "11.30" without am/pm → 8–12 = morning, 1–7 = afternoon
-        if (!t24) {
-          const bare = messageText.match(/\b(?:at\s+)?(1[0-2]|[1-9])(?:[:.](\d{2}))?\b(?!\s*(km|k\b|%|aed|dhs))/i);
-          if (bare) { let h = +bare[1]; if (h >= 1 && h <= 7) h += 12; t24 = `${String(h).padStart(2, "0")}:${bare[2] ?? "00"}`; }
-        }
-        const curT = toTime24(String(conversation.appointment_time ?? "")) ?? "12:15";
-        const curM = +curT.slice(0, 2) * 60 + +curT.slice(3);
-        const LADDER = ["10:15", "11:15", "12:15", "13:15", "14:15", "15:15", "16:15", "17:15", "18:15"];
-        // Picking one of the two options we offered ("the first one", "2nd")
-        const offered = [...recentA.matchAll(/\*?(\d{1,2}:\d{2}\s*[AP]M)\*?/gi)].map(m => toTime24(m[1])).filter(Boolean) as string[];
-        if (!t24 && /would .+ or .+ work for you/i.test(recentA) && offered.length >= 2) {
-          if (/\b(first|1st|earlier one|former)\b/i.test(messageText)) t24 = offered[offered.length - 2];
-          else if (/\b(second|2nd|last|later one|latter)\b/i.test(messageText)) t24 = offered[offered.length - 1];
-        }
-        // "later" / "too early" / "earlier" / "another time" → give TWO options, don't pick one (Marc)
-        const minsOf = (x: string) => +x.slice(0, 2) * 60 + +x.slice(3);
-        const dowA = new Date(dIso + "T12:00:00Z").getUTCDay();
-        const openA = dowA === 5 ? 12 * 60 : 10 * 60;
-        const ladder = LADDER.filter(x => minsOf(x) >= openA && x !== curT);
-        let options: string[] = [];
-        if (!t24 && /\btoo early\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+later\b|\blater\s*(slot|time|please|pls|\?)|^\s*later\b/i.test(messageText)) {
-          const later = ladder.filter(x => minsOf(x) > curM);
-          options = later.length >= 2 ? [later[0], later[Math.min(later.length - 1, 3)]] : later;
-        } else if (!t24 && /\btoo late\b|\b(a bit|little|bit|any(thing)?|something|slot|time)\s+earlier\b|\bearlier\s*(slot|time|please|pls|\?)|^\s*earlier\b/i.test(messageText) && !/\b(earliest|as early as possible)\b/i.test(messageText)) {
-          const earlier = ladder.filter(x => minsOf(x) < curM);
-          options = earlier.length >= 2 ? [earlier[0], earlier[earlier.length - 1]] : earlier;
-        } else if (!t24 && /\b(another|different|other) (time|slot)\b|\bchange the time\b|\bnot (that|this) time\b/i.test(messageText)) {
-          options = ["11:15", "14:15"].filter(x => x !== curT && minsOf(x) >= openA);
-          if (options.length < 2) options = ladder.filter(x => !options.includes(x)).slice(0, 2 - options.length).concat(options).sort();
-        }
-        if (options.length === 1) t = options[0];
-        else if (options.length >= 2) {
-          const fmt = (x: string) => { const h = +x.slice(0, 2); return `${h % 12 || 12}:${x.slice(3)} ${h < 12 ? "AM" : "PM"}`; };
-          const ask = `No problem. Would ${fmt(options[0])} or ${fmt(options[1])} work for you?`;
-          await sendWhatsAppMessage(phone, ask);
-          await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
-          await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, ask);
-          return NextResponse.json({ status: "time_options" }, { status: 200 });
-        }
-        if (t24) { const m = +t24.slice(0, 2) * 60 + +t24.slice(3); const r = m % 15 === 0 ? m : Math.ceil(m / 30) * 30; t = `${String(Math.floor(r / 60)).padStart(2, "0")}:${String(r % 60).padStart(2, "0")}`; }
-        else if (!t && /\b(earliest|soonest|quickest|as (early|quick|quickly|soon|fast) as possible|first (slot|thing)|morning)\b/i.test(messageText)) t = await pickDefaultTime(newDay || dIso, phone, "morning");
-        else if (!t && /\bafternoon\b/i.test(messageText)) t = await pickDefaultTime(newDay || dIso, phone, "afternoon");
-        else if (!t && /\bevening\b/i.test(messageText)) t = await pickDefaultTime(newDay || dIso, phone, "evening");
-        const finalDay = newDay || dIso;
-        if (newDay && !t) t = await pickDefaultTime(newDay, phone);   // new day, no time → our default slot that day
-        const dow = new Date(finalDay + "T12:00:00Z").getUTCDay();
-        const mins = t ? +t.slice(0, 2) * 60 + +t.slice(3) : -1;
-        if (t && mins >= (dow === 5 ? 12 * 60 : 10 * 60) && mins <= 18 * 60 + 30) {
-          const conf = formatBookingConfirmation(null, finalDay, t);
-          const reply = `No problem, I've changed it.\n\n${conf ?? ""}`.trim();
-          await sendWhatsAppMessage(phone, reply);
-          await updateConversation(phone, { appointment_date: finalDay, appointment_time: t, last_msg_id: message.id } as any).catch(() => {});
-          await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
-          await pushLead(phone, "time adjusted after default", { inspectionBooked: true });
-          return NextResponse.json({ status: "time_adjusted" }, { status: 200 });
-        }
-      }
-    }
     const plainQuestion = /\?/.test(messageText) && !/\b(change|move|reschedul\w*|instead|another (time|day)|different (time|day)|postpone|can we (do|make it)|earlier|later)\b/i.test(messageText);
     const wantsReschedule = !noBookingCase && !aboutCall(messageText) && currentStep >= CLOSING_STEP && hasBooking && !plainQuestion &&
       (RESCHEDULE.test(messageText) || newDayOrTime);
     if (wantsReschedule) {
-      await sendWhatsAppMessage(phone, CHANGE_REPLY);
+      const task = await createChangeTask({ ...conversation, phone }, "RESCHEDULE", messageText);
+      const answer = task.ok ? CHANGE_REPLY : CHANGE_ERROR;
+      await sendWhatsAppMessage(phone, answer);
       await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, CHANGE_REPLY);
-      await createChangeTask({ ...conversation, phone }, "RESCHEDULE", messageText);
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
       return NextResponse.json({ status: "reschedule_task" }, { status: 200 });
+    }
+    // Questions requiring staff action about an existing appointment are tasks as well.
+    const simpleBookingQuestion = /\b(location|address|where are you|map|directions?|opening|hours|what time (do you|are you) (open|close)|free inspection|inspection free)\b/i.test(messageText);
+    if (hasBooking && currentStep >= CLOSING_STEP && !simpleBookingQuestion
+        && /\b(my|the)\s+(booking|appointment|inspection)\b/i.test(messageText)
+        && /\b(call|contact|confirm|check|question|issue|problem|inquiry|ask the team|help)\b/i.test(messageText)) {
+      const task = await createChangeTask({ ...conversation, phone }, "OTHER", messageText);
+      const answer = task.ok ? CHANGE_REPLY : CHANGE_ERROR;
+      await sendWhatsAppMessage(phone, answer);
+      await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
+      return NextResponse.json({ status: "booking_inquiry_task" }, { status: 200 });
     }
     const isRebook = bookFromClosed;
 
@@ -1611,6 +1595,13 @@ export async function POST(req: NextRequest) {
         const dayInMsg = new RegExp(`\\b${DAY}\\b|\\b\\d{1,2}(st|nd|rd|th)\\b|\\b\\d{1,2}[/.-]\\d{1,2}\\b|\\b(jan|feb|mar|apr|june?|july?|aug|sep|oct|nov|dec)[a-z]*\\b|\\bnext week\\b`, "i").test(messageText);
         if (ea.appointment_date && conversation.appointment_date && !dayInMsg) ea.appointment_date = conversation.appointment_date;
         if (ea.appointment_date) apptDate = toIsoDate(ea.appointment_date) ?? ea.appointment_date;
+        // The appointment extractor can invent a clock time for "tomorrow afternoon".
+        // Keep the day but treat a period-only answer as having no exact time.
+        const statedClock = /\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|o'?clock|h\d{2})\b|\b(?:at|after|before|around)\s+\d{1,2}\b|^\s*\d{1,2}(?:[:.]\d{2})?\s*$/i.test(messageText);
+        if (!statedClock && /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|after noon|evening|weekend)\b/i.test(messageText)) {
+          ea.appointment_time = "";
+          apptTime = "";
+        }
         if (ea.appointment_time) {
           // Half-hour slots (10:00, 10:30 … 6:30 PM): an in-between time goes to the next slot
           const t = toTime24(ea.appointment_time);
@@ -1655,8 +1646,11 @@ export async function POST(req: NextRequest) {
         }
         // A question ("can I come today?") gets a time question, not a default slot
         if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate) && !/\?/.test(messageText)) {
-          apptTime = await pickDefaultTime(apptDate, phone, dayPart); ea.appointment_time = apptTime;
-          defaultedTime = true;
+          const askedExactTime = /\b(what|which) (exact )?time\b|\btime (is best|suits|works)\b/i.test(lastAssistantMsg);
+          if (askedExactTime) {
+            apptTime = await pickDefaultTime(apptDate, phone, dayPart); ea.appointment_time = apptTime;
+            defaultedTime = true;
+          }
         }
         // Time without a day ("5pm" in reply to "What time can you come in this afternoon?") → infer the
         // day from Kaya's question, so the booking never ends up with a time but no date.
@@ -1674,6 +1668,15 @@ export async function POST(req: NextRequest) {
         if (ea.appointment_time) apptSave.appointment_time  = ea.appointment_time;
         if (Object.keys(apptSave).length > 0)
           await updateConversation(phone, apptSave);
+        if (apptDate && !apptTime && currentStep >= 6 && !/\?/.test(messageText)
+            && !/\b(what|which) (exact )?time\b|\btime (is best|suits|works)\b/i.test(lastAssistantMsg)) {
+          const ask = "What exact time would you prefer on that day?";
+          await sendWhatsAppMessage(phone, ask);
+          await updateConversation(phone, { step: FINAL_STEP, appointment_date: apptDate,
+            last_msg_id: message.id, last_message_at: new Date().toISOString() } as any);
+          await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, ask);
+          return NextResponse.json({ status: "ask_exact_time" }, { status: 200 });
+        }
       } catch (e) {
         console.error("early appointment extraction error:", e);
       }
@@ -1741,7 +1744,8 @@ export async function POST(req: NextRequest) {
     let mortgageAmount: string | undefined;
     const isLoanFollowUp = fieldToSave === "loan" && !!conversation.loan;
     const loanAnswer = isLoanFollowUp ? (conversation.loan ?? "") : (fieldToSave === "loan" ? messageText : (conversation.loan ?? ""));
-    const loanIsYes  = /\byes\b|\bdo\b|have a|there is|outstanding/i.test(loanAnswer);
+    const loanIsYes  = !/\b(no|none|not|don'?t|do not|without|paid off|clear|cash purchase)\b/i.test(loanAnswer)
+      && /\byes\b|\bi do\b|\bhave (a |an )?(loan|mortgage)|there is|outstanding|lease to own/i.test(loanAnswer);
     if (currentStep === 5 && loanIsYes && messageText) {
       // Must start with a digit — the old [\d,]+ matched the lone comma in "yes, 200k"
       // "200.000" (dot as thousands separator) → "200000"
@@ -1761,6 +1765,20 @@ export async function POST(req: NextRequest) {
 
     if (currentStep === 5 && loanIsYes && !mortgageAmount && !conversation.mortgage_amount && askedCount(/outstanding balance/i) >= 2) {
       mortgageAmount = "Unknown";
+    }
+    // A loan answer can arrive after Kaya has already moved on to the booking question.
+    if (currentStep > 5 && /\b(loan|mortgage|finance|financed|lease to own|remaining|outstanding|balance)\b/i.test(messageText)) {
+      const amt = messageText.match(/\b(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?)\s*(k|thousand|m|million)?\b/i);
+      if (amt && /\b(remaining|outstanding|balance|loan|mortgage|finance|lease)\b/i.test(messageText)) {
+        const n = parseFloat(amt[1].replace(/[,.](?=\d{3}\b)/g, ""));
+        mortgageAmount = String(Math.round(n * (/^(k|thousand)$/i.test(amt[2] ?? "") ? 1000 : /^(m|million)$/i.test(amt[2] ?? "") ? 1_000_000 : 1)));
+      }
+      if (/\b(lease to own|loan|mortgage|remaining|outstanding)\b/i.test(messageText) && !/\b(no|none|not|don'?t|without|paid off)\b/i.test(messageText)) {
+        await updateConversation(phone, { loan: "Yes" } as any).catch(() => {});
+      }
+      const previous = String((conversation as any).car_conditions ?? "");
+      const note = `Finance detail: ${messageText.trim().slice(0, 180)}`;
+      if (!previous.includes(note)) await updateConversation(phone, { car_conditions: [previous, note].filter(Boolean).join(" | ") } as any).catch(() => {});
     }
 
     const carYear    = parseInt((vehicleUpdates.year ?? conversation.year) || "0");
@@ -2657,7 +2675,7 @@ export async function POST(req: NextRequest) {
         replyParts = [...(answer ? [answer] : []), ...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
-      if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nOur team will confirm the exact time with you on the morning of the booking. If another time suits you better, just let me know."; reply = replyParts.join("\n[SPLIT]\n"); }
+      if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nI've booked this slot for you. Our call centre will confirm the exact timing with you on the morning of the booking."; reply = replyParts.join("\n[SPLIT]\n"); }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     // Loan on the car → reassure first, then the next question as its own message (Marc)

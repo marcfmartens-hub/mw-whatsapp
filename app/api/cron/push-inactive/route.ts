@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createBiginContact } from "@/lib/bigin";
+import { createBiginContact, moveLeadToCallBack } from "@/lib/bigin";
 import { pickDefaultTime } from "@/lib/slots";
+import { sendWhatsAppMessage } from "@/lib/meta";
 import { generateInquirySummary } from "@/lib/claude";
 import type { ConversationMessage } from "@/lib/claude";
 
@@ -82,23 +83,51 @@ export async function GET(req: NextRequest) {
         car_conditions: conv.car_conditions,
       }).catch(() => "");
 
-      // A day was agreed but no time → book 12:15 PM by default (Marc)
-      if (conv.appointment_date && !conv.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(String(conv.appointment_date))) {
-        conv.appointment_time = await pickDefaultTime(String(conv.appointment_date), conv.phone);
-        await supabase.from(TABLE).update({ appointment_time: conv.appointment_time }).eq("phone", conv.phone);
+      // Only after Kaya has asked once for an exact time without getting an answer:
+      // choose a :15 slot, tell the customer, and then save it as a real booking.
+      const lastAssistant = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const notReady = notesC.includes("NOT READY YET");
+      const date = String(conv.appointment_date ?? "");
+      const today = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+      const canDefault = !notReady && !conv.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(date)
+        && date >= today && new Date(`${date}T12:00:00Z`).getUTCDay() !== 0
+        && /what exact time would you prefer on that day\?/i.test(lastAssistant);
+      let defaulted = false;
+      if (canDefault) {
+        const previous = [...history].reverse().find(m => m.role === "user")?.content ?? "";
+        const part = /\b(morning|afternoon|evening)\b/i.exec(previous)?.[1]?.toLowerCase() as "morning" | "afternoon" | "evening" | undefined;
+        const slot = await pickDefaultTime(date, conv.phone, part);
+        const nowDubai = new Date(Date.now() + 4 * 3600e3);
+        const slotMinutes = +slot.slice(0, 2) * 60 + +slot.slice(3);
+        if (date === today && slotMinutes < nowDubai.getUTCHours() * 60 + nowDubai.getUTCMinutes() + 60) {
+          console.warn("[cron/timeout] no future slot for", conv.phone);
+        } else {
+        const day = new Date(`${date}T12:00:00Z`);
+        const hour = +slot.slice(0, 2);
+        const when = `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day.getUTCDay()]} ${day.getUTCDate()} ${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][day.getUTCMonth()]}`;
+        const reply = `I've booked your inspection for ${when} at ${hour % 12 || 12}:${slot.slice(3)} ${hour < 12 ? "AM" : "PM"}. Our call centre will confirm the exact timing with you on the morning of the booking.\n\n📍 Mister Wheelz Car Buyers\nUmm Suqeim Branch, Al Quoz 4, Dubai\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\nMon–Sat 10 AM–7 PM (Friday from 12 PM); closed Sunday\nCustomer service: 058 582 5543`;
+        await sendWhatsAppMessage(conv.phone, reply);
+        conv.appointment_time = slot;
+        conv.step = 8;
+        conv.messages = [...history, { role: "assistant", content: reply }].slice(-40);
+        const { error: saveError } = await supabase.from(TABLE).update({ appointment_time: slot, step: 8, messages: conv.messages }).eq("phone", conv.phone);
+        if (saveError) throw saveError;
+        defaulted = true;
+        }
       }
       const ok = await createBiginContact({
         ...conv,
         phone_number: conv.phone_number || conv.phone,
         sales_inquiry: salesInquiry,
         // If a date + time were captured, the customer did book — don't push as "not booked"
-        inspection_booked: !!(conv.appointment_date && conv.appointment_time),
-        inquiry_summary: inquirySummary,
+        inspection_booked: !!(conv.appointment_date && conv.appointment_time && (defaulted || history.some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content)))),
+        inquiry_summary: [notReady ? `NOT READY YET — ${notesC.includes("Declined personal call") ? "customer declined a call; do not call." : notesC.includes("Accepted personal call") ? "customer requested a call." : "call preference pending."}` : "", inquirySummary].filter(Boolean).join("\n\n"),
         owner_status: conv.owner_status,
         car_conditions: conv.car_conditions,
       } as any);
 
       if (!ok) throw new Error("Bigin push failed");
+      if (notReady) await moveLeadToCallBack(conv.phone);
       await supabase
         .from(TABLE)
         .update({ bigin_pushed_at: new Date().toISOString() })
