@@ -8,7 +8,7 @@ import { createBiginContact, createChangeTask, moveLeadToCallBack, toIsoDate, to
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 import { MULKIYA_QUESTION, mulkiyaAnswer, specsStatement } from "@/lib/specs";
-import { asksBestWayToSell, isStandaloneOffTopicQuestion, isUnsureAboutSellingOption } from "@/lib/topic";
+import { asksBestWayToSell, isSellingOptionAnswer, isStandaloneOffTopicQuestion } from "@/lib/topic";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -1482,8 +1482,8 @@ export async function POST(req: NextRequest) {
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
       const answeringSellingAdvice = lastA.includes("Is a quick transfer with cash payment more important")
-        && isUnsureAboutSellingOption(messageText);
-      const isDeferred = !answeringSellingAdvice && (DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|don'?t (want|need) (to )?book|maybe later)\b/i.test(messageText));
+        && isSellingOptionAnswer(messageText);
+      const isDeferred = !answeringSellingAdvice && (DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|(don'?t|do not) (want|need) (to )?book|maybe later|(i will|i'?ll) let (you|u) know)\b/i.test(messageText));
       const declinesCallback = /\b(no|don'?t|do not|not now|no thanks|no need)\b.{0,24}\b(call\s*back|callback|call|contact|follow[\s-]?up)\b|\b(call\s*back|callback|call|contact|follow[\s-]?up)\b.{0,20}\b(no thanks|not now|not needed)\b/i.test(messageText);
       const explicitBranchVisit = /\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText);
       const answerToChoice = !explicitBranchVisit && (lastA.includes(NOT_READY_CHOICE) || lastA.includes("personal call from our team"));
@@ -1604,13 +1604,15 @@ export async function POST(req: NextRequest) {
     }
     const isRebook = bookFromClosed;
 
-    const deferring = DEFER_PATTERN.test(messageText) && !/\b(\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\b/i.test(messageText)
+    const answeringSellingOption = lastAssistantMsg.includes("Is a quick transfer with cash payment more important")
+      && isSellingOptionAnswer(messageText);
+    const deferring = !answeringSellingOption && DEFER_PATTERN.test(messageText) && !/\b(\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\b/i.test(messageText)
       && !new RegExp(`\\b${DAY}\\b|\\bweek\\s*-?\\s*end\\b`, "i").test(messageText);
     // Not a clear day/time: undecided, vague window, location only, walk-in, depends on someone, a day with
     // "maybe", or far away (Marc, 13 Oct) → handled with fixed replies below, never booked from this message.
     // Plain "this week" / "next week" at the when-to-sell question keeps Marc's own reply.
     const plainWeek = currentStep <= 6 && /\b(this|next)\s+week\b/i.test(messageText) && !/\b(later|sometime|maybe|end of)\b/i.test(messageText);
-    const timing = (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !plainWeek) ? classifyTiming(messageText, DEFER_PATTERN) : null;
+    const timing = (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !plainWeek && !answeringSellingOption) ? classifyTiming(messageText, DEFER_PATTERN) : null;
     if (timing) console.log(`[kaya] timing ${timing.kind} for ${phone}`);
     if ((currentStep === FINAL_STEP || wantsBooking || isRebook) && messageText && !deferring && !timing) {
       try {
@@ -2149,7 +2151,7 @@ export async function POST(req: NextRequest) {
       const askedForTeam = /\b(call me|call back|callback|speak to|speak with|talk to|talk with|contact me|human|real person|your team|purchasing team)\b/i.test(messageText);
       // "Not sure" here means unsure about cash versus consignment, not refusal to visit.
       const decidingSellingOption = lastA.includes("Is a quick transfer with cash payment more important")
-        && isUnsureAboutSellingOption(messageText);
+        && isSellingOptionAnswer(messageText);
       if (!offeredBefore && !hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
           && !askedForTeam && !decidingSellingOption && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText)
             || repeatedPriceRequest || priceRefusal || consignmentDeclined || priceFrustration)) {
