@@ -891,10 +891,8 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, { car_conditions: cleaned } as any).catch(() => {});
     }
     if (/\b(stop (messaging|texting|contacting|sending|writing)( me)?|unsubscribe|don'?t (message|text|contact) me|do not (message|text|contact) me|leave me alone|remove my (number|details)|opt[\s-]?out)\b|^\s*stop\s*[.!]*\s*$/i.test(messageText)) {
-      const reply = "I understand. Whenever you're ready, you're always welcome at our branch or to contact us again.";
+      const reply = "Understood. We won't message you again.";
       await sendWhatsAppMessage(phone, reply);
-      if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
-      await sendWhatsAppMessage(phone, LOCATION_TEXT);
       const ex = String((conversation as any).car_conditions ?? "");
       const note = "OPTED OUT: asked not to be messaged — do not contact";
       await updateConversation(phone, {
@@ -1589,6 +1587,10 @@ export async function POST(req: NextRequest) {
           return new Date(n.getTime() + add * 86400e3).toISOString().slice(0, 10);
         };
         if (/\bweek\s*-?\s*end\b/i.test(String(ea.appointment_date ?? "")) || (!ea.appointment_date && /\bweek\s*-?\s*end\b/i.test(messageText))) ea.appointment_date = nextSaturday();
+        // An AI extractor can reduce "after tomorrow" to "tomorrow". The customer's
+        // actual wording takes precedence so the appointment stays two days out.
+        if (/\b(?:the\s+)?day\s+after\s+tomorrow\b|\bafter\s+tomorrow\b/i.test(messageText))
+          ea.appointment_date = toIsoDate("after tomorrow") ?? ea.appointment_date;
         if (conversation.appointment_date && /week\s*-?\s*end/i.test(String(conversation.appointment_date))) (conversation as any).appointment_date = nextSaturday();
         // "In the afternoon" after "tomorrow" must not move the day back to today: without a day word
         // (or a date) in this message, the day already agreed stays
