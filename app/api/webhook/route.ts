@@ -7,6 +7,7 @@ import { sendWhatsAppMessage, sendWhatsAppImage, sendTypingIndicator } from "@/l
 import { createBiginContact, createChangeTask, toIsoDate, toTime24 } from "@/lib/bigin";
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
+import { MULKIYA_QUESTION, mulkiyaAnswer, specsStatement } from "@/lib/specs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -1090,7 +1091,7 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, { name: conversation.name } as any).catch(() => {});
     }
 
-    let askOrigin = false;     // customer doesn't know what GCC means → ask where the car was bought
+    let askOrigin = false;
     const alreadyKnown: VehicleFields = {
       make:    (conversation.make    && conversation.make    !== "Unknown") ? conversation.make    : undefined,
       model:   (conversation.model   && conversation.model   !== "Unknown") ? conversation.model   : undefined,
@@ -1150,55 +1151,29 @@ export async function POST(req: NextRequest) {
       if (mc && /\b(mileage|km|kms|kilomet|driven|odometer|k)\b/i.test(messageText) && !/\b(loan|bank|mortgage|price|aed|dhs)\b/i.test(messageText)) {
         vehicleUpdates.mileage = mc[1] ? String(Math.round(parseFloat(mc[1]) * 1000)) : mc[2].replace(/[,.]/g, "");
       }
-      if (/\bnon[\s-]?gcc\b|\b(american|us|usa|japanese|canadian|european|korean)\s*spec/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
-      else if (/\b(it'?s|is)\s+gcc\b|\bgcc\s+not\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
+      const correctedSpecs = specsStatement(messageText);
+      if (correctedSpecs === "GCC" || correctedSpecs === "Unknown") vehicleUpdates.specs = correctedSpecs;
     }
 
-    // "I don't understand what GCC specs" at any step before the booking → explain + ask where it was bought
+    // An unclear spec is Unknown; purchase location and country of origin never decide specs.
     if (currentStep < 8 && /\bgcc\b/i.test(messageText)
         && /\b(don'?t|do not|didn'?t|dont)\s+(understand|know what|get)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b/i.test(messageText)) {
-      askOrigin = true;
-      delete (vehicleUpdates as any).specs;
-    }
-    // Answer to "Did you buy the car here in the UAE, or was it imported from another country?" → country decides the specs (Malaysia, Japan, USA… = non-GCC)
-    {
-      const lastQo = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
-      if (lastQo.includes("imported from another country")) {
-        if (/\b(malays\w*|malesi\w*|japan\w*|usa|us|america\w*|canad\w*|korea\w*|china|chinese|europe\w*|german\w*|uk|england|singapore|thailand|australia|import\w*|outside|abroad)\b/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
-        else if (/\b(uae|dubai|abu dhabi|sharjah|ajman|here|local|saudi|ksa|oman|qatar|kuwait|bahrain|gcc|agency|dealer|showroom)\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
-        else vehicleUpdates.specs = "Unknown";
-      }
+      vehicleUpdates.specs = "Unknown";
     }
     // Deterministic backup for specs + mileage — never re-ask something the customer already said
     if (currentStep >= 1 && currentStep <= 4) {
-      const NON_GCC = /\bnon[\s-]?gcc\b|\b(not|no|isn'?t|is not)\s+(a\s+)?gcc\b|\b(american|us|usa|japanese|japan|canadian|canada|european|korean)\s*(spec|specs|import|imported|version)\b|\bimport(ed)?\s+from\s+(the\s+)?(us|usa|america|canada|japan|korea|europe)\b/i;
       const IN_MILES = /\d\s*k?\s*miles?\b/i.test(messageText);
       // "I don't understand what GCC specs" mentions GCC but is not an answer
       const GCC_CONFUSED = /\b(don'?t|do not|didn'?t|dont)\s+(understand|know what|get)|\bwhat (is|does|are|means?)\b.{0,20}\bgcc\b|\bgcc\b.{0,15}\bmean|\bmeaning\b|^\s*\?+\s*$|\bwhat\?\s*$/i.test(messageText);
-      if (GCC_CONFUSED && !alreadyKnown.specs) delete (vehicleUpdates as any).specs;
-      if (GCC_CONFUSED) { /* not an answer */ }
-      else if (!alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
-        if (NON_GCC.test(messageText) || IN_MILES) vehicleUpdates.specs = "Non-GCC";
-        else if (/\bgcc\b/i.test(messageText)) vehicleUpdates.specs = "GCC";
-      } else if (vehicleUpdates.specs === "GCC" && NON_GCC.test(messageText)) {
-        vehicleUpdates.specs = "Non-GCC";
-      }
+      if (GCC_CONFUSED && !alreadyKnown.specs) vehicleUpdates.specs = "Unknown";
       // Answer to "GCC specs, right?" → yes = GCC, no = non-GCC
       {
         const lastQ = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
         const askedGcc = /\bGCC\b[^?]{0,40}\?/i.test(lastQ);
-        if ((askedGcc || /\bgcc\b/i.test(messageText)) && GCC_CONFUSED && !lastQ.includes("imported from another country")) {
-          askOrigin = true;
-        } else if (askedGcc && !alreadyKnown.specs && (!vehicleUpdates.specs || vehicleUpdates.specs === "Unknown")) {
-          if (/\b(not sure|no idea|don'?t know|idk)\b/i.test(messageText)) vehicleUpdates.specs = "Unknown";
-          else if (/^\s*(no|nope|nah|not)\b|\bnon[\s-]?gcc\b|\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*|malays\w*|malesi\w*|china|chinese|singapore|thailand|germany|uk|australia)\b|\bimport/i.test(messageText)) vehicleUpdates.specs = "Non-GCC";
-          else vehicleUpdates.specs = "GCC"; // "yes", "Ys", "ya", "👍", "gcc" … — never ask the same question twice
+        if (askedGcc && !alreadyKnown.specs && !vehicleUpdates.specs) {
+          if (/^\s*(yes|yeah|yep|ya|👍)\s*[.!]?\s*$/i.test(messageText)) vehicleUpdates.specs = "GCC";
+          else if (/^\s*(no|nope|nah)\s*[.!]?\s*$/i.test(messageText)) vehicleUpdates.specs = "Unknown";
         }
-      }
-      // "not sure what GCC or non-GCC means… bought it from a dealer in Dubai" is not a non-GCC car
-      const UNSURE_SPECS = /\bgcc\s+or\s+non|\bwhat\b.{0,25}\bgcc\b|\b(not sure|no idea|don'?t know)\b.{0,30}\bgcc\b/i;
-      if (UNSURE_SPECS.test(messageText) && vehicleUpdates.specs === "Non-GCC" && !/\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b.{0,10}\b(spec|import)/i.test(messageText)) {
-        vehicleUpdates.specs = /\bprobably\s+gcc\b|\bdealer\b.{0,20}\b(dubai|uae|abu dhabi|sharjah)\b|\b(bought|purchased)\b.{0,20}\b(in|from)\s+(dubai|the uae|uae)\b/i.test(messageText) ? "GCC" : "Unknown";
       }
       // Typo in the year ("20002", "20188", "2o18") right after we asked for it → take the real year, never ask again
       {
@@ -1340,10 +1315,45 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, { car_conditions: updated } as any).catch(() => {});
     }
 
+    // The extractor may infer market specs from a country or import history. Override it
+    // with the customer's explicit spec label and the Mulkiya engine-number check.
+    const specQuestion = [...((conversation.messages ?? []) as ConversationMessage[])].reverse()
+      .find(m => m.role === "assistant")?.content ?? "";
+    const specClaim = specsStatement(messageText, /\b(specs?|gcc)\b/i.test(specQuestion) && /\?/.test(specQuestion));
+    const notesForSpecs = String((conversation as any).car_conditions ?? "");
+    const pendingMulkiya = notesForSpecs.includes("Mulkiya specs check pending");
+    if (pendingMulkiya) {
+      const answer = mulkiyaAnswer(messageText);
+      vehicleUpdates.specs = answer === "NON_GCC" ? "Non-GCC" : "Unknown";
+      const note = answer === "NON_GCC" ? "Non-GCC: Mulkiya engine number NONE/NIL/blank"
+        : answer === "ENGINE_PRESENT" ? "Specs conflict: claimed non-GCC, engine number present; team to verify"
+        : "Specs unknown: unable to check Mulkiya";
+      (conversation as any).car_conditions = notesForSpecs.replace(/(?:^| \| )Mulkiya specs check pending(?: \| )?/, " | ").replace(/^ \| | \| $/g, "").trim();
+      (conversation as any).car_conditions = [(conversation as any).car_conditions, note].filter(Boolean).join(" | ");
+      if (answer === "NON_GCC") (conversation as any).non_gcc_handoff = true;
+      await updateConversation(phone, { specs: vehicleUpdates.specs, car_conditions: (conversation as any).car_conditions,
+        ...(answer === "NON_GCC" ? { non_gcc_handoff: true } : {}) } as any).catch(() => {});
+    } else if (specClaim === "CHECK_MULKIYA" && currentStep < CLOSING_STEP) {
+      // A claimed imported market is not verified non-GCC until this field is checked.
+      const nextNotes = [notesForSpecs, "Mulkiya specs check pending"].filter(Boolean).join(" | ");
+      await updateConversation(phone, { ...vehicleDbFields(vehicleUpdates), specs: "Unknown", car_conditions: nextNotes,
+        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await sendWhatsAppMessage(phone, MULKIYA_QUESTION);
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, MULKIYA_QUESTION);
+      return NextResponse.json({ status: "mulkiya_check" }, { status: 200 });
+    } else if (specClaim === "GCC" || specClaim === "Unknown") {
+      vehicleUpdates.specs = specClaim;
+    } else if (vehicleUpdates.specs === "Non-GCC" || vehicleUpdates.specs === "GCC") {
+      // A model-generated spec without an explicit market statement is not evidence.
+      vehicleUpdates.specs = "Unknown";
+    }
+    if (vehicleUpdates.specs === "Unknown") conversation.specs = "Unknown";
+
     const SPECS_UNSURE = /\b(i\s*don'?t\s*know|not\s*sure|no\s*idea|unsure|idk|not\s*sure\s*about|unclear)\b/i;
     const hasKnownSpecs = (vehicleUpdates.specs && vehicleUpdates.specs !== "Unknown")
                           || (conversation.specs && conversation.specs !== "Unknown");
-    let specsExplicitlyUnknown = currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText);
+    let specsExplicitlyUnknown = vehicleUpdates.specs === "Unknown"
+      || (currentStep === 4 && !hasKnownSpecs && SPECS_UNSURE.test(messageText));
     // Loop guard: never ask the same question a third time — save "Unknown" and move on
     const histAssistant = ((conversation.messages ?? []) as ConversationMessage[]).filter(m => m.role === "assistant");
     const askedCount = (re: RegExp) => histAssistant.filter(m => re.test(m.content)).length;
@@ -2190,121 +2200,42 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Non-GCC / imported specs → team handoff + collect the rest ────────────
-    // 1) Handoff message  2) one question at a time: missing car details →
-    //    "when are you planning to sell?" → cash vs consignment (cars ≤ 8 yrs)
-    // 3) close and push to Bigin. No appointment booking.
-    // "It's GCC specs" after a non-GCC handoff → correct it and continue to booking
-    if (((conversation as any).non_gcc_handoff === true || conversation.specs === "Non-GCC")
-        && /\b(it'?s|is|yes|its|actually)\b.{0,15}\bgcc\b|\bgcc\s+specs?\b/i.test(messageText) && !/\bnon[\s-]?gcc\b/i.test(messageText)) {
-      // Back to the normal flow — the goal is the appointment: next missing question, in order
-      const vDb = vehicleDbFields(vehicleUpdates);
-      const c2 = { ...conversation, ...vDb } as any;
-      const tl = String(c2.sell_timeline ?? "").replace(/\s*\|?\s*sell_method:\w+/, "").trim();
-      const nm = c2.name ? ", " + c2.name : "";
-      let nextQ: string; let step: number;
-      if (!c2.mileage) { nextQ = "What's the mileage on it?"; step = 4; }
-      else if (!c2.loan && parseInt(String(c2.year), 10) >= 2020) { nextQ = "Any loan on the car?"; step = 5; }
-      else if (!tl) { nextQ = "When would you like to sell?"; step = 6; }
-      else { nextQ = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?"; step = FINAL_STEP; }
-      void nm;
-      const reply = `Thanks for clarifying. ${nextQ}`;
-      await sendWhatsAppMessage(phone, reply);
-      await updateConversation(phone, { ...vDb, specs: "GCC", non_gcc_handoff: false, step, last_msg_id: message.id } as any).catch(() => {});
-      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
-      return NextResponse.json({ status: "gcc_corrected" }, { status: 200 });
-    }
-    const isNonGcc = (vehicleUpdates.specs ?? carSpecs) === "Non-GCC" && carSpecs === "Non-GCC";
-    const alreadyHandedOff = (conversation as any).non_gcc_handoff === true;
-    const ngBookingOffered = String((conversation as any).car_conditions ?? "").includes("Non-GCC: booking offered");
-    if (((isNonGcc && currentStep >= 1) || alreadyHandedOff) && currentStep < CLOSING_STEP && !ngBookingOffered) {
-      const firstTime = !alreadyHandedOff;
+    // Verified non-GCC (Mulkiya engine-number field NONE/NIL/blank): no booking.
+    // Keep collecting the car, name and UAE contact number for the purchasing team.
+    const verifiedNonGcc = String((conversation as any).car_conditions ?? "").includes("Non-GCC: Mulkiya engine number NONE/NIL/blank");
+    if (verifiedNonGcc && currentStep < CLOSING_STEP) {
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const vDb = vehicleDbFields(vehicleUpdates);
-      const updates: Record<string, unknown> = { ...vDb, last_msg_id: message.id };
-      if (firstTime) updates.non_gcc_handoff = true;
-
-      const c = { ...conversation, ...vDb } as any;
-      const age = c.year ? currentYear - parseInt(c.year, 10) : 99;
-      let tl: string = c.sell_timeline ?? "";
-      const hasTimeline = !!tl.replace(/\s*\|?\s*sell_method:\w+/, "").trim();
-      const hasMethod   = /sell_method:/.test(tl);
-      const missingCar  = (["make", "model", "year", "mileage"] as const).find(k => !c[k] || c[k] === "Unknown");
-
-      // A question instead of an answer → purchasing team will discuss it; repeat the open question
-      const ngQuestion = !firstTime && /\?|\b(do|does|can|could|will|would)\s+(you|u)\b|\bhow much\b|\bwhat.{0,15}\b(price|offer)\b|\bhome\s*(visit|service)/i.test(messageText)
-        && !/\b(difference|explain|which is better)\b/i.test(messageText);
-      // Save this message as the answer to the question we asked last time
-      let explainMethod = false;
-      // If we just asked the timeline / method, this message is the answer even if it also asks something
-      const lastA0 = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
-      const answersOurQ = /when are you planning to sell|when would you like to sell|direct cash, or with consignment|cash sale, or would you/i.test(lastA0);
-      if (!firstTime && !missingCar && (!ngQuestion || answersOurQ)) {
-        if (!hasTimeline) {
-          tl = messageText + (hasMethod ? ` | ${tl}` : "");
-        } else if (!hasMethod && age <= 8) {
-          if (/\b(difference|what.?s|explain|how does|which is better)\b/i.test(messageText) && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText)) {
-            explainMethod = true;
-          } else {
-            const m = SELL_METHOD_CASH.test(messageText) ? "cash"
-              : SELL_METHOD_CONSIGNMENT.test(messageText) ? "consignment" : "not_sure";
-            tl = `${tl} | sell_method:${m}`;
-          }
-        }
-        updates.sell_timeline = tl || null;
+      const c = { ...conversation, ...vDb, specs: "Non-GCC" } as any;
+      const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const firstTime = !hist.some(m => m.role === "assistant" && /team will get back to you about this car/i.test(m.content));
+      if (!c.name && /may I have your name/i.test(lastA)) {
+        const name = extractNameFromMessage(messageText);
+        if (name) c.name = name;
       }
-
-      // Number confirmation is always the last question
-      const PHONE_Q = "Which UAE number is best to reach you on?";
-      const lastAssistant = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
-      const phoneAskedBefore = hist.some(m => m.role === "assistant" && /best (number )?to reach you/i.test(m.content));
-      if (!firstTime && /best (number )?to reach you/i.test(lastAssistant)) {
-        const pm = messageText.match(/(?:\+?971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
-        if (pm) {
-          const raw = pm[0].replace(/\D/g, "");
-          const alt = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
-          if (alt !== phone) updates.alternative_phone = alt;
-        }
+      const phoneMatch = messageText.match(/(?:\+?971|00971|0)?\s*5\d[\s-]?\d{3}[\s-]?\d{4}/);
+      if (phoneMatch) {
+        const raw = phoneMatch[0].replace(/\D/g, "");
+        c.alternative_phone = raw.startsWith("971") ? raw : `971${raw.replace(/^0/, "")}`;
       }
-
-      // Decide the next question
-      const nowHasTimeline = !!tl.replace(/\s*\|?\s*sell_method:\w+/, "").trim();
-      const nowHasMethod   = /sell_method:/.test(tl);
-      // Marc: short explanation, ask for the full car details, fill what's missing — and that's all
-      // (no timeline / cash-consignment / phone questions for non-GCC)
-      void nowHasTimeline; void nowHasMethod; void explainMethod; void phoneAskedBefore; void PHONE_Q;
-      const carList = (["make", "model", "year", "mileage"] as const).filter(k => !c[k] || c[k] === "Unknown");
-      let nextQ: string | null = null;
-      if (firstTime && carList.length) nextQ = "Please share the full car details so we have the full information.";
-      else if (missingCar) nextQ = `Could you share the ${missingCar} of the car?`;
-      // Loop guard: never ask the same question a second time — move on
-      if (nextQ && hist.some(m => m.role === "assistant" && m.content.includes(nextQ!))) nextQ = null;
-
-      const parts: string[] = [];
-      const saidTeamWillDiscuss = hist.some(m => m.role === "assistant" && /purchasing team will discuss|team will answer/i.test(m.content));
-      if (ngQuestion && !saidTeamWillDiscuss) parts.push("That's something our team will discuss with you directly.");
-      if (firstTime && nextQ) parts.push(`Thanks for letting me know. We don't buy every non-GCC car, so I'll have our team contact you. ${nextQ}`);
-      else if (nextQ) parts.push(nextQ);
-      // Marc (13 Oct): once the details are in, continue straight to booking the inspection
-      // (also when all details were already given before we learned it's non-GCC)
-      const goBooking = !nextQ;
-      if (goBooking) {
-        parts.push(firstTime
-          ? "Thanks for letting me know. We don't buy every non-GCC car, but you're welcome to bring it in for a quick inspection so our team can check it. When would you like to come?"
-          : "Thanks, I've got all the details. Our team will review them, and you're welcome to bring the car in for a quick inspection. When would you like to come?");
-        const prevN = String(c.car_conditions ?? "");
-        updates.car_conditions = prevN ? `${prevN} | Non-GCC: booking offered` : "Non-GCC: booking offered";
-        updates.step = 6;
-      }
-
-      for (const part of parts) await sendWhatsAppMessage(phone, part);
-      if (!nextQ && !goBooking) updates.step = CLOSING_STEP;
+      const missingCar = (["make", "model", "year", "mileage"] as const).filter(k => !c[k] || c[k] === "Unknown");
+      const hasUaePhone = isUAE || !!c.alternative_phone;
+      const nextQ = missingCar.length ? `Could you share the ${missingCar.join(", ")} of the car?`
+        : !c.name ? "May I have your name?"
+        : !hasUaePhone ? "Which UAE mobile number is best for our team to reach you on?"
+        : null;
+      const intro = firstTime ? "Thanks for checking. This indicates a non-GCC car, so I won't book an inspection. Our team will get back to you about this car." : "Thanks.";
+      const reply = nextQ ? `${intro} ${nextQ}` : `${intro} Our team will contact you ${teamWhen()}.`;
+      const updates: Record<string, unknown> = { ...vDb, specs: "Non-GCC", non_gcc_handoff: true,
+        ...(c.name ? { name: c.name } : {}), ...(c.alternative_phone ? { alternative_phone: c.alternative_phone } : {}),
+        last_msg_id: message.id, last_message_at: new Date().toISOString(), ...(nextQ ? {} : { step: CLOSING_STEP }) };
+      await sendWhatsAppMessage(phone, reply);
       await updateConversation(phone, updates as any).catch(e => console.error("non-GCC save error:", e));
-      await appendHistory(phone, hist, messageText, parts.join("\n\n"));
-
-      // Push at the handoff (so the team sees it right away) and again when complete
-      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "non-GCC handoff" : "non-GCC complete", { salesInquiry: nowHasMethod ? undefined : "Other", inspectionBooked: false, milestone: firstTime ? "FOLLOW UP" : undefined });
-      return NextResponse.json({ status: "non_gcc_handoff" }, { status: 200 });
+      await appendHistory(phone, hist, messageText, reply);
+      if (firstTime || !nextQ) await pushLead(phone, firstTime ? "verified non-GCC" : "verified non-GCC details", {
+        salesInquiry: "Other", inspectionBooked: false, milestone: firstTime ? "FOLLOW UP" : undefined,
+      });
+      return NextResponse.json({ status: "verified_non_gcc_handoff" }, { status: 200 });
     }
 
     if (Array.isArray(vehicleUpdates.typo_check) && vehicleUpdates.typo_check.length > 0) {
