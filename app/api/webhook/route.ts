@@ -77,7 +77,7 @@ const HANDOFF_SIGNALS = /\b(too many questions|call me(?=\s*(back|later|please|p
 const HOME_VISIT_PATTERN  = /\b(home\s*(visit|pick\s*up|collection|pickup)|come\s*to\s*(me|my|us)|pick\s*(it\s*)?up|collect\s*(from|at)|i\s*can.?t\s*(come|bring)|unable\s*to\s*(come|drive|bring)|mobility|wheelchair|disabled)\b/i;
 const TRADE_IN_PATTERN    = /\b(trade[\s-]?in|trade\s*my|swap|exchange|part[\s-]?exchange|replace\s*(my|the)|get\s*(a\s*)?new\s*car|upgrade\s*(my|the)|in\s*exchange\s*for)\b/i;
 const DEFER_PATTERN = /\b(let (u|you) know|(will|i'?ll|i will) (inform|tell|update|confirm|revert|message|text|call)( (u|you))?|get back to (u|you)|i'?ll (check|think|see|decide)|will (check|think|decide)|think about it|not sure yet|let me (check|think|see)|(i'?ll |i will |will )?confirm (to )?(you |u )?(later|tomorrow|the date|date|time|timing)|later i (will |'ll )?(confirm|tell|inform|let)|i confirm (to )?(you |u )?later|date i confirm)\b/i;
-const PRICE_OFFER_PATTERN = /\b(how\s*much|price|offer|estimate|valuation|value|worth|what\s*(will\s*you\s*pay|do\s*you\s*give|can\s*i\s*get)|give\s*me\s*(a\s*)?(price|number|figure|quote))\b/i;
+const PRICE_OFFER_PATTERN = /\b(how\s*much|price|offer|estimate|valuation|value|worth|ballpark|rough\s*(range|figure|number|quote|idea)|what\s*(will\s*you\s*pay|do\s*you\s*give|can\s*i\s*get)|(?:can|will|would)\s*you\s*(pay|give|match|beat)|(?:give|tell)\s*me\s*(a\s*)?(price|number|figure|quote))\b/i;
 
 // Ownership detection
 const OWNER_PATTERN = /\b(my\s*car|i\s*(own|am\s*the\s*owner)|registered\s*(in\s*my\s*name|owner)|it.?s\s*mine)\b/i;
@@ -1483,7 +1483,7 @@ export async function POST(req: NextRequest) {
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
       const answeringSellingAdvice = lastA.includes("Is a quick transfer with cash payment more important")
         && isSellingOptionAnswer(messageText);
-      const isDeferred = !answeringSellingAdvice && (DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|(don'?t|do not) (want|need) (to )?book|maybe later|(i will|i'?ll) let (you|u) know)\b/i.test(messageText));
+      const isDeferred = !answeringSellingAdvice && (DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|(don'?t|do not) (want|need) (to )?book|won'?t (book|come|visit)|maybe later|(i will|i'?ll) let (you|u) know)\b/i.test(messageText));
       const declinesCallback = /\b(no|don'?t|do not|not now|no thanks|no need)\b.{0,24}\b(call\s*back|callback|call|contact|follow[\s-]?up)\b|\b(call\s*back|callback|call|contact|follow[\s-]?up)\b.{0,20}\b(no thanks|not now|not needed)\b/i.test(messageText);
       const explicitBranchVisit = /\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText);
       const answerToChoice = !explicitBranchVisit && (lastA.includes(NOT_READY_CHOICE) || lastA.includes("personal call from our team"));
@@ -2091,7 +2091,7 @@ export async function POST(req: NextRequest) {
         const pm = messageText.match(/(?:\+|\b00)\d[\d\s-]{7,16}\d|(?:\+?971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b5\d{8}\b/);
         if (pm) { let alt = pm[0].replace(/\D/g, "").replace(/^00/, ""); if (/^05/.test(alt)) alt = "971" + alt.slice(1); else if (/^5\d{8}$/.test(alt)) alt = "971" + alt; if (alt !== phone) upd.alternative_phone = alt; }
         if (!YES.test(messageText) && !pm) notes.push(`Customer correction: ${messageText.slice(0, 120)}`);
-        const priceChoice = hist.some(m => m.role === "user" && /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i.test(m.content));
+        const priceChoice = hist.some(m => m.role === "user" && PRICE_OFFER_PATTERN.test(m.content));
         notes.push(priceChoice ? "Forwarded to the team after repeated price requests" : "Forwarded to the team after booking hesitation");
         if (!notes.join(" | ").includes("Asked to speak to the team")) notes.push("Asked to speak to the team");
         upd.car_conditions = notes.join(" | ");
@@ -2142,8 +2142,8 @@ export async function POST(req: NextRequest) {
       const offeredBefore = hist.some(m => m.role === "assistant" && (m.content.includes(OFFER_FWD) || m.content.includes(LEGACY_OFFER_FWD)));
       const priorDefers = hist.filter(m => m.role === "user" && DEFER_ANY(m.content)).length;
       const DIFFICULT = /\b(difficult|hard|not possible|impossible|can'?t (make it|come|manage)|cannot (come|make it)|no time|too busy|very busy|not easy|(i )?don'?t know|not sure|no idea|confused)\b/i;
-      const priorPriceRequests = hist.filter(m => m.role === "user" && /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i.test(m.content)).length;
-      const repeatedPriceRequest = priorPriceRequests >= 3 && /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i.test(messageText);
+      const priorPriceRequests = hist.filter(m => m.role === "user" && PRICE_OFFER_PATTERN.test(m.content)).length;
+      const repeatedPriceRequest = priorPriceRequests >= 3 && PRICE_OFFER_PATTERN.test(messageText);
       const priceRefusal = priorPriceRequests > 0 && /\b(no\s*,?\s*thanks?|not interested|maybe later|i'?ll pass|don'?t want (to|it)|forget it|not for me|never mind|nevermind)\b/i.test(messageText);
       const consignmentDeclined = priorPriceRequests > 0 && hist.some(m => m.role === "assistant" && /consignment/i.test(m.content))
         && /\b(cash only|only cash|just cash|not consignment|no consignment|don'?t want consignment)\b/i.test(messageText);
@@ -2383,7 +2383,7 @@ export async function POST(req: NextRequest) {
     }
 
     const history: ConversationMessage[] = (conversation.messages ?? []) as ConversationMessage[];
-    const PRICE_PUSH      = /\b(price|offer|estimate|price range|how much|what.*(worth|pay|give)|give me.*price|tell me.*price)\b/i;
+    const PRICE_PUSH      = PRICE_OFFER_PATTERN;
     const HUMAN_REQUEST   = /\b(call me(?=\s*(back|later|please|pls|now|asap|tomorrow|today|on|at|when|$|[.!?]))|(speak|talk)\s+(to|with)\s+(a\s+)?(someone|somebody|person|human|agent|manager|staff|team)|real person|human agent)\b/i;
     const BOOKING_REFUSAL = /\b(no\s*,?\s*thanks?|no\s*,?\s*thank\s*you|not\s*interested|maybe\s*later|i'?ll\s*pass|don'?t\s*want\s*(to|it)|forget\s*it|not\s*for\s*me|leave\s*it|never\s*mind|nevermind|bye|goodbye)\b/i;
     const OPTIONS_SENT = /consignment|direct cash sale|we can advise after/i;
