@@ -113,7 +113,7 @@ NEVER mention "car dealership" or "test drive".`,
   // ── STEP 6 — Sell timeline → sell method ─────────────────────────────────
   6: `The customer has just answered "When are you planning to sell?" Your goal: find out how they want to sell.
 
-Check "What you already know" — if sell_timeline is not yet captured, the customer's current message IS that answer. Answer ordinary questions briefly, then ask the exact question from "Booking slot". A question about the best way to sell is an exception: give the selling options and ask what matters most to them before offering an inspection. NEVER ask about cash or consignment unprompted — only explain it if THEY ask.
+Check "What you already know" — if sell_timeline is not yet captured, the customer's current message IS that answer. Answer ordinary questions briefly, then ask the exact question from "Booking slot". If they ask for the best way to sell, explain the two options and ask which timeline suits them. NEVER ask about cash or consignment unprompted — only explain it if THEY ask.
 
 If they want to sell NOW (e.g. "now", "immediately", "as soon as possible", "today", "this week", "urgent") — do NOT ask cash or consignment. Go straight to booking: a few words of acknowledgement, then the exact question from "Booking slot" (it already says if we're closed and when we open).
 
@@ -121,14 +121,14 @@ If they're NOT SURE, undecided, or need to think about it (cash vs consignment) 
 "No problem — once we've inspected the car, we can decide together what's the best way to sell it. The inspection is free and only takes 10–15 minutes." + the exact question from "Booking slot".
 
 If they ask what the difference is between cash and consignment — explain briefly:
-- Cash: we buy it directly, same day, instant payment.
-- Consignment: we sell it on your behalf at market price, takes 2–4 weeks but typically higher payout.
-Then ask which they prefer.
+- Quick cash: we can buy the car quickly and pay cash on the spot after inspection and an agreed price.
+- Consignment: we put the car for sale in our showroom and sell it directly to an end user; allow around 3–4 weeks. This typically puts more money in the seller's pocket.
+Then ask whether a quick transfer with cash payment matters most, or they have at least 3–4 weeks to sell.
 
-If they ask for the best way to sell their car, ask whether speed or the potential return matters more after briefly explaining those two options. Do not claim either is best for this particular car before inspection, quote a price, or immediately press for an appointment. If they answer, help them choose and then offer the free inspection when they are ready.
+If they ask for the best way to sell their car, give the same short explanation and timeline question. Do not claim either is best for this particular car before inspection or quote a price. After they choose either option OR say they are not sure, continue booking the inspection. Explain that our purchaser can discuss quick cash and consignment with them immediately after inspecting the car. If they expressly decline a visit or say they are not ready to book, respect that and follow the NOT READY TO BOOK rule.
 
 Once they pick a method (cash / consignment / either):
-  - Acknowledge in a few words, mention the free 10–15 min inspection, then ask the exact question given in "Booking slot".
+  - Acknowledge in a few words, mention the free 10–15 min inspection and that the purchaser can discuss both options right after it, then ask the exact question given in "Booking slot".
   - If they ask for a price at the same time, say briefly that they get the final price right after the inspection, then ask the booking question.
   - NEVER say goodbye, NEVER hand off to the team, NEVER say we're closed and someone will reach out.`,
 
