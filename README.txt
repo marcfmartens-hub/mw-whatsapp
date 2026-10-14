@@ -1,10 +1,13 @@
-Kaya specs update — based on marcfmartens-hub/mw-whatsapp main at 9d5cdc9f07a7aad434bcdeb53472ef5033b5e67b
+Kaya price-choice update
+Based on marcfmartens-hub/mw-whatsapp main commit 4fca6a6.
 
-Replace these files in your GitHub repository, keeping the same paths:
+Replace exactly this file in GitHub:
   app/api/webhook/route.ts
-  lib/claude.ts
-  lib/specs.ts  (new file)
 
-This package contains the specs/Mulkiya rules only. It does not change the price callback wording, booking-time fallback, or booking-change behavior.
+The first price reply, second price reply, third-step consignment prompt, price ban,
+and the Mulkiya/specs code remain in the file. Repeated price pressure, refusal
+or hesitation without an explicit team request offers a booking-or-phone-call choice.
+An explicit request for a person or callback still goes straight to team handoff.
+The previous 'in person' choice is recognized for conversations already in progress.
 
-After uploading all three files, commit them together. Vercel can then deploy that commit through your existing GitHub integration. Confirm Vercel reports a successful deployment before relying on the new behavior.
+Commit the file, then verify the new Vercel production deployment is Ready.
