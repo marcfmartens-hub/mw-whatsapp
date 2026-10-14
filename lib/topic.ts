@@ -9,3 +9,7 @@ export function isStandaloneOffTopicQuestion(message: string): boolean {
 export function asksBestWayToSell(message: string): boolean {
   return /\b(best|better|right)\s+(way|option|method|approach)\s+(to\s+)?sell\b|\b(how should i sell|cash or consignment|consignment or cash|which is better.*(?:cash|consign)|(?:cash|consign).*which is better)\b/i.test(message);
 }
+
+export function isUnsureAboutSellingOption(message: string): boolean {
+  return /^(?:i(?:'m| am)?\s+)?(?:not sure|unsure|don'?t know|no idea|either|maybe|depends)(?:\s+(?:yet|which|about (?:the )?options?))?[.!?\s]*$/i.test(message.trim());
+}
