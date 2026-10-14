@@ -93,6 +93,8 @@ export function toIsoDate(raw: string): string | null {
   const now = new Date(Date.now() + 4 * 3600 * 1000);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   if (/\btoday\b/.test(v)) return iso(now);
+  if (/\b(?:the\s+)?day\s+after\s+tomorrow\b|\bafter\s+tomorrow\b/.test(v))
+    return iso(new Date(now.getTime() + 2 * 86400000));
   if (/\btomorrow\b/.test(v)) return iso(new Date(now.getTime() + 86400000));
   const days = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
   const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
