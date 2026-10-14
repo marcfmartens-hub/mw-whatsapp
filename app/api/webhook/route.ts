@@ -879,6 +879,15 @@ export async function POST(req: NextRequest) {
     // booking/callback choice open without treating this as consent to a callback.
     const contactHistory = (conversation.messages ?? []) as ConversationMessage[];
     const lastContactReply = [...contactHistory].reverse().find(m => m.role === "assistant")?.content ?? "";
+    if (lastContactReply.includes(CUSTOMER_CALL_CHOICE)
+        && /^\s*(?:i'?ll|i\s*(?:will|can|am going to)|i'?m|im)\s+(?:call|phone|ring|contact)\s+you(?:\s+(?:later|tomorrow|when ready))?\s*[.!]?\s*$/i.test(messageText)) {
+      const reply = "Of course. You can call us on +971 58 582 5543 whenever you're ready. Have a nice day!";
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { step: CLOSING_STEP, last_msg_id: message.id,
+        last_message_at: new Date().toISOString() } as any);
+      await appendHistory(phone, contactHistory, messageText, reply);
+      return NextResponse.json({ status: "customer_will_call_close" }, { status: 200 });
+    }
     if (wantsOurNumber(messageText)) {
       const alreadyBooked = !!(conversation.appointment_date && conversation.appointment_time)
         && contactHistory.some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content));
@@ -899,6 +908,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "customer_will_call" }, { status: 200 });
     }
     if (lastContactReply.includes(CUSTOMER_CALL_CHOICE)) {
+      const conditionalPriceVisit = /\b(?:if|only if|provided|assuming|when)\b.{0,80}\b(?:pay|price|amount|offer|match|agree)\b|\b(?:pay|match)\b.{0,40}\b(?:then|if)\b.{0,30}\b(?:come|visit|inspection)\b/i.test(messageText);
+      if (conditionalPriceVisit) {
+        const reply = "We can't confirm an amount before inspecting the car. The inspection is free, and our purchaser can discuss the options with you afterward.";
+        await sendWhatsAppMessage(phone, reply);
+        await sendWhatsAppMessage(phone, CUSTOMER_CALL_CHOICE);
+        await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any);
+        await appendHistory(phone, contactHistory, messageText, `${reply}\n[SPLIT]\n${CUSTOMER_CALL_CHOICE}`);
+        return NextResponse.json({ status: "conditional_price_no_booking" }, { status: 200 });
+      }
       const wantsTeamCall = /\b(?:call me|call back|callback|team (?:to )?call|team (?:to )?contact|please call|you (?:can|should) call me|have (?:someone|the team) call)\b/i.test(messageText)
         && !/\b(?:don'?t|do not|no|not)\s+(?:call|contact)\b/i.test(messageText);
       const wantsVisit = /\b(?:continue (?:with )?(?:the )?booking|book (?:an? )?(?:inspection|appointment|slot)|i(?:'ll| will| can) come|i want (?:to )?(?:come|book)|appointment|inspection)\b/i.test(messageText)
