@@ -866,6 +866,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "media_only" }, { status: 200 });
     }
 
+    // A job applicant is not a car seller. Answer once instead of looping on make/model.
+    if (/\b(job\s+(vacanc(?:y|ies)|opportunit(?:y|ies))|vacanc(?:y|ies)|looking\s+for\s+(a\s+)?job|career\s+opportunit(?:y|ies)|are\s+you\s+hiring)\b/i.test(messageText)
+        && !/\b(sell|selling|my\s+car|book\s+(an?\s+)?inspection)\b/i.test(messageText)) {
+      const reply = "Thanks for your interest. I help with car sales enquiries. For job vacancies, please contact our team on 058 582 5543.";
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      return NextResponse.json({ status: "job_inquiry" }, { status: 200 });
+    }
+
     // ── Trade-in: customer sells AND buys → normal selling flow, flagged for the team ──
     if (TRADE_IN_PATTERN.test(messageText) && !String((conversation as any).car_conditions ?? "").includes("Trade-in:")) {
       const note = "Trade-in: customer also wants to buy a car";
