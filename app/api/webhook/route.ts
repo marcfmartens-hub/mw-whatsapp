@@ -1527,9 +1527,6 @@ export async function POST(req: NextRequest) {
         : "I received your cancellation request, but couldn't update the appointment. Please call us on 058 582 5543; the team will check it with you.";
       await sendWhatsAppMessage(phone, answer);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
-      if (saved) await pushLead(phone, "booking cancelled", { inspectionBooked: false, clearAppointment: true,
-        topNote: `CANCELLED appointment ${oldAppt}. Call centre to reconfirm or reverse cancellation.` });
-      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "cancel_task" }, { status: 200 });
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
@@ -1571,9 +1568,6 @@ export async function POST(req: NextRequest) {
         : "I received your rescheduling request, but couldn't update the appointment. Please call us on 058 582 5543; the team will check it with you.";
       await sendWhatsAppMessage(phone, answer);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
-      if (saved) await pushLead(phone, "booking reschedule requested", { inspectionBooked: false, clearAppointment: true,
-        topNote: `RESCHEDULE REQUESTED. Old appointment ${oldAppt}. Customer wrote: ${messageText.slice(0, 200)}. Call centre to confirm new slot.` });
-      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "reschedule_task" }, { status: 200 });
     }
     // Questions requiring staff action about an existing appointment are tasks as well.
@@ -1586,8 +1580,6 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, answer);
       await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
-      await pushLead(phone, "booking inquiry", { inspectionBooked: true, topNote: `BOOKING INQUIRY: ${messageText.slice(0, 200)}` });
-      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "booking_inquiry_task" }, { status: 200 });
     }
     const isRebook = bookFromClosed;
