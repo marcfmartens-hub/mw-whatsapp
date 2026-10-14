@@ -13,3 +13,9 @@ export function asksBestWayToSell(message: string): boolean {
 export function isUnsureAboutSellingOption(message: string): boolean {
   return /^(?:i(?:'m| am)?\s+)?(?:not sure|unsure|don'?t know|no idea|either|maybe|depends)(?:\s+(?:yet|which|about (?:the )?options?))?[.!?\s]*$/i.test(message.trim());
 }
+
+export function isSellingOptionAnswer(message: string): boolean {
+  if (/\b(not ready to (?:book|come|visit)|don'?t want to (?:book|come|visit)|no (?:booking|appointment))\b/i.test(message)) return false;
+  return isUnsureAboutSellingOption(message)
+    || /\b(quick cash|cash payment|cash option|direct sale|consign(?:ment)?|higher (?:return|amount|price)|more money|quick transfer|sell (?:it )?(?:quickly|fast)|(?:can|could|happy to) wait|(?:have|got|need) (?:at least )?3\s*[-/]\s*4 weeks|(?:in|after) (?:three|four|3|4) weeks)\b/i.test(message);
+}
