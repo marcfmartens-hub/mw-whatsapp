@@ -2021,17 +2021,28 @@ export async function POST(req: NextRequest) {
         const WANT_BOOK = /\b(continue|book|booking|first|1st|option 1|appointment|inspection|come in|visit)\b/i;
         const WANT_TEAM = /\b(forward|team|second|2nd|option 2|call|discuss|person|talk|speak)\b/i;
         if (WANT_BOOK.test(messageText) && !WANT_TEAM.test(messageText)) {
-          // propose a concrete slot instead of asking "which day"
-          const n = new Date(Date.now() + 4 * 3600e3);
-          let add = n.getUTCHours() >= 17 ? 1 : 0;
-          let d = new Date(n.getTime() + add * 86400e3);
-          if (d.getUTCDay() === 0) d = new Date(d.getTime() + 86400e3);
-          const iso = d.toISOString().slice(0, 10);
-          const t = await pickDefaultTime(iso, phone);
-          const h = +t.slice(0, 2);
-          const x = d.getUTCDate(), sfx = x % 10 === 1 && x !== 11 ? "st" : x % 10 === 2 && x !== 12 ? "nd" : x % 10 === 3 && x !== 13 ? "rd" : "th";
-          const when = `${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()]} ${x}${sfx} of ${["January","February","March","April","May","June","July","August","September","October","November","December"][d.getUTCMonth()]}`;
-          await fin(`Great! Shall I book you for ${when} at ${h % 12 || 12}:${t.slice(3)} ${h < 12 ? "AM" : "PM"}? You can always change it.`);
+          // Continue from the day the customer already mentioned (never Sunday); otherwise ask for the day
+          const userTexts = hist.filter(m => m.role === "user").map(m => m.content);
+          let iso: string | null = null;
+          for (const t of [...userTexts].reverse()) {
+            if (/\bweek\s*-?\s*end\b/i.test(t)) { iso = toIsoDate("saturday"); break; }
+            const dm = t.match(/\b(\d{1,2})(st|nd|rd|th)?\s*(of\s*)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i);
+            const wd = t.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|tomorrow)\b/i);
+            const c = dm ? toIsoDate(`${dm[1]} ${dm[4]}`) : wd ? toIsoDate(wd[1]) : null;
+            if (c) { iso = rollSameWeekday(c, t, "", userTexts); break; }
+          }
+          const todayIso = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+          if (iso && (iso < todayIso || new Date(iso + "T12:00:00Z").getUTCDay() === 0)) iso = null;
+          if (iso) {
+            const d = new Date(iso + "T12:00:00Z");
+            const t = await pickDefaultTime(iso, phone);
+            const h = +t.slice(0, 2);
+            const x = d.getUTCDate(), sfx = x % 10 === 1 && x !== 11 ? "st" : x % 10 === 2 && x !== 12 ? "nd" : x % 10 === 3 && x !== 13 ? "rd" : "th";
+            const when = `${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()]} ${x}${sfx} of ${["January","February","March","April","May","June","July","August","September","October","November","December"][d.getUTCMonth()]}`;
+            await fin(`Great! Shall I book you for ${when} at ${h % 12 || 12}:${t.slice(3)} ${h < 12 ? "AM" : "PM"}? Our team will confirm the exact time with you on the morning of the booking.`);
+          } else {
+            await fin("Great! Which day would suit you best? We're open Monday to Saturday, and our team will confirm the exact time with you on the morning of the booking.");
+          }
           return NextResponse.json({ status: "forward_declined_book" }, { status: 200 });
         }
         if (WANT_TEAM.test(messageText) || YES.test(messageText)) {
@@ -2705,7 +2716,7 @@ export async function POST(req: NextRequest) {
         replyParts = [...(answer ? [answer] : []), ...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
-      if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nIf another time suits you better, just let me know."; reply = replyParts.join("\n[SPLIT]\n"); }
+      if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nOur team will confirm the exact time with you on the morning of the booking. If another time suits you better, just let me know."; reply = replyParts.join("\n[SPLIT]\n"); }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     // Loan on the car → reassure first, then the next question as its own message (Marc)
