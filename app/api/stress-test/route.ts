@@ -74,6 +74,19 @@ Write ONLY your next WhatsApp message (short, natural, like a real person). If t
 
 // Scripted replays of real chats (exact customer messages)
 const SCRIPTS: Record<string, string[]> = {
+  availability_not_today: ["Hi", "Ali", "Toyota Camry 2020 80k GCC", "No loan", "Not today", "Friday 2 PM"],
+  availability_weekend_busy: ["Hi", "Noor", "Nissan Patrol 2021 70k GCC", "No loan", "Selling now but no time before the weekend", "Saturday afternoon"],
+  availability_after_tomorrow: ["Hi", "John", "Honda Civic 2019 90k GCC", "No loan", "After tomorrow", "Friday 3 PM"],
+  availability_not_tomorrow: ["Hi", "Maya", "Lexus RX 2020 65k GCC", "No loan", "Not tomorrow", "Saturday 11 AM"],
+  availability_friday_only: ["Hi", "Zaid", "BMW 520i 2020 80k GCC", "No loan", "Friday only", "2 PM"],
+  availability_this_weekend: ["Hi", "Omar", "Audi Q5 2021 50k GCC", "No loan", "This weekend", "11 AM"],
+  availability_next_weekend: ["Hi", "Lina", "Toyota Prado 2022 45k GCC", "No loan", "Next weekend", "11 AM"],
+  availability_after_weekend: ["Hi", "Salim", "Kia Sportage 2021 80k GCC", "No loan", "After the weekend", "Monday 4 PM"],
+  availability_next_monday: ["Hi", "Rita", "Mazda CX-5 2021 60k GCC", "No loan", "Next Monday", "11 AM"],
+  availability_before_weekend: ["Hi", "Sara", "Toyota Corolla 2020 60k GCC", "No loan", "Before the weekend, but not today", "Friday 3 PM"],
+  availability_sunday: ["Hi", "Karim", "Nissan Sunny 2020 90k GCC", "No loan", "Sunday evening", "Monday 5 PM"],
+  availability_two_weeks: ["Hi", "Nadia", "Mercedes C200 2021 65k GCC", "No loan", "In two weeks", "I'll message when ready"],
+  availability_sell_now_visit_next_week: ["Hi", "Faisal", "Land Cruiser 2021 70k GCC", "No loan", "I can sell today, but can only come next week", "Tuesday 2 PM"],
   selladvice_script: ["Hi", "Aisha", "Toyota Camry 2020", "85k GCC", "No loan", "Soon", "Tell me the best way to sell my car", "I care more about the potential return", "I still need to think about it"],
   selladvice_cash: ["Hi", "Omar", "Nissan Patrol 2021", "70k GCC", "No loan", "Soon", "What is the best way to sell?", "I want quick cash", "Saturday 11 AM"],
   selladvice_consignment: ["Hi", "Lina", "BMW 520i 2020", "65k GCC", "No loan", "This month", "How should I sell my car?", "I can wait 4 weeks", "Friday 2 PM"],
