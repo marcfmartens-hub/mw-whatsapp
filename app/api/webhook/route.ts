@@ -1517,15 +1517,17 @@ export async function POST(req: NextRequest) {
     if (isCancel) {
       const task = await createChangeTask({ ...conversation, phone }, "CANCEL", messageText);
       const oldAppt = `${conversation.appointment_date} ${conversation.appointment_time}`;
-      const answer = task.ok
-        ? "Your inspection appointment has been cancelled as requested. Our call centre will follow up to reconfirm your decision; if you'd like to keep the appointment, please let them know."
-        : `Your inspection appointment has been cancelled as requested. ${CHANGE_ERROR}`;
-      await sendWhatsAppMessage(phone, answer);
-      await updateConversation(phone, { step: CLOSING_STEP, appointment_date: null, appointment_time: null,
+      const saved = await updateConversation(phone, { step: CLOSING_STEP, appointment_date: null, appointment_time: null,
         appointment: null, car_conditions: [String((conversation as any).car_conditions ?? ""), `CANCELLED: ${oldAppt}; ${messageText.slice(0, 200)}`].filter(Boolean).join(" | "),
-        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).then(() => true).catch(() => false);
+      const answer = saved
+        ? task.ok
+          ? "Your inspection appointment has been cancelled as requested. Our call centre will follow up to reconfirm your decision; if you'd like to keep the appointment, please let them know."
+          : `Your inspection appointment has been cancelled as requested. ${CHANGE_ERROR}`
+        : "I received your cancellation request, but couldn't update the appointment. Please call us on 058 582 5543; the team will check it with you.";
+      await sendWhatsAppMessage(phone, answer);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
-      await pushLead(phone, "booking cancelled", { inspectionBooked: false, clearAppointment: true,
+      if (saved) await pushLead(phone, "booking cancelled", { inspectionBooked: false, clearAppointment: true,
         topNote: `CANCELLED appointment ${oldAppt}. Call centre to reconfirm or reverse cancellation.` });
       await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "cancel_task" }, { status: 200 });
@@ -1559,15 +1561,17 @@ export async function POST(req: NextRequest) {
     if (wantsReschedule) {
       const task = await createChangeTask({ ...conversation, phone }, "RESCHEDULE", messageText);
       const oldAppt = `${conversation.appointment_date} ${conversation.appointment_time}`;
-      const answer = task.ok
-        ? "Your request to reschedule is confirmed, and your previous appointment time has been released. Our call centre will contact you to confirm the new date and time."
-        : `Your previous appointment time has been released. ${CHANGE_ERROR}`;
-      await sendWhatsAppMessage(phone, answer);
-      await updateConversation(phone, { step: CLOSING_STEP, appointment_date: null, appointment_time: null,
+      const saved = await updateConversation(phone, { step: CLOSING_STEP, appointment_date: null, appointment_time: null,
         appointment: null, car_conditions: [String((conversation as any).car_conditions ?? ""), `RESCHEDULE REQUESTED: old ${oldAppt}; requested ${messageText.slice(0, 200)}`].filter(Boolean).join(" | "),
-        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).then(() => true).catch(() => false);
+      const answer = saved
+        ? task.ok
+          ? "Your request to reschedule is confirmed, and your previous appointment time has been released. Our call centre will contact you to confirm the new date and time."
+          : `Your previous appointment time has been released. ${CHANGE_ERROR}`
+        : "I received your rescheduling request, but couldn't update the appointment. Please call us on 058 582 5543; the team will check it with you.";
+      await sendWhatsAppMessage(phone, answer);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
-      await pushLead(phone, "booking reschedule requested", { inspectionBooked: false, clearAppointment: true,
+      if (saved) await pushLead(phone, "booking reschedule requested", { inspectionBooked: false, clearAppointment: true,
         topNote: `RESCHEDULE REQUESTED. Old appointment ${oldAppt}. Customer wrote: ${messageText.slice(0, 200)}. Call centre to confirm new slot.` });
       await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "reschedule_task" }, { status: 200 });
