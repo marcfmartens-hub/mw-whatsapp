@@ -1987,7 +1987,7 @@ export async function POST(req: NextRequest) {
     // ── Second "I'll let you know" / "it's difficult" → offer the team (Marc, 14 Oct) ──
     // Kaya: "How about I forward your details to our team…?" → yes → double-check car + number → hand over.
     {
-      const OFFER_FWD = "How about I forward your details to our team? They can get back to you and you can discuss the car with them directly.";
+      const OFFER_FWD = "Would you like to continue with the booking, or shall I forward your details to our team so you can discuss it with them in person?";
       const CONFIRM_MARK = "Just to double-check";
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
@@ -2018,7 +2018,23 @@ export async function POST(req: NextRequest) {
       }
 
       if (lastA.includes(OFFER_FWD) && currentStep < CLOSING_STEP) {
-        if (YES.test(messageText)) {
+        const WANT_BOOK = /\b(continue|book|booking|first|1st|option 1|appointment|inspection|come in|visit)\b/i;
+        const WANT_TEAM = /\b(forward|team|second|2nd|option 2|call|discuss|person|talk|speak)\b/i;
+        if (WANT_BOOK.test(messageText) && !WANT_TEAM.test(messageText)) {
+          // propose a concrete slot instead of asking "which day"
+          const n = new Date(Date.now() + 4 * 3600e3);
+          let add = n.getUTCHours() >= 17 ? 1 : 0;
+          let d = new Date(n.getTime() + add * 86400e3);
+          if (d.getUTCDay() === 0) d = new Date(d.getTime() + 86400e3);
+          const iso = d.toISOString().slice(0, 10);
+          const t = await pickDefaultTime(iso, phone);
+          const h = +t.slice(0, 2);
+          const x = d.getUTCDate(), sfx = x % 10 === 1 && x !== 11 ? "st" : x % 10 === 2 && x !== 12 ? "nd" : x % 10 === 3 && x !== 13 ? "rd" : "th";
+          const when = `${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()]} ${x}${sfx} of ${["January","February","March","April","May","June","July","August","September","October","November","December"][d.getUTCMonth()]}`;
+          await fin(`Great! Shall I book you for ${when} at ${h % 12 || 12}:${t.slice(3)} ${h < 12 ? "AM" : "PM"}? You can always change it.`);
+          return NextResponse.json({ status: "forward_declined_book" }, { status: 200 });
+        }
+        if (WANT_TEAM.test(messageText) || YES.test(messageText)) {
           const numQ = isUAE ? "and can our team reach you on this number?" : "and which number can our team reach you on?";
           await fin(`Great! ${CONFIRM_MARK}: ${carLine || "your car"}. Is that correct, ${numQ}`);
           return NextResponse.json({ status: "forward_confirm" }, { status: 200 });
@@ -2031,10 +2047,10 @@ export async function POST(req: NextRequest) {
 
       const offeredBefore = hist.some(m => m.role === "assistant" && m.content.includes(OFFER_FWD));
       const priorDefers = hist.filter(m => m.role === "user" && DEFER_ANY(m.content)).length;
-      const DIFFICULT = /\b(difficult|hard|not possible|impossible|can'?t (make it|come|manage)|cannot (come|make it)|no time|too busy|very busy|not easy)\b/i;
+      const DIFFICULT = /\b(difficult|hard|not possible|impossible|can'?t (make it|come|manage)|cannot (come|make it)|no time|too busy|very busy|not easy|(i )?don'?t know|not sure|no idea|confused)\b/i;
       if (!offeredBefore && !hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
           && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText))) {
-        await fin(OFFER_FWD);
+        await fin(`I understand. ${OFFER_FWD}`);
         return NextResponse.json({ status: "forward_offer" }, { status: 200 });
       }
     }
@@ -2648,7 +2664,10 @@ export async function POST(req: NextRequest) {
     // Never end on a dead end ("I understand.") while we're still booking — keep the conversation going
     if (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !/\?/.test(reply)
         && !/\b(team will|be in touch|have a nice|see you|take care|passed (it|everything)|contact you|call you|you'?re booked)\b/i.test(reply)) {
-      reply = `${reply.trim()}\n[SPLIT]\n${pendingBookingQ(lastAssistantMsg) ?? "Which day would be good for you?"}`;
+      const askedSomething = /\?|^\s*(what|when|how|do|does|are|is|can|which|where)\b/i.test(messageText);
+      const choice = "Would you like to continue with the booking, or shall I forward your details to our team so you can discuss it with them in person?";
+      const pend = pendingBookingQ(lastAssistantMsg);
+      reply = `${reply.trim()}\n[SPLIT]\n${askedSomething && pend ? pend : choice}`;
     }
     // "Hello" in the middle of the chat → just repeat the open question (e.g. the "Shall I book you…" offer)
     if (currentStep >= 5 && currentStep < CLOSING_STEP && /^\s*(hello|hi|hey|hii+|helo|hlo|salam|assalam\w*|hello\?+|\?+)\W*$/i.test(messageText)) {

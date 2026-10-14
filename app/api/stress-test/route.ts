@@ -106,7 +106,8 @@ const SCRIPTS: Record<string, string[]> = {
   ctx1: ["Hi", "Naveed", "Toyota Corolla 2019", "90000 km gcc", "today", "Where your location.", "Yes I can bring all. Tell me what about the price going normally.", "5pm", "ok"],
   panamera: ["🚘 What is your car make, model & Year?", "Porche Panamera 2013 model", "Gcc", "190k km", "Asap", "I need money", "On 16th or 17th Oct I can come please", "Hello", "Are you buying cars for export ???", "yes"],
   pajero: ["🚘 What is your car make, model & Year?", "Hi kaya I'm mohamed", "Mitsubishi Pajero 2018", "165K kms", "GCC", "Immediately. Ready for any inspection from early next week", "I am bit busy this week. Next week will be fine. Mondayvor Tuesday", "What time you start working in the morning", "Tuesday 10 am would be good for me"],
-  defer2: ["Hi", "Ali", "Ford Mustang", "20002", "150000 km", "gcc", "Anytime soon", "I'm busy this week but maybe in the weekend", "Are you open on sunday", "It's difficult for me", "yes", "yes this number"],
+  defer2: ["Hi", "Ali", "Ford Mustang", "20002", "150000 km", "gcc", "Anytime soon", "I'm busy this week but maybe in the weekend", "Are you open on sunday", "It's difficult for me", "forward to the team", "yes this number"],
+  defer4: ["Hi", "Sam", "Nissan Patrol 2019 gcc 90k", "soon", "I don't know", "continue booking", "yes"],
   defer3: ["Hi", "Omar", "Toyota Camry 2018 gcc 120k", "soon", "I'll let you know", "Share location", "I'll pet you know", "ok", "correct, you can call 0501234567"],
   pajero3: ["Hi", "Mohamed", "Mitsubishi Pajero 2018 gcc 165k", "early next week", "Tuesday", "yes"],
   pajero4: ["Hi", "Sara", "Kia Rio 2019 gcc 90k", "next week", "Wednesday 2pm"],
@@ -133,7 +134,7 @@ export function hookConsole() {
   console.log   = (...a: unknown[]) => { const t = fmt(a); if (/^\[(kaya|slots)\]/.test(t) && !/reply ready/.test(t)) als.getStore()?.push(`[LOG] ${t.slice(0, 300)}`); l(...a); };
 }
 
-export const BATCH = ["defer2", "defer3"];
+export const BATCH = ["defer2", "defer3", "defer4"];
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
