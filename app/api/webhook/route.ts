@@ -1200,6 +1200,33 @@ export async function POST(req: NextRequest) {
       if (UNSURE_SPECS.test(messageText) && vehicleUpdates.specs === "Non-GCC" && !/\b(american|us|usa|japan\w*|canad\w*|korea\w*|europe\w*)\b.{0,10}\b(spec|import)/i.test(messageText)) {
         vehicleUpdates.specs = /\bprobably\s+gcc\b|\bdealer\b.{0,20}\b(dubai|uae|abu dhabi|sharjah)\b|\b(bought|purchased)\b.{0,20}\b(in|from)\s+(dubai|the uae|uae)\b/i.test(messageText) ? "GCC" : "Unknown";
       }
+      // Typo in the year ("20002", "20188", "2o18") right after we asked for it → take the real year, never ask again
+      {
+        const lastQy = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+        const maxY = new Date().getFullYear() + 1;
+        const okY = (y: number) => y >= 1975 && y <= maxY;
+        if ((!alreadyKnown.year || !okY(+alreadyKnown.year)) && (!vehicleUpdates.year || !okY(+vehicleUpdates.year)) && /\byear\b/i.test(lastQy)) {
+          const raw = messageText.trim().replace(/[oO]/g, "0");
+          const m = raw.match(/^\D{0,12}(\d{3,6})\D{0,12}$/);
+          if (m && !/\b(km|kms|miles?|k)\b/i.test(messageText)) {
+            const d = m[1];
+            let year: number | null = null;
+            if (d.length === 4 && okY(+d)) year = +d;
+            else if (d.length === 5 || d.length === 6) {
+              // drop one (or two) extra digits — prefer removing a doubled digit: 20002 → 2002, 20188 → 2018
+              const cands: number[] = [];
+              for (let i = 0; i < d.length; i++) { const c = d.slice(0, i) + d.slice(i + 1); if (c.length === 4 && okY(+c)) cands.push(+c); if (c.length === 5) for (let j = 0; j < c.length; j++) { const c2 = c.slice(0, j) + c.slice(j + 1); if (okY(+c2)) cands.push(+c2); } }
+              const doubled = [...d].findIndex((ch, i) => i > 0 && ch === d[i - 1]);
+              const pref = doubled > 0 ? +(d.slice(0, doubled) + d.slice(doubled + 1)) : NaN;
+              year = okY(pref) && d.length === 5 ? pref : (cands[0] ?? null);
+            } else if (d.length === 3 && /^0\d\d$|^[12]\d\d$/.test(d)) {
+              // "018" → 2018, "219" → 2019 is too unsure — only the leading-zero form
+              if (/^0\d\d$/.test(d) && okY(2000 + +d.slice(1))) year = 2000 + +d.slice(1);
+            }
+            if (year) { vehicleUpdates.year = String(year); console.log(`[kaya] year typo "${d}" → ${year} for ${phone}`); }
+          }
+        }
+      }
       // Indian/Pakistani counting: "3 lakh" = 300,000 km (the extractor misreads it)
       {
         const ml = messageText.match(/\b(\d+(?:\.\d+)?)\s*(?:lakhs?|lacs?|lakh?s?)\b/i);
