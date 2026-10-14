@@ -28,6 +28,10 @@ export function visitAvailability(message: string, nowDubai = new Date(Date.now(
   }
   if (/\bbefore (?:the |this )?week\s*-?\s*end\b.*\bnot today\b/i.test(t))
     return { reply: "No problem. Which day before the weekend works for you?" };
+  if (/\bsunday\b/i.test(t)) {
+    const mon = plus(((8 - nowDubai.getUTCDay()) % 7) || 7);
+    return { date: iso(mon), reply: `Sorry, we're closed on Sundays. Could you come on ${label(mon)} instead? If so, what time would suit you?` };
+  }
   if (/\b(?:the )?day after tomorrow\b/i.test(t)) {
     const d = nextOpen(2);
     return { date: iso(d), reply: `No problem, ${label(d)} works. What time is best for you to bring the car${d.getUTCDay() === 5 ? "? We open at 12 PM on Friday." : "?"}` };
