@@ -149,6 +149,10 @@ const SCRIPTS: Record<string, string[]> = {
   sentra2: ["🚘 What is your car make, model & Year?", "I have Nissan Sentra 2019 Model I want sale it how Much u give", "201300km run", "I don't understand what GCC specs", "Malesiya", "Where your location.", "Yes I can bring all. Tell me what about the price going normally.", "Ok when I free I'll let you know thanks", "What time closed evening", "Maybe Thursday", "Can't book Time after 3 PM some time too much traffic."],
   sentra3: ["Hi", "Rafi", "Nissan Sentra 2019", "201300km", "I don't understand what GCC specs", "bought it in Dubai", "today", "Where your location.", "Tell me what about the price going normally.", "5pm"],
   carlos4: ["Hi", "Carlos", "Hummer H2 2007 250k", "yes", "no loan", "If it’s possible this week", "can I come tomorrow at 4?", "ok", "thanks"],
+  customer_calls_us: ["Hi", "Ali", "Toyota Camry 2020 80k GCC", "No loan", "soon", "send me your number", "I'll call you"],
+  call_is_not_name: ["Hi", "im call you", "Mercedes Maybach 2021 161000 km GCC", "now", "Price 75000", "send me number", "If you can pay that amount I will come for the inspection"],
+  customer_calls_then_books: ["Hi", "Ali", "Toyota Camry 2020 80k GCC", "No loan", "soon", "what's your number?", "continue with the booking", "Saturday 3 PM"],
+  customer_requests_callback: ["Hi", "Sara", "Nissan Patrol 2021 70k GCC", "No loan", "soon", "I will call you what's your number", "Please call me instead"],
 };
 
 const als = new AsyncLocalStorage<string[]>();
