@@ -901,7 +901,7 @@ export async function POST(req: NextRequest) {
       await updateConversation(phone, { car_conditions: cleaned } as any).catch(() => {});
     }
     if (/\b(stop (messaging|texting|contacting|sending|writing)( me)?|unsubscribe|don'?t (message|text|contact) me|do not (message|text|contact) me|leave me alone|remove my (number|details)|opt[\s-]?out)\b|^\s*stop\s*[.!]*\s*$/i.test(messageText)) {
-      const reply = "Understood. We won't message you again.";
+      const reply = `Understood. We won't contact you again. You're always welcome whenever you're ready.\n\n${LOCATION_TEXT}`;
       await sendWhatsAppMessage(phone, reply);
       const ex = String((conversation as any).car_conditions ?? "");
       const note = "OPTED OUT: asked not to be messaged — do not contact";
@@ -911,6 +911,7 @@ export async function POST(req: NextRequest) {
       } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
       await pushLead(phone, "opted out", { inspectionBooked: false });
+      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "opted_out" }, { status: 200 });
     }
 
@@ -1463,11 +1464,12 @@ export async function POST(req: NextRequest) {
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
       const isDeferred = DEFER_PATTERN.test(messageText) || /\b(no need (to |for )?(a )?book(ing)?|not ready( to (book|sell))?|don'?t (want|need) (to )?book|maybe later)\b/i.test(messageText);
+      const declinesCallback = /\b(no|don'?t|do not|not now|no thanks|no need)\b.{0,24}\b(call\s*back|callback|call|contact|follow[\s-]?up)\b|\b(call\s*back|callback|call|contact|follow[\s-]?up)\b.{0,20}\b(no thanks|not now|not needed)\b/i.test(messageText);
       const explicitBranchVisit = /\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText);
       const answerToChoice = !explicitBranchVisit && (lastA.includes(NOT_READY_CHOICE) || lastA.includes("personal call from our team"));
-      if (isDeferred || answerToChoice) {
-        const yes = /\b(yes|yeah|sure|please|call|contact|phone|team)\b/i.test(messageText) && !/^\s*(no|don'?t|not)\b/i.test(messageText);
-        const no = /^\s*(no|nope|nah|no thanks|not now|don'?t|not interested)\b/i.test(messageText);
+      if (isDeferred || answerToChoice || declinesCallback) {
+        const yes = !declinesCallback && /\b(yes|yeah|sure|please|call|contact|phone|team)\b/i.test(messageText) && !/^\s*(no|don'?t|not)\b/i.test(messageText);
+        const no = declinesCallback || /^\s*(no|nope|nah|no thanks|not now|don'?t|not interested)\b/i.test(messageText);
         if (answerToChoice && !yes && !no) {
           const ask = "Just to confirm, would you like a personal call from our team, or would you prefer to contact us when you're ready?";
           await sendWhatsAppMessage(phone, ask);
@@ -1475,26 +1477,27 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ status: "not_ready_clarify" }, { status: 200 });
         }
         const note = answerToChoice && yes ? "NOT READY YET: Accepted personal call"
-          : answerToChoice && no ? "NOT READY YET: Declined personal call"
+          : no ? "NOT READY YET: Declined personal call"
           : "NOT READY YET: Call preference pending";
         const previous = String((conversation as any).car_conditions ?? "").split(" | ").filter(n => !n.startsWith("NOT READY YET:"));
         const notes = [...previous, note].join(" | ");
+        const closeNoCall = no && (answerToChoice || declinesCallback);
         const reply = answerToChoice && yes
           ? (isUAE ? "Thanks. Our team can contact you on this WhatsApp number. Have a nice day!" : `Thanks. ${POST_PHONE_Q}`)
-          : answerToChoice && no
-            ? "No problem. Whenever you're ready to sell your car, we'll be ready for you. I'll share our details and location below. Have a nice day!"
+          : closeNoCall
+            ? "No problem. Whenever you're ready to sell your car, you're always welcome at Mister Wheelz. Here are our location and opening hours. Have a nice day!"
             : NOT_READY_CHOICE;
         await sendWhatsAppMessage(phone, reply);
-        if (answerToChoice && no) {
+        if (closeNoCall) {
           if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
           await sendWhatsAppMessage(phone, LOCATION_TEXT);
         }
         await updateConversation(phone, { ...vehicleDbFields(vehicleUpdates), car_conditions: notes,
-          step: answerToChoice ? CLOSING_STEP : currentStep, appointment_date: null, appointment_time: null,
+          step: answerToChoice || closeNoCall ? CLOSING_STEP : currentStep, appointment_date: null, appointment_time: null,
           last_msg_id: message.id, last_message_at: new Date().toISOString() } as any);
-        await appendHistory(phone, hist, messageText, answerToChoice && no ? `${reply}\n[SPLIT]\n${LOCATION_TEXT}` : reply);
+        await appendHistory(phone, hist, messageText, closeNoCall ? `${reply}\n[SPLIT]\n${LOCATION_TEXT}` : reply);
         await pushLead(phone, "not ready yet", { inspectionBooked: false,
-          milestone: answerToChoice ? undefined : "FOLLOW UP", topNote: "NOT READY YET" });
+          milestone: answerToChoice || closeNoCall ? undefined : "FOLLOW UP", topNote: "NOT READY YET" });
         await moveLeadToCallBack(phone);
         return NextResponse.json({ status: answerToChoice ? "not_ready_answer" : "not_ready_offer" }, { status: 200 });
       }
@@ -1508,15 +1511,23 @@ export async function POST(req: NextRequest) {
     const isCancel = currentStep >= FINAL_STEP && hasBooking && CANCEL.test(messageText) && !RESCHEDULE.test(messageText)
       && !/\b(but|instead|rather|can we|how about)\b/i.test(messageText)
       && !(CONDITIONAL.test(messageText) && !/\b(cancel|sold)\b/i.test(messageText));
-    // Marc: Kaya never changes bookings — cancel / reschedule requests become a task for the call centre
-    const CHANGE_REPLY = "I’ve passed your booking request to our team. They’ll contact you to confirm it. Your existing appointment remains in place until they do.";
-    const CHANGE_ERROR = "I couldn't forward your booking request right now. Please call our customer service team on 058 582 5543. Your existing appointment remains in place until they confirm a change.";
+    // A cancellation closes the old appointment. A reschedule closes the old slot;
+    // the new slot is arranged by the call centre. Both receive a linked Bigin task.
+    const CHANGE_ERROR = "Your request is recorded, but I couldn't create the team follow-up task. Please call us on 058 582 5543 to confirm the next step.";
     if (isCancel) {
       const task = await createChangeTask({ ...conversation, phone }, "CANCEL", messageText);
-      const answer = task.ok ? CHANGE_REPLY : CHANGE_ERROR;
+      const oldAppt = `${conversation.appointment_date} ${conversation.appointment_time}`;
+      const answer = task.ok
+        ? "Your inspection appointment has been cancelled as requested. Our call centre will follow up to reconfirm your decision; if you'd like to keep the appointment, please let them know."
+        : `Your inspection appointment has been cancelled as requested. ${CHANGE_ERROR}`;
       await sendWhatsAppMessage(phone, answer);
-      await updateConversation(phone, { step: CLOSING_STEP, last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await updateConversation(phone, { step: CLOSING_STEP, appointment_date: null, appointment_time: null,
+        appointment: null, car_conditions: [String((conversation as any).car_conditions ?? ""), `CANCELLED: ${oldAppt}; ${messageText.slice(0, 200)}`].filter(Boolean).join(" | "),
+        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
+      await pushLead(phone, "booking cancelled", { inspectionBooked: false, clearAppointment: true,
+        topNote: `CANCELLED appointment ${oldAppt}. Call centre to reconfirm or reverse cancellation.` });
+      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "cancel_task" }, { status: 200 });
     }
     // Reschedule: explicit change request after booking, or answering Kaya's reschedule question
@@ -1547,10 +1558,18 @@ export async function POST(req: NextRequest) {
       (RESCHEDULE.test(messageText) || newDayOrTime);
     if (wantsReschedule) {
       const task = await createChangeTask({ ...conversation, phone }, "RESCHEDULE", messageText);
-      const answer = task.ok ? CHANGE_REPLY : CHANGE_ERROR;
+      const oldAppt = `${conversation.appointment_date} ${conversation.appointment_time}`;
+      const answer = task.ok
+        ? "Your request to reschedule is confirmed, and your previous appointment time has been released. Our call centre will contact you to confirm the new date and time."
+        : `Your previous appointment time has been released. ${CHANGE_ERROR}`;
       await sendWhatsAppMessage(phone, answer);
-      await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await updateConversation(phone, { step: CLOSING_STEP, appointment_date: null, appointment_time: null,
+        appointment: null, car_conditions: [String((conversation as any).car_conditions ?? ""), `RESCHEDULE REQUESTED: old ${oldAppt}; requested ${messageText.slice(0, 200)}`].filter(Boolean).join(" | "),
+        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
+      await pushLead(phone, "booking reschedule requested", { inspectionBooked: false, clearAppointment: true,
+        topNote: `RESCHEDULE REQUESTED. Old appointment ${oldAppt}. Customer wrote: ${messageText.slice(0, 200)}. Call centre to confirm new slot.` });
+      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "reschedule_task" }, { status: 200 });
     }
     // Questions requiring staff action about an existing appointment are tasks as well.
@@ -1559,10 +1578,12 @@ export async function POST(req: NextRequest) {
         && /\b(my|the)\s+(booking|appointment|inspection)\b/i.test(messageText)
         && /\b(call|contact|confirm|check|question|issue|problem|inquiry|ask the team|help)\b/i.test(messageText)) {
       const task = await createChangeTask({ ...conversation, phone }, "OTHER", messageText);
-      const answer = task.ok ? CHANGE_REPLY : CHANGE_ERROR;
+      const answer = task.ok ? "Your appointment inquiry is recorded. Our call centre will follow up with you; your appointment is still booked." : CHANGE_ERROR;
       await sendWhatsAppMessage(phone, answer);
       await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, answer);
+      await pushLead(phone, "booking inquiry", { inspectionBooked: true, topNote: `BOOKING INQUIRY: ${messageText.slice(0, 200)}` });
+      await moveLeadToCallBack(phone);
       return NextResponse.json({ status: "booking_inquiry_task" }, { status: 200 });
     }
     const isRebook = bookFromClosed;
