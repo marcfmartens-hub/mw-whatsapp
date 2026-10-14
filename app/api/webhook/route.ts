@@ -1503,7 +1503,12 @@ export async function POST(req: NextRequest) {
       const declinesCallback = /\b(no|don'?t|do not|not now|no thanks|no need)\b.{0,24}\b(call\s*back|callback|call|contact|follow[\s-]?up)\b|\b(call\s*back|callback|call|contact|follow[\s-]?up)\b.{0,20}\b(no thanks|not now|not needed)\b/i.test(messageText);
       const explicitBranchVisit = /\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText);
       const answerToChoice = !explicitBranchVisit && (lastA.includes(NOT_READY_CHOICE) || lastA.includes("personal call from our team"));
-      if (isDeferred || answerToChoice || declinesCallback) {
+      // A concrete day/time is a return to booking, even after a callback question.
+      const resumesBooking = answerToChoice && !declinesCallback
+        && !/\b(?:not|can'?t|cannot|won'?t|maybe|perhaps)\b/i.test(messageText)
+        && (/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|tomorrow|today)\b/i.test(messageText)
+          || /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(messageText));
+      if ((isDeferred || answerToChoice || declinesCallback) && !resumesBooking) {
         const yes = !declinesCallback && /\b(yes|yeah|sure|please|call|contact|phone|team)\b/i.test(messageText) && !/^\s*(no|don'?t|not)\b/i.test(messageText);
         const no = declinesCallback || /^\s*(no|nope|nah|no thanks|not now|don'?t|not interested)\b/i.test(messageText);
         if (answerToChoice && !yes && !no) {
@@ -1541,6 +1546,19 @@ export async function POST(req: NextRequest) {
     const CANCEL = /\b(cancel|already sold|sold it|sold the car|don'?t need (it|the appointment|the booking)|no need (for )?(the |a )?booking|not coming|won'?t (be )?com\w*|can'?t (make it|come)|call (it )?off)\b/i;
     const RESCHEDULE = /\b(reschedul\w*|change (the |my )?(time|date|appointment)|move (it|the appointment)|instead|another (time|day)|different (time|day)|postpone|earlier|later|can (we|i) (make it|do)|could do|make it)\b/i;
     const lastAssistantMsg = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+    let completingNamedBooking = false;
+    if (lastAssistantMsg.endsWith(POST_NAME_Q) && !hasBooking && conversation.appointment_date && conversation.appointment_time) {
+      const n = extractNameFromMessage(messageText)
+        ?? (/^[A-Za-z]{2,30}(?:\s+[A-Za-z]{2,30})?$/.test(messageText.trim()) && looksLikeName(messageText.trim()) ? nameCase(messageText.trim()) : null);
+      if (!n) {
+        await sendWhatsAppMessage(phone, POST_NAME_Q);
+        await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, POST_NAME_Q);
+        return NextResponse.json({ status: "booking_name_clarify" }, { status: 200 });
+      }
+      (coreUpdates as any).name = n;
+      conversation.name = n;
+      completingNamedBooking = true;
+    }
     const mentionsDayOrTime = new RegExp(`\\b${DAY}\\b|\\b${TIME}`, "i").test(messageText);
     // "I'm not coming for nothing / unless you answer" is a condition, not a cancellation
     const CONDITIONAL = /\b(unless|if|without|before|for nothing|until|otherwise)\b/i;
@@ -2139,7 +2157,8 @@ export async function POST(req: NextRequest) {
         const bothNegative = /^(?:\s*(?:neither|none|not interested(?: in either)?|no to both|(?:i\s+)?don'?t want either)\b|\s*no\b.{0,60}\b(?:book|booking)\b.{0,30}\b(?:call|callback)\b)/i.test(messageText)
           && !/\b(?:yes to|please|i want|i'd like)\b.{0,20}\b(?:team|call|callback|book|booking)\b/i.test(messageText);
         if (bothNegative) return closeAsNotReady();
-        if (WANT_BOOK.test(messageText) && !WANT_TEAM.test(messageText)) {
+        const rejectsVisit = /\b(?:too busy|no time|cannot|can'?t|won'?t|not able|without a number|without a price)\b/i.test(messageText);
+        if (WANT_BOOK.test(messageText) && !WANT_TEAM.test(messageText) && !rejectsVisit) {
           // Continue from the day the customer already mentioned (never Sunday); otherwise ask for the day
           const userTexts = hist.filter(m => m.role === "user").map(m => m.content);
           let iso: string | null = null;
@@ -2171,6 +2190,10 @@ export async function POST(req: NextRequest) {
         }
         if (NO.test(messageText)) {
           return closeAsNotReady();
+        }
+        if (rejectsVisit) {
+          await fin(NOT_READY_CHOICE);
+          return NextResponse.json({ status: "booking_declined_call_offered" }, { status: 200 });
         }
       }
 
@@ -2597,7 +2620,7 @@ export async function POST(req: NextRequest) {
           } else reply = dow === 0 ? sundayText() : "No problem. Which day works best for you?";
           break;
         }
-        case "G": reply = "No problem. Our team will check in with you closer to the time."; if (timing.followUp) await addNote(`Follow-up: ${timing.followUp}`); break;
+        case "G": reply = "No problem. When you're ready, just message us with a day that suits you."; break;
       }
     }
     // Putting it off ("ok i let u know tomorrow") is not a booking — never push, just leave the door open
@@ -2640,7 +2663,7 @@ export async function POST(req: NextRequest) {
     // Don't depend on one exact sentence — Kaya words it differently. Confirmed if a date AND
     // time were captured and the reply reads like a confirmation.
     const hasApptDateTime = !!(apptDate || conversation.appointment_date) && !!(apptTime || conversation.appointment_time);
-    let appointmentConfirmedEarly = (currentStep === FINAL_STEP || jumpToBooking) && !action && (
+    let appointmentConfirmedEarly = completingNamedBooking || (currentStep === FINAL_STEP || jumpToBooking) && !action && (
       /team will be in touch on whatsapp/i.test(reply) ||
       (hasApptDateTime && /\b(all set|you'?re set|booked|confirmed|see you|it'?s set|locked in|in touch)\b/i.test(reply))
     );
@@ -2744,6 +2767,15 @@ export async function POST(req: NextRequest) {
       reply = reply.charAt(0).toUpperCase() + reply.slice(1);
     }
     let replyParts = reply.split(/\[SPLIT\]/i).map(s => s.trim()).filter(Boolean);
+    if (appointmentConfirmedEarly && !((coreUpdates as any).name ?? conversation.name)) {
+      // The slot is saved, but it is not a confirmed booking or Bigin appointment yet.
+      await updateConversation(phone, { step: FINAL_STEP, appointment_date: apptDate || conversation.appointment_date,
+        appointment_time: apptTime || conversation.appointment_time, last_msg_id: message.id,
+        last_message_at: new Date().toISOString() } as any);
+      await sendWhatsAppMessage(phone, POST_NAME_Q);
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, POST_NAME_Q);
+      return NextResponse.json({ status: "booking_name_required" }, { status: 200 });
+    }
     if (appointmentConfirmedEarly) {
       // Fixed confirmation format (car summary from Kaya stays as the first message, if she sent one)
       const nmForConf = (coreUpdates as any).name ?? conversation.name;
@@ -2757,7 +2789,12 @@ export async function POST(req: NextRequest) {
       if (conf) {
         // Keep only the car-summary lines from Kaya's own text (her "booked you for 10:00" could contradict the slot)
         const summaryRaw = replyParts.find(p => /^(Make|Model|Year):/m.test(p));
-        const summary = summaryRaw?.split("\n").filter(l => /^(Make|Model|Year|Mileage|Specs|Loan):/i.test(l.trim())).join("\n");
+        const authoritativeSpecs = vehicleUpdates.specs ?? conversation.specs;
+        const summaryLines = summaryRaw?.split("\n").filter(l => /^(Make|Model|Year|Mileage|Specs|Loan):/i.test(l.trim()))
+          .map(l => /^Specs:/i.test(l.trim()) && authoritativeSpecs ? `Specs: ${authoritativeSpecs}` : l) ?? [];
+        if (authoritativeSpecs && summaryLines.length && !summaryLines.some(l => /^Specs:/i.test(l.trim())))
+          summaryLines.push(`Specs: ${authoritativeSpecs}`);
+        const summary = summaryLines.join("\n");
         // The customer asked something in the same message → keep Kaya's answer (without any times/booking talk)
         let answer = "";
         if (/\?/.test(messageText)) {
@@ -2769,7 +2806,14 @@ export async function POST(req: NextRequest) {
         replyParts = [...(answer ? [answer] : []), ...(summary ? [summary] : []), conf];
         reply = replyParts.join("\n[SPLIT]\n");
       }
-      if (defaultedTime) { replyParts[replyParts.length - 1] += "\n\nI've booked this slot for you. Our call centre will confirm the exact timing with you on the morning of the booking."; reply = replyParts.join("\n[SPLIT]\n"); }
+      const selectedSlot = toTime24(String(apptTime || conversation.appointment_time || ""));
+      const customerStatedSelectedTime = [...history.filter(m => m.role === "user").map(m => m.content), messageText]
+        .some(t => [...t.matchAll(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b/gi)]
+          .some(m => toTime24(m[0]) === selectedSlot));
+      if (defaultedTime || (selectedSlot?.endsWith(":15") && !customerStatedSelectedTime)) {
+        replyParts[replyParts.length - 1] += "\n\nI've booked this slot for you. Our call centre will confirm the exact timing with you on the morning of the booking.";
+        reply = replyParts.join("\n[SPLIT]\n");
+      }
       replyParts[replyParts.length - 1] += "\n\nHere below is our location.";
     }
     // Loan on the car → reassure first, then the next question as its own message (Marc)
@@ -2890,9 +2934,9 @@ export async function POST(req: NextRequest) {
     if (appointmentConfirmedEarly) {
       if (LOCATION_IMAGE_URL) await sendWhatsAppImage(phone, LOCATION_IMAGE_URL);
       await sendWhatsAppMessage(phone, LOCATION_TEXT);
-      // Marc: name and number only AFTER the booking — name if we don't have it, number only for non-UAE WhatsApp
+      // The name is collected before confirmation; request an alternate number only when needed.
       const nameNow = (coreUpdates as any).name ?? conversation.name ?? nameFromHistory([...history, { role: "user", content: messageText }]);
-      const after = !nameNow ? POST_NAME_Q : !isUAE ? POST_PHONE_Q : null;
+      const after = !nameNow ? null : !isUAE ? POST_PHONE_Q : null;
       if (after) { await sendWhatsAppMessage(phone, after); reply = `${reply}\n[SPLIT]\n${after}`; }
     }
 
