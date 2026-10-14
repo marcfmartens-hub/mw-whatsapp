@@ -2525,7 +2525,7 @@ export async function POST(req: NextRequest) {
     }
     if (askOrigin) reply = "No problem. GCC specs means the car was made for the Gulf market. Did you buy the car here in the UAE, or was it imported from another country?";
     // Sunday (closed) → mention Saturday and Friday, never book a Sunday (Marc)
-    if (/\bsun(day)?\b/i.test(messageText) && currentStep >= 5 && currentStep < CLOSING_STEP && action?.type !== "OFFER_CALLBACK") {
+    if (/\bsun(day)?\b/i.test(messageText) && currentStep >= 5 && currentStep < CLOSING_STEP && !visitWindow && action?.type !== "OFFER_CALLBACK") {
       const dIsoS = String(apptDate || "");
       const isSun = !dIsoS || (/^\d{4}-\d{2}-\d{2}$/.test(dIsoS) && new Date(dIsoS + "T12:00:00Z").getUTCDay() === 0);
       if (isSun) {
