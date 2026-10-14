@@ -8,6 +8,7 @@ import { createBiginContact, createChangeTask, moveLeadToCallBack, toIsoDate, to
 import { CAR_MODELS, CAR_MAKES } from "@/lib/carData";
 import { estimateCarValue } from "@/lib/valuation";
 import { MULKIYA_QUESTION, mulkiyaAnswer, specsStatement } from "@/lib/specs";
+import { asksBestWayToSell, isStandaloneOffTopicQuestion } from "@/lib/topic";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -876,6 +877,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "job_inquiry" }, { status: 200 });
     }
 
+    if (isStandaloneOffTopicQuestion(messageText)) {
+      const reply = "I help with selling cars, so I can't advise on politics or religion. If you'd like to return to your car, I'm here to help.";
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      return NextResponse.json({ status: "off_topic" }, { status: 200 });
+    }
+
     // ── Trade-in: customer sells AND buys → normal selling flow, flagged for the team ──
     if (TRADE_IN_PATTERN.test(messageText) && !String((conversation as any).car_conditions ?? "").includes("Trade-in:")) {
       const note = "Trade-in: customer also wants to buy a car";
@@ -1031,6 +1040,15 @@ export async function POST(req: NextRequest) {
     }
 
     const currentStep = conversation.step ?? 0;
+    // Advice is a question, not a choice of consignment or consent to book.
+    if ((currentStep === 6 || currentStep === FINAL_STEP) && asksBestWayToSell(messageText)
+        && !/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday)\b.*\b(\d{1,2}\s*(am|pm)|noon)\b/i.test(messageText)) {
+      const reply = "If speed matters most, a direct cash sale is usually the simpler route. If you're comfortable waiting, consignment may bring a higher return, though it takes longer. We can advise on your particular car after a free inspection. Which matters more to you: selling quickly or the potential return?";
+      await sendWhatsAppMessage(phone, reply);
+      await updateConversation(phone, { last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+      await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, reply);
+      return NextResponse.json({ status: "selling_advice" }, { status: 200 });
+    }
     const fieldToSave = FIELD_BY_STEP[currentStep];
     {
       const lastA = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
@@ -2608,7 +2626,7 @@ export async function POST(req: NextRequest) {
     }
     // Wants to sell now → no cash/consignment question, straight to the time (Marc)
     // Marc: no cash/consignment question — after "when do you want to sell?" always go to the appointment
-    if (currentStep === 6 && !action && !timing && !askOrigin && !lastAssistantMsg.includes("imported from another country") && !/\?/.test(messageText)) {
+    if (currentStep === 6 && !action && !timing && !askOrigin && !asksBestWayToSell(messageText) && !lastAssistantMsg.includes("imported from another country") && !/\?/.test(messageText)) {
       const q = getBookingSlot().match(/Ask exactly: "([^"]+)"/)?.[1] ?? "What time can you come in tomorrow?";
       const nm = (coreUpdates as any).name ?? conversation.name;
       void nm;
@@ -2859,7 +2877,7 @@ export async function POST(req: NextRequest) {
     // — otherwise advance to appointment booking
     // Only stay on the sell-method step when they ask for an explanation.
     // "Not sure" moves on to booking — the best way to sell is decided after the inspection.
-    const stayAtSellMethod   = currentStep === 6 && /\b(difference|explain|what'?s the|how does|which is better|options?)\b/i.test(messageText)
+    const stayAtSellMethod   = currentStep === 6 && (asksBestWayToSell(messageText) || /\b(difference|explain|what'?s the|how does|which is better|options?)\b/i.test(messageText))
       && !/\b(not sure|unsure|don'?t know|undecided|no idea|think about it|either)\b/i.test(messageText)
       && !SELL_METHOD_CASH.test(messageText) && !SELL_METHOD_CONSIGNMENT.test(messageText);
     const promisedCallback = !appointmentConfirmed && currentStep >= 5 &&
