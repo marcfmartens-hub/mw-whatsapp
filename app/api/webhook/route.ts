@@ -3005,7 +3005,7 @@ export async function POST(req: NextRequest) {
         && !String((conversation as any).car_conditions ?? "").includes("CUSTOMER WILL CALL: Requested a team callback")) {
       const askedQuestion = /\?|^\s*(what|when|where|how|do|does|are|is|can|could|which)\b/i.test(messageText);
       if (!askedQuestion) {
-        replyParts = ["Thanks, I've noted that. You can call us on +971 58 582 5543 whenever you're ready."];
+        replyParts = []; // No new question or explicit choice: the conversation is closed.
       } else {
         replyParts = replyParts.map(p => p
           .replace(/[^.!?\n]*\b(?:our team|someone from our team)\s+(?:will|can|is going to)\s+(?:call|contact|be in touch)[^.!?\n]*[.!?]/gi, "")
@@ -3030,7 +3030,7 @@ export async function POST(req: NextRequest) {
       if (after) { await sendWhatsAppMessage(phone, after); reply = `${reply}\n[SPLIT]\n${after}`; }
     }
 
-    if (action?.type === "OFFER_CALLBACK") {
+    if (action?.type === "OFFER_CALLBACK" && reply) {
       // Marc: confirm the number (UAE WhatsApp) or ask for one (non-UAE)
       await sendWhatsAppMessage(phone, isUAE ? "They can reach you on this same number, correct?" : POST_PHONE_Q);
     }
@@ -3039,7 +3039,7 @@ export async function POST(req: NextRequest) {
       const updatedHistory: ConversationMessage[] = [
         ...history,
         { role: "user"      as const, content: messageText },
-        { role: "assistant" as const, content: reply },
+        ...(reply ? [{ role: "assistant" as const, content: reply }] : []),
       ].slice(-40);
       await updateConversation(phone, { messages: updatedHistory } as any);
     } catch (e) {
@@ -3106,7 +3106,7 @@ export async function POST(req: NextRequest) {
     // ── Bigin milestones ──────────────────────────────────────────────
     // a) booking confirmed  b) team follow-up promised (callback, cash-only, price handoff …)
     const TEAM_FOLLOWUP = /\b(team|someone)\b[^.]{0,60}\b(be in touch|reach out|call you|contact you|get back to you|follow up)/i;
-    const teamFollowUp = !appointmentConfirmed &&
+    const teamFollowUp = !appointmentConfirmed && !!reply &&
       (action?.type === "OFFER_CALLBACK" || TEAM_FOLLOWUP.test(reply));
 
     if (appointmentConfirmed) {
