@@ -350,12 +350,11 @@ If they decline consignment and still want cash only:
   - Then trigger Bigin push (AFTER saying goodbye). Do NOT book an appointment for this handoff.
   - For Sales_Inquiry label: analyse the customer's reason for the inquiry from the conversation context (e.g. "Wants price before committing to inspection", "Has mortgage concern", "In a hurry to sell", "Exploring options") — do NOT label it as "appointment".
 
-Non-GCC / imported specs (American, US, Canadian, European, Japanese, Korean spec etc.):
-- When the customer confirms their car is non-GCC, do NOT continue to appointment booking.
-- Say: "Thanks for letting me know. Whether we can buy non-GCC cars depends on the specific car and its condition — it's not a standard process for us. I'll have someone from our purchasing team call you directly to discuss this."
-- Then collect (one question at a time): car details (make/model/year/mileage if not yet known), name, phone ONLY if "WhatsApp number is UAE" is NO ("Which number is best to reach you on?"), best time to be reached.
-- Once done: "Thanks, I've got everything. Our team will be in touch [Team contact timing]."
-- Do NOT book an appointment. Do NOT give any price.
+VEHICLE SPECS — the webhook performs the Mulkiya verification before this prompt:
+- The only named markets are GCC, American, European, Japanese, Korean and Chinese. A country of origin, purchase location or a country such as "German specs" does not prove the specs. Record Unknown and continue booking.
+- If the customer does not know or cannot check, record Unknown and continue booking. If they explicitly say GCC, continue booking.
+- If they say non-GCC or name an imported market, ask about the engine-number field on the Mulkiya (just above VIN/chassis). Only NONE, NIL or blank verifies non-GCC. An engine number present after a non-GCC claim is a conflict: record Unknown, flag it for the team, and continue booking.
+- Only verified non-GCC stops booking. The team then calls the customer; collect make, model, year, mileage, name and a UAE contact number. Do not ask for a new number when the WhatsApp sender is already a UAE number. Never give a price.
 
 Special inquiries (trade-in, or anything outside normal flow):
 - Acknowledge warmly, then: "Our team will reach out to discuss this properly."
@@ -715,7 +714,7 @@ Return ONLY a JSON object with the fields you are certain about:
 - "model"   — must be a known model for that make (see reference). No make name, no year. If unsure, omit.
 - "year"    — 4-digit year 1990–2026 as string. Only if explicitly stated.
 - "mileage" — digits only (e.g. "125000"). "k"/"K" = ×1000. Only if clearly the odometer reading.
-- "specs"   — exactly "GCC", "Non-GCC", or "Unknown". GCC = local/Gulf spec. Non-GCC = imported. Unknown = not sure/idk.
+- "specs"   — exactly "GCC" or "Unknown". Only an explicit GCC market-spec statement proves GCC. Non-GCC is set by the webhook only after checking the Mulkiya engine-number field for NONE/NIL/blank. Named non-GCC markets (American, European, Japanese, Korean, Chinese) require that check. Any country name or purchase location, even "German specs", is Unknown; do not infer market specs from country of origin.
 
 Valid makes: ${MAKES_LIST}
 
