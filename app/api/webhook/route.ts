@@ -1463,6 +1463,21 @@ export async function POST(req: NextRequest) {
     // Only a booking Kaya actually confirmed counts (a day saved while chatting is not a booking to change/cancel)
     const hasBooking = !!(conversation.appointment_date && conversation.appointment_time)
       && ((conversation.messages ?? []) as ConversationMessage[]).some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content));
+    // A short rejection of a proposed visit is ambiguous: offer the two existing paths once.
+    // Keep this before the home-visit objection rule ("can't come this weekend" is about timing).
+    if (!hasBooking && currentStep >= 6 && currentStep < CLOSING_STEP) {
+      const lastA = [...((conversation.messages ?? []) as ConversationMessage[])].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const bookingQuestion = !!pendingBookingQ(lastA) || /\b(?:could you come|would (?:monday|tuesday|wednesday|thursday|friday|saturday|that day) work)\b/i.test(lastA);
+      const vagueNo = /^\s*(?:no(?:\s+thanks)?|nope|nah|not interested)[.!\s]*$/i.test(messageText);
+      const rejectsSuggestedDay = /\b(?:can'?t|cannot|won'?t|not able to)\s+come\b.{0,35}\b(?:this|next)\s+week\s*-?\s*end\b|\b(?:that|this) day (?:doesn'?t|does not|won'?t) work\b/i.test(messageText);
+      if (bookingQuestion && (vagueNo || rejectsSuggestedDay)) {
+        await sendWhatsAppMessage(phone, BOOKING_OR_TEAM_CHOICE);
+        await updateConversation(phone, { appointment_date: null, appointment_time: null,
+          last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+        await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], messageText, BOOKING_OR_TEAM_CHOICE);
+        return NextResponse.json({ status: "booking_or_team_choice" }, { status: 200 });
+      }
+    }
     if (!hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
         && HOME_VISIT_PATTERN.test(messageText)
         && !/\b(i can|i will|i'?ll|we can|we will)\b.{0,30}\b(come|visit|bring)\b.{0,30}\b(branch|office|you)\b/i.test(messageText)) {
@@ -2082,7 +2097,7 @@ export async function POST(req: NextRequest) {
       const hist = (conversation.messages ?? []) as ConversationMessage[];
       const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
       const YES = /^\s*(yes|yeah|yep|ya|yah|ok|okay|sure|please|pls|fine|go ahead|correct|right|alright|sounds good|good|perfect|👍|of course|why not)\b/i;
-      const NO = /^\s*(no|nope|nah|not now|no thanks|no need|don'?t)\b/i;
+      const NO = /^\s*(no|nope|nah|not now|no thanks|no need|neither|none|not interested|don'?t want either|don'?t)\b/i;
       const DEFER_ANY = (t: string) => DEFER_PATTERN.test(t) || /\b(i'?ll|i will|will)\s+\w{2,4}\s+(you|u)\s+(know|update)\b|\b(let|tell)\s+(you|u)\s+(know|later)\b/i.test(t);
       const fin = async (reply: string, upd: Record<string, unknown> = {}) => {
         await sendWhatsAppMessage(phone, reply);
@@ -2111,6 +2126,19 @@ export async function POST(req: NextRequest) {
       if ((lastA.includes(OFFER_FWD) || lastA.includes(LEGACY_OFFER_FWD)) && currentStep < CLOSING_STEP) {
         const WANT_BOOK = /\b(continue|book|booking|first|1st|option 1|appointment|inspection|come in|visit)\b/i;
         const WANT_TEAM = /\b(forward|team|second|2nd|option 2|call|discuss|person|talk|speak)\b/i;
+        const closeAsNotReady = async () => {
+          const reply = "No problem. Whenever you're ready to sell your car, you're always welcome at Mister Wheelz. Here are our location and opening hours. Have a nice day!";
+          const notes = [String(c.car_conditions ?? "").split(" | ").filter((n: string) => !n.startsWith("NOT READY YET:")).join(" | "), "NOT READY YET: Declined booking and personal call"].filter(Boolean).join(" | ");
+          await fin(reply, { step: CLOSING_STEP, appointment_date: null, appointment_time: null, car_conditions: notes });
+          await sendWhatsAppMessage(phone, LOCATION_TEXT);
+          await pushLead(phone, "not ready yet", { inspectionBooked: false, topNote: "NOT READY YET" });
+          await moveLeadToCallBack(phone);
+          return NextResponse.json({ status: "booking_and_callback_declined" }, { status: 200 });
+        };
+        // An explicit rejection of both options takes precedence over words like "booking" or "call".
+        const bothNegative = /^(?:\s*(?:neither|none|not interested(?: in either)?|no to both|(?:i\s+)?don'?t want either)\b|\s*no\b.{0,60}\b(?:book|booking)\b.{0,30}\b(?:call|callback)\b)/i.test(messageText)
+          && !/\b(?:yes to|please|i want|i'd like)\b.{0,20}\b(?:team|call|callback|book|booking)\b/i.test(messageText);
+        if (bothNegative) return closeAsNotReady();
         if (WANT_BOOK.test(messageText) && !WANT_TEAM.test(messageText)) {
           // Continue from the day the customer already mentioned (never Sunday); otherwise ask for the day
           const userTexts = hist.filter(m => m.role === "user").map(m => m.content);
@@ -2142,8 +2170,7 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ status: "forward_confirm" }, { status: 200 });
         }
         if (NO.test(messageText)) {
-          await fin("No problem, just let me know the day and time that suits you.");
-          return NextResponse.json({ status: "forward_declined" }, { status: 200 });
+          return closeAsNotReady();
         }
       }
 
