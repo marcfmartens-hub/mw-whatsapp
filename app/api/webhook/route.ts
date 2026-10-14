@@ -1646,7 +1646,9 @@ export async function POST(req: NextRequest) {
         }
         // A question ("can I come today?") gets a time question, not a default slot
         if (apptDate && !apptTime && !ea.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(apptDate) && !/\?/.test(messageText)) {
-          const askedExactTime = /\b(what|which) (exact )?time\b|\btime (is best|suits|works)\b/i.test(lastAssistantMsg);
+          // Only our explicit second request counts. A general "what time is best?"
+          // followed by "Saturday morning" must get one more chance to name a time.
+          const askedExactTime = /what exact time would you prefer on that day\?/i.test(lastAssistantMsg);
           if (askedExactTime) {
             apptTime = await pickDefaultTime(apptDate, phone, dayPart); ea.appointment_time = apptTime;
             defaultedTime = true;
@@ -1669,7 +1671,7 @@ export async function POST(req: NextRequest) {
         if (Object.keys(apptSave).length > 0)
           await updateConversation(phone, apptSave);
         if (apptDate && !apptTime && currentStep >= 6 && !/\?/.test(messageText)
-            && !/\b(what|which) (exact )?time\b|\btime (is best|suits|works)\b/i.test(lastAssistantMsg)) {
+            && !/what exact time would you prefer on that day\?/i.test(lastAssistantMsg)) {
           const ask = "What exact time would you prefer on that day?";
           await sendWhatsAppMessage(phone, ask);
           await updateConversation(phone, { step: FINAL_STEP, appointment_date: apptDate,
@@ -1709,7 +1711,6 @@ export async function POST(req: NextRequest) {
             const after = messageText.match(/\bafter\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
             if (after) { let h = +after[1]; if (!after[3] && h >= 1 && h <= 7) h += 12; else if (after[3]?.toLowerCase() === "pm" && h < 12) h += 12; t = `${String(h).padStart(2, "0")}:15`; }
             else { const t24 = toTime24(String(messageText.match(/\b\d{1,2}(:\d{2})?\s*(am|pm)\b/i)?.[0] ?? "")); if (t24) t = t24; }
-            if (!t && /\b(morning|afternoon|evening)\b/i.test(messageText)) t = await pickDefaultTime(d, phone, messageText.match(/\b(morning|afternoon|evening)\b/i)![1].toLowerCase() as any);
             if (t) { apptTime = t; apptFromMsg = true; defaultedTime = false; await updateConversation(phone, { appointment_date: d, appointment_time: t } as any).catch(() => {}); }
           }
         }
