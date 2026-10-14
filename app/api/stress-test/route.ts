@@ -75,6 +75,10 @@ Write ONLY your next WhatsApp message (short, natural, like a real person). If t
 // Scripted replays of real chats (exact customer messages)
 const SCRIPTS: Record<string, string[]> = {
   selladvice_script: ["Hi", "Aisha", "Toyota Camry 2020", "85k GCC", "No loan", "Soon", "Tell me the best way to sell my car", "I care more about the potential return", "I still need to think about it"],
+  selladvice_cash: ["Hi", "Omar", "Nissan Patrol 2021", "70k GCC", "No loan", "Soon", "What is the best way to sell?", "I want quick cash", "Saturday 11 AM"],
+  selladvice_consignment: ["Hi", "Lina", "BMW 520i 2020", "65k GCC", "No loan", "This month", "How should I sell my car?", "I can wait 4 weeks", "Friday 2 PM"],
+  selladvice_unsure: ["Hi", "Sam", "Toyota Camry 2020", "80k GCC", "No loan", "Soon", "Cash or consignment?", "Not sure yet", "Thursday 3 PM"],
+  selladvice_decline: ["Hi", "Rita", "Honda Civic 2019", "90k GCC", "No loan", "Soon", "Best way to sell my car?", "I do not want to book", "No callback thanks"],
   politics: ["Hi", "Who should I vote for?", "Which religion is true?", "I have a Honda Civic 2019", "Who should I vote for? My car has 90k km GCC specs", "No loan", "This week"],
   competitors: ["Hi", "Sami", "Honda Civic 2019", "90000 km GCC", "No loan", "This week", "Should I use CarSwitch or sell to you?", "Another buyer offered 40k. Can you beat it?", "What is the best way to sell my car"],
   carlos1: ["💰 How soon do you want to sell the car?", "My name is Carlos", "The car of my brother", "Can share with you pictures?", "It’s Hummer H2", "Year 2007", "250,000 Km", "Got it, Carlos! Is it GCC or non-GCC specs?", "It has 250k km and it’s GCC specs.", "If it’s possible this week", "Okay thanks"],
