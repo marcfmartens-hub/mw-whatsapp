@@ -64,6 +64,12 @@ const POST_PHONE_Q = "Which number is best to reach you on?";
 const CLOSING_STEP = 8;
 const BOOKING_OR_TEAM_CHOICE = "Would you like to continue with the booking, or shall I forward your details to our purchasing team so they can discuss it with you by phone?";
 const NOT_READY_CHOICE = "No problem. Would you like someone from our team to contact you personally to discuss your car?";
+const CUSTOMER_CALL_CHOICE = "Would you like to continue with the booking, or would you like our team to call you? You can also call us on the number above whenever you're ready.";
+
+// The customer asking for OUR number is not a request for US to call them.
+function wantsOurNumber(text: string): boolean {
+  return /\b(?:send|share|give|text)\s+me\s+(?:(?:your|the|a)\s+)?(?:phone|contact|mobile|customer service\s+)?number\b|\b(?:what(?:'s| is)|which|do you have)\s+(?:your|the|a)\s+(?:phone|contact|mobile|customer service\s+)?number\b|\b(?:how|where)\s+(?:can|do)\s+i\s+(?:call|phone|reach|contact)\s+you\b|\b(?:i\s*(?:will|can|want to|would like to|am going to)|i'?ll|i'?m|im)\s+(?:call|phone|ring|contact)\s+you\b|\b(?:number|phone number)\s+(?:to|i can)\s+call\b/i.test(text);
+}
 
 // Sell method detection
 const SELL_METHOD_CASH        = /\b(cash|direct|buy now|sell now|sell fast|quick sale|immediately|instant)\b/i;
@@ -117,7 +123,7 @@ const CAR_WORDS = new Set<string>([
   ...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat(),
   "merc", "benz", "mercedes", "chevy", "vw", "landcruiser", "cruiser", "rover", "range", "lexus", "beemer",
 ].map(w => String(w).toLowerCase()));
-const NOT_A_NAME = /^(hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test|kaya|kaia|mister|wheelz|full|fully|automatic|aromatic|automatik|auto|manual|gear|petrol|diesel|hybrid|electric|korean|japanese|chinese|american|german|european|canadian|spec|specs|model|runs|running|mileage|kilometers|kilometres|lakh|lakhs|accident|paint|original|clean|scrap|expired|mulkia|mulkiya|warranty|service|fines|registered)$/i;
+const NOT_A_NAME = /^(call|callback|phone|number|contact|ring|hi+|hey+|hello+|hiya|yo|salam|salaam|assalam\w*|good|morning|afternoon|evening|there|yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank|car|cars|selling|sell|sale|buy|price|offer|cash|consignment|interested|looking|here|fine|my|the|a|an|it|its|is|not|just|want|need|please|today|tomorrow|now|asap|gcc|non|km|kms|loan|mortgage|new|used|old|and|from|with|but|or|im|i|am|have|has|got|to|for|in|at|on|calling|writing|messaging|busy|abroad|outside|away|late|sorry|available|ready|interested|owner|seller|buyer|dealer|agent|still|also|very|so|really|too|back|out|done|free|happy|currently|actually|based|travelling|traveling|driving|working|planning|going|thinking|trying|coming|leaving|moving|relocating|selling|asking|wondering|checking|following|sending|ignore|rules|rule|instructions|instruction|give|tell|system|prompt|forget|pretend|admin|developer|your|me|you|price|offer|bot|ai|test|kaya|kaia|mister|wheelz|full|fully|automatic|aromatic|automatik|auto|manual|gear|petrol|diesel|hybrid|electric|korean|japanese|chinese|american|german|european|canadian|spec|specs|model|runs|running|mileage|kilometers|kilometres|lakh|lakhs|accident|paint|original|clean|scrap|expired|mulkia|mulkiya|warranty|service|fines|registered)$/i;
 
 function looksLikeName(candidate: string, explicit = false): boolean {
   const words = candidate.trim().split(/\s+/);
@@ -659,6 +665,7 @@ export async function POST(req: NextRequest) {
     const recentA = (((LOCATION_KEYWORDS.test(messageText) ? (await getConversation(phone).catch(() => null))?.messages : null) ?? []) as ConversationMessage[]).filter(m => m.role === "assistant").slice(-3).map(m => m.content).join("\n");
     const pinSentRecently = /maps\.app\.goo\.gl|Here below is our location/i.test(recentA);
     const isLocationRequest = LOCATION_KEYWORDS.test(messageText)
+      && !wantsOurNumber(messageText)
       && !/\b(got|have|received|saw|thanks for)\b.{0,15}\b(the )?(location|address|map|pin)\b/i.test(messageText)
       && (!pinSentRecently || /\bwhere\b/i.test(messageText));
     // Other parts of the message besides the location request ("where are you? and is there parking")
@@ -866,6 +873,55 @@ export async function POST(req: NextRequest) {
       await sendWhatsAppMessage(phone, reply);
       await appendHistory(phone, (conversation.messages ?? []) as ConversationMessage[], "[sent photos/files]", reply);
       return NextResponse.json({ status: "media_only" }, { status: 200 });
+    }
+
+    // The customer wants to call us. Share our number and location, then leave the
+    // booking/callback choice open without treating this as consent to a callback.
+    const contactHistory = (conversation.messages ?? []) as ConversationMessage[];
+    const lastContactReply = [...contactHistory].reverse().find(m => m.role === "assistant")?.content ?? "";
+    if (wantsOurNumber(messageText)) {
+      const alreadyBooked = !!(conversation.appointment_date && conversation.appointment_time)
+        && contactHistory.some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content));
+      const note = "CUSTOMER WILL CALL: Shared customer service number; no callback requested";
+      const oldNotes = String((conversation as any).car_conditions ?? "").split(" | ").filter(n => !n.startsWith("CUSTOMER WILL CALL:"));
+      const invalidName = /^call$/i.test(String(conversation.name ?? ""));
+      await updateConversation(phone, { step: alreadyBooked ? conversation.step : CLOSING_STEP,
+        ...(invalidName ? { name: null } : {}), car_conditions: [...oldNotes, note].filter(Boolean).join(" | "),
+        last_msg_id: message.id, last_message_at: new Date().toISOString() } as any);
+      if (invalidName) conversation.name = null;
+      const parts = [LOCATION_TEXT, ...(alreadyBooked ? [] : [CUSTOMER_CALL_CHOICE])];
+      for (const part of parts) await sendWhatsAppMessage(phone, part);
+      await appendHistory(phone, contactHistory, messageText, parts.join("\n[SPLIT]\n"));
+      if (!alreadyBooked) {
+        await pushLead(phone, "customer requested our number", { inspectionBooked: false, topNote: "CUSTOMER WILL CALL — no callback requested" });
+        await moveLeadToCallBack(phone);
+      }
+      return NextResponse.json({ status: "customer_will_call" }, { status: 200 });
+    }
+    if (lastContactReply.includes(CUSTOMER_CALL_CHOICE)) {
+      const wantsTeamCall = /\b(?:call me|call back|callback|team (?:to )?call|team (?:to )?contact|please call|you (?:can|should) call me|have (?:someone|the team) call)\b/i.test(messageText)
+        && !/\b(?:don'?t|do not|no|not)\s+(?:call|contact)\b/i.test(messageText);
+      const wantsVisit = /\b(?:continue (?:with )?(?:the )?booking|book (?:an? )?(?:inspection|appointment|slot)|i(?:'ll| will| can) come|i want (?:to )?(?:come|book)|appointment|inspection)\b/i.test(messageText)
+        && !/\b(?:don'?t|do not|no|not|can'?t|cannot)\b/i.test(messageText);
+      if (wantsTeamCall || wantsVisit || /^\s*(?:no(?:\s+thanks)?|neither|none|i'?ll call (?:you|later)|i will call (?:you|later))\s*[.!]?\s*$/i.test(messageText)) {
+        const oldNotes = String((conversation as any).car_conditions ?? "").split(" | ").filter(n => !n.startsWith("CUSTOMER WILL CALL:"));
+        const note = wantsTeamCall ? "CUSTOMER WILL CALL: Requested a team callback"
+          : wantsVisit ? "CUSTOMER WILL CALL: Continued booking" : "CUSTOMER WILL CALL: No callback requested";
+        const reply = wantsTeamCall ? `Thanks. Our team will call you ${teamWhen()}. Have a nice day!`
+          : wantsVisit ? "Sure. Which day and time would suit you for the free inspection?"
+          : "No problem. You can call us whenever you're ready. Have a nice day!";
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, { step: wantsVisit ? FINAL_STEP : CLOSING_STEP,
+          car_conditions: [...oldNotes, note].filter(Boolean).join(" | "),
+          last_msg_id: message.id, last_message_at: new Date().toISOString() } as any);
+        await appendHistory(phone, contactHistory, messageText, reply);
+        if (wantsTeamCall) {
+          await pushLead(phone, "customer requested callback", { inspectionBooked: false,
+            salesInquiry: contactHistory.some(m => m.role === "user" && PRICE_OFFER_PATTERN.test(m.content)) ? "Price Offer Inquiry" : undefined });
+          await moveLeadToCallBack(phone);
+        }
+        return NextResponse.json({ status: wantsTeamCall ? "requested_callback" : wantsVisit ? "continue_booking" : "customer_will_call_close" }, { status: 200 });
+      }
     }
 
     // A job applicant is not a car seller. Answer once instead of looping on make/model.
