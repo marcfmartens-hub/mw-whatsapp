@@ -2998,6 +2998,22 @@ export async function POST(req: NextRequest) {
     if (!appointmentConfirmedEarly && hasBooking && currentStep >= CLOSING_STEP) {
       replyParts = replyParts.map(p => p.replace(/[^.!?\n]*\b(what time (can|would|is best|works)|which (day|time) (would|works|do you)|when can you come)[^.!?\n]*\?/gi, "").trim()).filter(Boolean);
     }
+    // Sharing our number is not permission to call the customer. Keep the chat
+    // closed after extra details, while still answering a new question.
+    if (!appointmentConfirmedEarly && currentStep >= CLOSING_STEP
+        && String((conversation as any).car_conditions ?? "").includes("CUSTOMER WILL CALL:")
+        && !String((conversation as any).car_conditions ?? "").includes("CUSTOMER WILL CALL: Requested a team callback")) {
+      const askedQuestion = /\?|^\s*(what|when|where|how|do|does|are|is|can|could|which)\b/i.test(messageText);
+      if (!askedQuestion) {
+        replyParts = ["Thanks, I've noted that. You can call us on +971 58 582 5543 whenever you're ready."];
+      } else {
+        replyParts = replyParts.map(p => p
+          .replace(/[^.!?\n]*\b(?:our team|someone from our team)\s+(?:will|can|is going to)\s+(?:call|contact|be in touch)[^.!?\n]*[.!?]/gi, "")
+          .replace(/[^.!?\n]*\b(?:we(?:'ll| will))\s+(?:call|contact|be in touch)[^.!?\n]*[.!?]/gi, "")
+          .trim()).filter(Boolean);
+        if (!replyParts.length) replyParts = ["You can call us on +971 58 582 5543 whenever you're ready."];
+      }
+    }
     console.log(`[kaya] reply ready for ${phone} after ${Math.round((Date.now() - t0) / 1000)}s`);
     for (const part of replyParts) {
       await sendWhatsAppMessage(phone, part);
