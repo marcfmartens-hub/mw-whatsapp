@@ -1984,6 +1984,61 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Second "I'll let you know" / "it's difficult" → offer the team (Marc, 14 Oct) ──
+    // Kaya: "How about I forward your details to our team…?" → yes → double-check car + number → hand over.
+    {
+      const OFFER_FWD = "How about I forward your details to our team? They can get back to you and you can discuss the car with them directly.";
+      const CONFIRM_MARK = "Just to double-check";
+      const hist = (conversation.messages ?? []) as ConversationMessage[];
+      const lastA = [...hist].reverse().find(m => m.role === "assistant")?.content ?? "";
+      const YES = /^\s*(yes|yeah|yep|ya|yah|ok|okay|sure|please|pls|fine|go ahead|correct|right|alright|sounds good|good|perfect|👍|of course|why not)\b/i;
+      const NO = /^\s*(no|nope|nah|not now|no thanks|no need|don'?t)\b/i;
+      const DEFER_ANY = (t: string) => DEFER_PATTERN.test(t) || /\b(i'?ll|i will|will)\s+\w{2,4}\s+(you|u)\s+(know|update)\b|\b(let|tell)\s+(you|u)\s+(know|later)\b/i.test(t);
+      const fin = async (reply: string, upd: Record<string, unknown> = {}) => {
+        await sendWhatsAppMessage(phone, reply);
+        await updateConversation(phone, { ...upd, last_msg_id: message.id, last_message_at: new Date().toISOString() } as any).catch(() => {});
+        await appendHistory(phone, hist, messageText, reply);
+      };
+      const c = conversation as any;
+      const carLine = [[c.make, c.model, c.year].filter(Boolean).join(" "), c.mileage ? `${Number(String(c.mileage).replace(/\D/g, "")).toLocaleString("en-US")} km` : "", c.specs && c.specs !== "Unknown" ? c.specs : ""].filter(Boolean).join(", ");
+
+      if (lastA.includes(CONFIRM_MARK) && currentStep < CLOSING_STEP) {
+        // Answer to the double-check → hand over to the team
+        const notes: string[] = [String(c.car_conditions ?? "")].filter(Boolean);
+        const upd: Record<string, unknown> = { step: CLOSING_STEP };
+        const pm = messageText.match(/(?:\+|\b00)\d[\d\s-]{7,16}\d|(?:\+?971|\b0)\s*5\d[\s-]?\d{3}[\s-]?\d{4}\b|\b5\d{8}\b/);
+        if (pm) { let alt = pm[0].replace(/\D/g, "").replace(/^00/, ""); if (/^05/.test(alt)) alt = "971" + alt.slice(1); else if (/^5\d{8}$/.test(alt)) alt = "971" + alt; if (alt !== phone) upd.alternative_phone = alt; }
+        if (!YES.test(messageText) && !pm) notes.push(`Customer correction: ${messageText.slice(0, 120)}`);
+        notes.push("Forwarded to the team after 'I'll let you know'");
+        if (!notes.join(" | ").includes("Asked to speak to the team")) notes.push("Asked to speak to the team");
+        upd.car_conditions = notes.join(" | ");
+        await fin(`Thanks! I've passed everything on to our team. They'll be in touch ${teamWhen()}. Have a nice day!`, upd);
+        await pushLead(phone, "forwarded to team", { salesInquiry: "Other", inspectionBooked: false, milestone: "FOLLOW UP" });
+        return NextResponse.json({ status: "forwarded_to_team" }, { status: 200 });
+      }
+
+      if (lastA.includes(OFFER_FWD) && currentStep < CLOSING_STEP) {
+        if (YES.test(messageText)) {
+          const numQ = isUAE ? "and can our team reach you on this number?" : "and which number can our team reach you on?";
+          await fin(`Great! ${CONFIRM_MARK}: ${carLine || "your car"}. Is that correct, ${numQ}`);
+          return NextResponse.json({ status: "forward_confirm" }, { status: 200 });
+        }
+        if (NO.test(messageText)) {
+          await fin("No problem, just let me know the day and time that suits you.");
+          return NextResponse.json({ status: "forward_declined" }, { status: 200 });
+        }
+      }
+
+      const offeredBefore = hist.some(m => m.role === "assistant" && m.content.includes(OFFER_FWD));
+      const priorDefers = hist.filter(m => m.role === "user" && DEFER_ANY(m.content)).length;
+      const DIFFICULT = /\b(difficult|hard|not possible|impossible|can'?t (make it|come|manage)|cannot (come|make it)|no time|too busy|very busy|not easy)\b/i;
+      if (!offeredBefore && !hasBooking && currentStep >= 5 && currentStep < CLOSING_STEP
+          && ((DEFER_ANY(messageText) && priorDefers >= 1) || DIFFICULT.test(messageText))) {
+        await fin(OFFER_FWD);
+        return NextResponse.json({ status: "forward_offer" }, { status: 200 });
+      }
+    }
+
     // ── Customer asks for a real person → push now, then collect details ─────
     // Mode is stateless: active once Kaya has sent the handoff line (HUMAN_LINE) in this chat.
     {
@@ -2590,6 +2645,11 @@ export async function POST(req: NextRequest) {
       }
     }
     console.log(`[kaya] step=${currentStep} action=${action?.type ?? "-"} jump=${jumpToBooking} appt=${apptDate}|${apptTime} confirmed=${appointmentConfirmedEarly}`);
+    // Never end on a dead end ("I understand.") while we're still booking — keep the conversation going
+    if (currentStep >= 5 && currentStep < CLOSING_STEP && !hasBooking && !/\?/.test(reply)
+        && !/\b(team will|be in touch|have a nice|see you|take care|passed (it|everything)|contact you|call you|you'?re booked)\b/i.test(reply)) {
+      reply = `${reply.trim()}\n[SPLIT]\n${pendingBookingQ(lastAssistantMsg) ?? "Which day would be good for you?"}`;
+    }
     // "Hello" in the middle of the chat → just repeat the open question (e.g. the "Shall I book you…" offer)
     if (currentStep >= 5 && currentStep < CLOSING_STEP && /^\s*(hello|hi|hey|hii+|helo|hlo|salam|assalam\w*|hello\?+|\?+)\W*$/i.test(messageText)) {
       const pend = pendingBookingQ(lastAssistantMsg);
