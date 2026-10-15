@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "id": "2b25b3dd-a69d-4b06-a545-f108848f1852",
+      "created_at": "2026-10-15T14:03:13.288Z",
+      "base_commit": "aea45718aff6925deb566a03f56a597e308c6dc8",
+      "files": [
+        {
+          "path": "lib/kaya-improve/learning.json",
+          "status": "modified",
+          "before": "{\"version\":1,\"aliases\":[]}\n",
+          "after": "{\n  \"version\": 1,\n  \"aliases\": [],\n  \"skills\": [\n    \"avoid_repetition\"\n  ]\n}\n"
+        }
+      ]
+    },
+    {
       "id": "2026-10-15-review-json-fix",
       "created_at": "2026-10-15T12:43:01.587Z",
       "base_commit": "04b96901c0a82c8efb2cfa8611b6220cd339032e",
