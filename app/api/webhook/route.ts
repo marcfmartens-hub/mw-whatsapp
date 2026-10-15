@@ -1,3 +1,4 @@
+import { learnedMessage } from "@/lib/kaya-improve/learning";
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
 import { pickDefaultTime } from "@/lib/slots";
@@ -68,6 +69,7 @@ const CUSTOMER_CALL_CHOICE = "Would you like to continue with the booking, or wo
 
 // The customer asking for OUR number is not a request for US to call them.
 function wantsOurNumber(text: string): boolean {
+  text = learnedMessage(text);
   return /\b(?:send|share|give|text)\s+me\s+(?:(?:your|the|a)\s+)?(?:phone|contact|mobile|customer service\s+)?number\b|\b(?:what(?:'s| is)|which|do you have)\s+(?:your|the|a)\s+(?:phone|contact|mobile|customer service\s+)?number\b|\b(?:how|where)\s+(?:can|do)\s+i\s+(?:call|phone|reach|contact)\s+you\b|\b(?:i\s*(?:will|can|want to|would like to|am going to)|i'?ll|i'?m|im)\s+(?:call|phone|ring|contact)\s+you\b|\b(?:number|phone number)\s+(?:to|i can)\s+call\b/i.test(text);
 }
 

@@ -1,0 +1,29 @@
+const assert=require('node:assert/strict'),path=require('node:path'),crypto=require('node:crypto');
+const dir=process.argv[2],updates=[],requests=[];let options={};
+const state={config:{enabled:true,autoApprove:true}};
+const chain={update(data){this.data=data;return this},eq(){updates.push(this.data);return Promise.resolve({error:null})}};
+require.cache[require.resolve(path.join(dir,'store.js'))]={exports:{settings:async()=>state,improveDb:()=>({from:()=>Object.create(chain)})}};
+const {Github}=require(path.join(dir,'github.js'));
+Github.prototype.checks=async()=>options.checks??{ci:true,preview:true,failed:false};
+Github.prototype.main=async()=>({sha:options.main??'base'});
+Github.prototype.file=async()=>options.content??'candidate';
+Github.prototype.productionReady=async()=>options.production??false;
+Github.prototype.request=async(p,m,b)=>{requests.push({p,m,b});if(p.includes('/pulls/1/files'))return options.files??[{filename:'lib/kaya-improve/learning.json'},{filename:'lib/kaya-improve/history.json'}];if(p==='/pulls/1')return{head:{sha:options.head??'head'}};if(options.rejectWrite&&m==='PATCH')throw Error('Concurrent main update rejected');return{};};
+const {progressRelease}=require(path.join(dir,'publisher.js'));
+const release={id:'r',status:'ci_pending',head_sha:'head',base_sha:'base',pr_number:1,backup:{before:'{}'},validation:{passed:true,candidate_hash:crypto.createHash('sha256').update('candidate').digest('hex'),backup_index_hash:crypto.createHash('sha256').update('candidate').digest('hex')}};
+async function run(o={},r=release){options=o;updates.length=0;requests.length=0;try{await progressRelease(r);return null}catch(e){return e}}
+(async()=>{
+ await run({checks:{ci:false,preview:true,failed:false}});assert.equal(requests.length,0);
+ await run({checks:{ci:true,preview:false,failed:false}});assert.equal(requests.length,0);
+ await run({checks:{ci:false,preview:false,failed:true}});assert.equal(updates[0].status,'tests_failed');
+ await run({main:'new-main'});assert.equal(updates[0].status,'stale');assert.equal(requests.some(r=>r.m==='PATCH'),false);
+ assert.ok(await run({head:'tampered'}));assert.equal(updates.at(-1).status,'blocked');
+ assert.ok(await run({content:'tampered'}));assert.equal(requests.some(r=>r.m==='PATCH'),false);
+ assert.ok(await run({files:[{filename:'lib/claude.ts'}]}));assert.equal(requests.some(r=>r.m==='PATCH'),false);
+ assert.ok(await run({rejectWrite:true}));assert.equal(updates.at(-1).status,'blocked');
+ await run();const write=requests.find(r=>r.m==='PATCH');assert.equal(write.p,'/git/refs/heads/main');assert.deepEqual(write.b,{sha:'head',force:false});assert.equal(updates.at(-1).status,'deploying');
+ await run({production:false},{...release,status:'deploying',merge_sha:'head'});assert.equal(updates.length,0);
+ await run({production:true},{...release,status:'deploying',merge_sha:'head'});assert.equal(updates.some(u=>u.status==='published'),true);
+ state.config.autoApprove=false;await run();assert.equal(requests.length,0);
+ console.log('Publisher blocks incomplete/failed tests, stale/tampered candidates, locked files and concurrent main writes; waits for production deployment before marking published.');
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -21,7 +21,7 @@ function getSupabase() {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   // no-store: Next.js was caching these reads, so new silent chats were never seen
-  return createClient(url, key, { global: { fetch: (i: RequestInfo | URL, init?: RequestInit) => fetch(i, { ...init, cache: "no-store" }) } });
+  return createClient(url, key, { global: { headers: process.env.KAYA_IMPROVE_SECRET ? { "x-kaya-improve-secret": process.env.KAYA_IMPROVE_SECRET } : {}, fetch: (i: RequestInfo | URL, init?: RequestInit) => fetch(i, { ...init, cache: "no-store" }) } });
 }
 
 export async function GET(req: NextRequest) {

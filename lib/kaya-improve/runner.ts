@@ -19,10 +19,10 @@ export async function runCheck(kind:RunId, source:"manual"|"bigin"="manual", pho
       const {data,error}=await db.from("mw_improve_reviews").select("findings");if(error) throw error;
       const groups:Record<string,number>={};
       for(const row of data??[]) for(const f of row.findings??[]) groups[f.code]=(groups[f.code]??0)+1;
-      summary={tests,passed:tests.every(t=>t.passed),recurring_issues:groups,publishing:"Unavailable: locked policy approval and full Kaya response regression gate are not yet connected"};
+      summary={tests,passed:tests.every(t=>t.passed),recurring_issues:groups,publishing:"See the separate auto-approval queue: only exact contact-language aliases are eligible."};
     } else if(kind==="review") {
       const {data,error}=await db.from("mw_improve_reviews").select("phone,outcome,findings").order("reviewed_at",{ascending:false}).limit(200);if(error) throw error;
-      summary={reviewed:(data??[]).filter(r=>r.findings.length).length,proposals:(data??[]).filter(r=>r.findings.length).map(r=>({phone:r.phone,corrections:r.findings.map((f:{suggestion:string})=>f.suggestion)})),method:"Rule-based suggestions; no AI rewrite or publishing"};
+      summary={reviewed:(data??[]).filter(r=>r.findings.length).length,proposals:(data??[]).filter(r=>r.findings.length).map(r=>({phone:r.phone,corrections:r.findings.map((f:{suggestion:string})=>f.suggestion)})),method:"Rule-based suggestions. Separate auto-approval reviews may use AI for supported language aliases."};
     } else {
       let query=db.from("mw_whatsapp").select("phone,name,step,appointment_date,appointment_time,bigin_pushed_at,car_conditions,messages,last_message_at").order("last_message_at",{ascending:false}).limit(200);
       if(phone) query=query.eq("phone",phone);

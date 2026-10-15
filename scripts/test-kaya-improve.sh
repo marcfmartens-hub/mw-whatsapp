@@ -2,9 +2,11 @@
 set -eu
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
-./node_modules/.bin/tsc lib/kaya-improve/config.ts lib/kaya-improve/detect.ts lib/kaya-improve/zip.ts lib/kaya-improve/events.ts --outDir "$out" --module commonjs --target es2020 --esModuleInterop --skipLibCheck
+./node_modules/.bin/tsc lib/kaya-improve/config.ts lib/kaya-improve/detect.ts lib/kaya-improve/zip.ts lib/kaya-improve/events.ts lib/kaya-improve/approve.ts --outDir "$out" --module commonjs --target es2020 --esModuleInterop --resolveJsonModule --skipLibCheck
 node scripts/kaya-improve-tests.cjs "$out"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-event-tests.cjs "$out"
+NODE_PATH="$PWD/node_modules" node scripts/kaya-auto-tests.cjs "$out"
+NODE_PATH="$PWD/node_modules" node scripts/kaya-publisher-tests.cjs "$out"
 python3 - "$out/test.zip" <<'PY'
 import zipfile,sys,json
 with zipfile.ZipFile(sys.argv[1]) as z:
