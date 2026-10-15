@@ -1,4 +1,4 @@
-export interface Chat { phone: string; name?: string | null; step?: number; appointment_date?: string | null; appointment_time?: string | null; bigin_pushed_at?: string | null; car_conditions?: string | null; messages?: {role: string; content: string}[] | null }
+export interface Chat { phone: string; last_message_at?:string|null; name?: string | null; step?: number; appointment_date?: string | null; appointment_time?: string | null; bigin_pushed_at?: string | null; car_conditions?: string | null; messages?: {role: string; content: string}[] | null }
 export interface Finding { code: string; severity: "warning" | "critical"; message: string; evidence: string; suggestion: string }
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 export function detect(chat: Chat) {

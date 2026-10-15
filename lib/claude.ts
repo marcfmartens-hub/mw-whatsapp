@@ -1,3 +1,6 @@
+import learnedCatalog from "./kaya-improve/learning.json";
+import {Learning,validateLearning,learnedMessage} from "./kaya-improve/learning";
+import {communicationPrompt} from "./kaya-improve/skills";
 import Anthropic from "@anthropic-ai/sdk";
 import { MAKES_LIST, CAR_MODELS } from "./carData";
 
@@ -599,33 +602,38 @@ export async function getKayaReply(
   step: number,
   history: ConversationMessage[],
   customerMessage: string,
-  known: KnownFields = {}
+  known: KnownFields = {},
+  learning: Learning = validateLearning(learnedCatalog),
+  strictReplay = false
 ): Promise<string> {
   const messages: ConversationMessage[] = [
     ...history,
-    { role: "user", content: customerMessage.trim() || "(no message)" },
+    { role: "user", content: learnedMessage(customerMessage.trim(),learning) || "(no message)" },
   ];
 
   try {
-    const response = await anthropic.messages.create({
+    const client=strictReplay?new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY,maxRetries:0,timeout:25000}):anthropic;
+    const response = await client.messages.create({
       model: KAYA_MODEL,
       max_tokens: KAYA_MAX_TOKENS,
-      system: splitSystem(buildSystemPrompt(step, known)),
+      system: splitSystem(buildSystemPrompt(step, known) + communicationPrompt(learning.skills)),
       messages,
     });
 
-    lastKayaUsage = response.usage;
+    if(!strictReplay)lastKayaUsage = response.usage;
     const u = response.usage as any;
     console.log(`[Kaya] tokens in=${u.input_tokens} cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} out=${u.output_tokens}`);
     const textBlock = response.content.find((block) => block.type === "text");
     if (textBlock?.type === "text") return sanitizeReply(textBlock.text.trim());
 
+    if(strictReplay)throw Error("Replay received no text response");
     // Extended thinking models (Sonnet 5) can emit only thinking blocks when max_tokens is tight.
     // If we land here, log what arrived so we can debug in Vercel logs.
     console.error("[Kaya] No text block. Content types:", response.content.map((b) => b.type).join(", "));
     return "Sorry, could you say that again?";
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Unknown error";
+    if(strictReplay)throw error;
     console.error("[Kaya] Claude API error:", msg);
     return "Sorry, I'm having a little trouble right now — could you try again in a moment? 🙏";
   }

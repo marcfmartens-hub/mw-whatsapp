@@ -3,7 +3,7 @@ import {NextRequest,NextResponse} from "next/server";
 import {waitUntil} from "@vercel/functions";
 import {publishReady,resumeForCommit} from "@/lib/kaya-improve/publisher";
 export const dynamic="force-dynamic";
-export const maxDuration=120;
+export const maxDuration=300;
 export async function POST(req:NextRequest){
  const secret=process.env.KAYA_GITHUB_WEBHOOK_SECRET;if(!secret)return NextResponse.json({error:"Not configured"},{status:503});
  const raw=await req.text();if(Buffer.byteLength(raw)>1024*1024)return NextResponse.json({error:"Payload too large"},{status:413});

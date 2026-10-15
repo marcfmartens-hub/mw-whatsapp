@@ -11,7 +11,7 @@ import { AUTO_POLICY } from "@/lib/kaya-improve/auto-policy";
 import { connectPublisher, connectionStatus, publishReady, rollbackRelease, resumeForCommit, hash } from "@/lib/kaya-improve/publisher";
 import { backupZip } from "@/lib/kaya-improve/zip";
 export const dynamic="force-dynamic";
-export const maxDuration=180;
+export const maxDuration=300;
 async function guard(req:NextRequest,write=false) {
  const user=await sessionUser(req);
  if(!user) return {error:NextResponse.json({error:"Unauthorized"},{status:401})};
@@ -54,7 +54,7 @@ export async function GET(req:NextRequest) {
   return NextResponse.json({state,proposals:proposals.data,autoReleases:autoReleases.data,autoPolicy:AUTO_POLICY,runs:runs.data,lastRuns,versions:versions.data,reviews:reviews.data,
    next:Object.fromEntries(RUNS.map(r=>[r.id,nextRun(state.config,r.id,lastRuns[r.id]?.started_at??null)])),
    releases:history.releases.map(({files,...r})=>({...r,files:files.map(f=>({path:f.path,status:f.status}))})),
-   publishing:{...(await connectionStatus()),enabled:state.config.enabled&&state.config.autoApprove,reason:"Only validated contact-language aliases can publish. Critical fixes proceed immediately after checks; minor fixes batch at most once per 24 hours. GitHub connection and signed completion webhook are required."}
+   publishing:{...(await connectionStatus()),enabled:state.config.enabled&&state.config.autoApprove,reason:"Only validated language aliases and approved communication skills can publish after before/after replay. Critical fixes proceed immediately after checks; minor fixes batch at most once per 24 hours. GitHub connection and signed completion webhook are required."}
   },{headers:{"Cache-Control":"no-store"}});
  }catch(e){console.error("[kaya-improve] monitor read failed",e);return NextResponse.json({error:e instanceof Error?e.message:"Unable to load monitor"},{status:503});}
 }
@@ -70,7 +70,7 @@ export async function POST(req:NextRequest) {
    const review=await db.from("mw_improve_reviews").select("findings,reviewed_at").eq("phone",body.phone).single();if(review.error)throw review.error;
    const finding=review.data.findings[body.index];
    if(review.data.reviewed_at!==body.reviewed_at||!finding||finding.code!==body.code)return NextResponse.json({error:"Finding changed; refresh the report"},{status:409});
-   const row=await db.from("mw_whatsapp").select("phone,name,step,appointment_date,appointment_time,bigin_pushed_at,car_conditions,messages,last_message_at").eq("phone",body.phone).single();if(row.error)throw row.error;
+   const row=await db.from("mw_whatsapp").select("*").eq("phone",body.phone).single();if(row.error)throw row.error;
    const chat=row.data as Chat;
    if(!detect(chat).findings.some(f=>f.code===finding.code&&f.evidence===finding.evidence))return NextResponse.json({error:"Conversation changed; analyze it again first"},{status:409});
    waitUntil(autoReview(chat,finding.code).catch(e=>console.error("[kaya-improve] finding review failed",e)));

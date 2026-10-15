@@ -1,7 +1,7 @@
 export const RUNS = [
-  { id: "confirmation", name: "Confirmation Audit", description: "Audit booking and callback evidence. Existing booking rules always apply.", defaultMode: "event", defaultMinutes: 0, recommended: "After Bigin push (recommended)" },
-  { id: "reply", name: "Reply Check", description: "Detect repeated replies, confusing names and unsupported callback promises.", defaultMode: "event", defaultMinutes: 0, recommended: "After Bigin push (recommended)" },
-  { id: "outcome", name: "Conversation Outcome", description: "Classify the conversation after its successful Bigin push. Silence alone is not a failure.", defaultMode: "event", defaultMinutes: 0, recommended: "After Bigin push (recommended)" },
+  { id: "confirmation", name: "Confirmation Audit", description: "Audit booking and callback evidence. Existing booking rules always apply.", defaultMode: "event", defaultMinutes: 0, recommended: "After each saved reply (recommended)" },
+  { id: "reply", name: "Reply Check", description: "Check each saved reply for repetition, context and communication problems.", defaultMode: "event", defaultMinutes: 0, recommended: "After each saved reply (recommended)" },
+  { id: "outcome", name: "Conversation Outcome", description: "Classify the conversation after a saved reply, including chats never pushed to Bigin. Silence alone is not a failure.", defaultMode: "event", defaultMinutes: 0, recommended: "After each saved reply (recommended)" },
   { id: "review", name: "Detailed Review", description: "Review flagged chats and collect suggested corrections and proposals.", defaultMode: "interval", defaultMinutes: 60, recommended: "Next Bigin push, at most hourly (recommended)" },
   { id: "regression", name: "Improvement & Regression", description: "Group recurring issues and test the detector against successful and difficult fixtures. Auto approval uses its own validation and publishing gate.", defaultMode: "interval", defaultMinutes: 1440, recommended: "Next Bigin push, at most daily (recommended)" },
 ] as const;
