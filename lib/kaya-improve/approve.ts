@@ -6,11 +6,12 @@ import { validateLearning, validateCandidate } from "./learning";
 import { improveDb, settings } from "./store";
 import { hash, publishReady, successfulMessages } from "./publisher";
 import { AUTO_POLICY } from "./auto-policy";
-export async function autoReview(chat:Chat){
+export async function autoReview(chat:Chat, findingCode?:string){
  const state=await settings();if(!state.config.enabled||!state.config.autoApprove)return;
- const db=improveDb(),evidence=safeEvidence(chat),fingerprint=hash(JSON.stringify(evidence)),runId=`auto-review:${chat.phone}:${fingerprint}`;
+ const db=improveDb(),evidence=safeEvidence(chat),fingerprint=hash(JSON.stringify(evidence)),runId=`auto-review:${chat.phone}:${fingerprint}${findingCode?":"+findingCode:""}`;
  // Correct recorded bookings get lightweight checks; deeper review targets problems/non-bookings.
  const detected=detect(chat),needsReview=detected.findings.length>0||(!chat.appointment_date&&detected.outcome!=="not_ready");
+ if(findingCode&&!detected.findings.some(f=>f.code===findingCode))throw Error("Finding no longer applies; analyze this chat again");
  if(!needsReview){await publishReady();return;}
  const claimed=await db.from("mw_improve_runs").insert({id:runId,kind:"auto_approval",status:"running"});
  if(claimed.error?.code==="23505"){
@@ -23,7 +24,7 @@ export async function autoReview(chat:Chat){
  const holder=randomUUID();const lease=await db.rpc("kaya_improve_lease",{lease_name:`review:${chat.phone}`,holder,release_lease:false});if(lease.error){await db.from("mw_improve_runs").update({status:"failed",finished_at:new Date().toISOString(),error:lease.error.message}).eq("id",runId);throw lease.error;}
  if(!lease.data){await db.from("mw_improve_runs").update({status:"skipped",finished_at:new Date().toISOString(),summary:{reason:"A review for this conversation is already running"}}).eq("id",runId);return;}
  try{
-  const suggestions=await propose(chat),successful=await successfulMessages(),before=validateLearning(catalog);let approved=0,pending=0,rejected=0;
+  const suggestions=await propose(chat,findingCode),successful=await successfulMessages(),before=validateLearning(catalog);let approved=0,pending=0,rejected=0;
   for(const s of suggestions){
    const control=await settings();if(!control.config.enabled||!control.config.autoApprove){await db.from("mw_improve_runs").update({status:"skipped",finished_at:new Date().toISOString(),summary:{reason:"Automation switched off"}}).eq("id",runId);return;}
    const id=createHash("sha256").update(s.manual?`${fingerprint}:${s.reason}`:`${s.intent}:${s.phrase}`).digest("hex");
@@ -41,10 +42,10 @@ export async function autoReview(chat:Chat){
    const r=await db.from("mw_improve_proposals").insert({id,status,severity,...alias,reason:s.reason,evidence:{conversation:evidence,policy:AUTO_POLICY.version},validation});if(r.error&&r.error.code!=="23505")throw r.error;
   }
   // Deterministic serious findings outside the allowed patch scope always remain visible.
-  for(const f of detected.findings.filter(f=>f.severity==="critical")){
-   const id=hash(`${fingerprint}:${f.code}`);const r=await db.from("mw_improve_proposals").upsert({id,status:"needs_admin",severity:"critical",reason:f.message,evidence:{code:f.code,conversation:evidence,suggestion:f.suggestion,policy:AUTO_POLICY.version}},{onConflict:"id",ignoreDuplicates:true});if(r.error)throw r.error;
+  for(const f of detected.findings.filter(f=>findingCode?f.code===findingCode&&approved===0&&pending===0:f.severity==="critical")){
+   pending++;const id=hash(`${fingerprint}:${f.code}`);const r=await db.from("mw_improve_proposals").upsert({id,status:"needs_admin",severity:f.severity==="critical"?"critical":"minor",reason:f.message,evidence:{code:f.code,conversation:evidence,suggestion:f.suggestion,policy:AUTO_POLICY.version}},{onConflict:"id",ignoreDuplicates:true});if(r.error)throw r.error;
   }
-  const done=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString(),summary:{approved,needs_admin:pending,rejected,policy:AUTO_POLICY.version}}).eq("id",runId);if(done.error)throw done.error;
+  const done=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString(),summary:{approved,needs_admin:pending,rejected,finding_code:findingCode??null,phone:chat.phone,policy:AUTO_POLICY.version}}).eq("id",runId);if(done.error)throw done.error;
  }catch(e){await db.from("mw_improve_runs").update({status:"failed",finished_at:new Date().toISOString(),error:e instanceof Error?e.message:String(e)}).eq("id",runId);throw e;
  }finally{await db.rpc("kaya_improve_lease",{lease_name:`review:${chat.phone}`,holder,release_lease:true});}
  await publishReady();

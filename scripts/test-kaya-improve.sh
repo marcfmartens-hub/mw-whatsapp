@@ -9,6 +9,7 @@ NODE_PATH="$PWD/node_modules" node scripts/kaya-recent-tests.cjs "$out"
 node scripts/kaya-improve-tests.cjs "$out"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-event-tests.cjs "$out"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-auto-tests.cjs "$out"
+NODE_PATH="$PWD/node_modules" node scripts/kaya-finding-tests.cjs "$out"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-publisher-tests.cjs "$out"
 python3 - "$out/test.zip" <<'PY'
 import zipfile,sys,json

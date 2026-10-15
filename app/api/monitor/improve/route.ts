@@ -1,3 +1,6 @@
+import { waitUntil } from "@vercel/functions";
+import { autoReview } from "@/lib/kaya-improve/approve";
+import { detect, Chat } from "@/lib/kaya-improve/detect";
 import { NextRequest, NextResponse } from "next/server";
 import { sessionUser } from "@/lib/monitorRole";
 import { improveDb, settings } from "@/lib/kaya-improve/store";
@@ -59,6 +62,20 @@ export async function POST(req:NextRequest) {
  const g=await guard(req,true);if(g.error)return g.error;
  try {
   const body=await req.json();
+  if(body.action==="review_finding") {
+   if(process.env.VERCEL_ENV&&process.env.VERCEL_ENV!=="production")return NextResponse.json({error:"Improvement review is production only"},{status:409});
+   if(!/^\d{8,16}$/.test(body.phone??"")||!Number.isInteger(body.index)||body.index<0||body.index>100)return NextResponse.json({error:"Invalid finding"},{status:400});
+   const state=await settings();if(!state.config.enabled||!state.config.autoApprove)return NextResponse.json({error:"Enable Kaya Improve and automatic approval first"},{status:409});
+   const db=improveDb();
+   const review=await db.from("mw_improve_reviews").select("findings,reviewed_at").eq("phone",body.phone).single();if(review.error)throw review.error;
+   const finding=review.data.findings[body.index];
+   if(review.data.reviewed_at!==body.reviewed_at||!finding||finding.code!==body.code)return NextResponse.json({error:"Finding changed; refresh the report"},{status:409});
+   const row=await db.from("mw_whatsapp").select("phone,name,step,appointment_date,appointment_time,bigin_pushed_at,car_conditions,messages,last_message_at").eq("phone",body.phone).single();if(row.error)throw row.error;
+   const chat=row.data as Chat;
+   if(!detect(chat).findings.some(f=>f.code===finding.code&&f.evidence===finding.evidence))return NextResponse.json({error:"Conversation changed; analyze it again first"},{status:409});
+   waitUntil(autoReview(chat,finding.code).catch(e=>console.error("[kaya-improve] finding review failed",e)));
+   return NextResponse.json({ok:true,message:"Review requested. Follow its progress in Run history and Improvement proposals. Passing supported fixes follow the existing release protocol; unsupported fixes require Super Admin review."},{status:202});
+  }
   if(body.action==="analyze_recent")return NextResponse.json({ok:true,result:await analyzeRecentChats(body.count)});
   if(body.action==="connect_publishing")return NextResponse.json(await connectPublisher());
   if(body.action==="refresh_releases"){
