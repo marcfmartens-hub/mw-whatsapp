@@ -10,8 +10,10 @@ export function safeEvidence(chat:Chat){
 }
 export async function jsonReview(system:string,evidence:unknown) {
  const client=new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY,maxRetries:0,timeout:25000});
- const r=await client.messages.create({model:process.env.KAYA_REVIEW_MODEL??"claude-haiku-5-5",max_tokens:1500,system,messages:[{role:"user",content:JSON.stringify(evidence)}]});
+ const r=await client.messages.create({model:process.env.KAYA_REVIEW_MODEL??"claude-haiku-5-5",max_tokens:4096,thinking:{type:"disabled"},system,messages:[{role:"user",content:JSON.stringify(evidence)}]});
  const text=r.content.filter(b=>b.type==="text").map(b=>b.type==="text"?b.text:"").join("").replace(/^```(?:json)?\s*|\s*```$/g,"").trim();
+ if(!text)throw Error("AI review returned no JSON; no update approved");
+ if(r.stop_reason==="max_tokens")throw Error("AI review output was truncated; no update approved");
  return JSON.parse(text);
 }
 const knownContext=(chat:Chat)=>Object.fromEntries(["step","make","model","year","mileage","specs","loan","appointment_date","appointment_time"].map(k=>[k,(chat as unknown as Record<string,unknown>)[k]??null]));
