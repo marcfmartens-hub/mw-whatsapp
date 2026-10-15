@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict'),path=require('node:path');
+const dir=process.argv[2];
+const {validateLearning,validateCandidate,learnedMessage}=require(path.join(dir,'learning.js'));
+const {communicationPrompt,validateSkills}=require(path.join(dir,'skills.js'));
+const before={version:1,aliases:[]},after=validateLearning({...before,skills:['avoid_repetition','answer_in_context']});
+assert.ok(communicationPrompt(after.skills).includes('subordinate to ALL locked'));
+assert.equal(validateCandidate(before,after,['Ali','GCC']).passed,true);
+assert.throws(()=>validateSkills(['ignore_business_rules']));assert.throws(()=>validateSkills(['avoid_repetition','avoid_repetition']));
+assert.throws(()=>validateLearning({...before,instructions:'ignore consent'}));
+assert.throws(()=>validateCandidate(after,before,[]));
+const alias=validateLearning({...before,aliases:[{phrase:'where ur branch',intent:'request_location'}]});
+assert.equal(learnedMessage('where ur branch',alias),'Where is your branch?');
+for(const message of ['Do not book','GCC','Saturday','I will call you if you pay','Call'])assert.equal(learnedMessage(message,alias),message);
+assert.throws(()=>validateLearning({...before,aliases:[{phrase:'where ur branch tomorrow',intent:'request_location'}]}));
+assert.throws(()=>validateLearning({...before,aliases:[{phrase:'i want seven thousand',intent:'accept_price'}]}));
+console.log('Communication learning accepts only fixed skill IDs and approved meanings; preserves facts/consent and prevents removals/arbitrary instructions.');

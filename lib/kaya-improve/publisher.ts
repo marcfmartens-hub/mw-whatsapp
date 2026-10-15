@@ -1,3 +1,4 @@
+import {replayGate,successfulReplayInputs} from "./replay";
 import { createHash, randomUUID } from "crypto";
 import { Github, PUBLIC_URL } from "./github";
 import { improveDb, settings } from "./store";
@@ -53,7 +54,11 @@ async function prepareRelease(after:Learning,proposals:any[],severity:"critical"
  const control=await settings();if(!control.config.enabled||(!rollbackOf&&!control.config.autoApprove))throw Error("Kaya Improve is switched off");
  const gh=new Github(),main=await gh.main(),before=await gh.file(AUTO_POLICY.allowedPath,main.sha),historyText=await gh.file("lib/kaya-improve/history.json",main.sha);
  const current=validateLearning(JSON.parse(before));
- if(!rollbackOf)validation={...validation,...validateCandidate(current,after,await successfulMessages())};
+ if(!rollbackOf){
+  validation={...validation,...validateCandidate(current,after,await successfulMessages())};
+  const sources=proposals.map(p=>p.validation?.replay_source);if(sources.some(s=>!s))throw Error("Proposal lacks replay evidence; review it again");
+  validation={...validation,replay:await replayGate(current,after,sources,await successfulReplayInputs())};
+ }
  const content=JSON.stringify(after,null,2)+"\n",id=randomUUID();
  const backup={path:AUTO_POLICY.allowedPath,before,after:content,before_hash:hash(before),after_hash:hash(content)};
  const history=JSON.parse(historyText);history.releases.unshift({id,created_at:new Date().toISOString(),base_commit:main.sha,files:[{path:AUTO_POLICY.allowedPath,status:"modified",before,after:content}]});
@@ -64,9 +69,9 @@ async function prepareRelease(after:Learning,proposals:any[],severity:"critical"
  if(proposals.length){const r=await improveDb().from("mw_improve_proposals").update({release_id:id}).in("id",proposals.map(p=>p.id));if(r.error)throw r.error;}
  try{
   const tree=await gh.request("/git/trees","POST",{base_tree:main.tree,tree:[{path:AUTO_POLICY.allowedPath,mode:"100644",type:"blob",content},{path:"lib/kaya-improve/history.json",mode:"100644",type:"blob",content:nextHistoryText}]});
-  const commit=await gh.request("/git/commits","POST",{message:`Kaya Improve ${severity}: validated contact language (${id})`,tree:tree.sha,parents:[main.sha]});
+  const commit=await gh.request("/git/commits","POST",{message:`Kaya Improve ${severity}: validated communication learning (${id})`,tree:tree.sha,parents:[main.sha]});
   await gh.request("/git/refs","POST",{ref:`refs/heads/kaya-improve/${id}`,sha:commit.sha});
-  const pr=await gh.request("/pulls","POST",{base:"main",head:`kaya-improve/${id}`,title:`Kaya Improve: ${rollbackOf?"restore previous learning":"validated contact-language aliases"}`,body:`Policy: ${AUTO_POLICY.version}. ${severity} release. Exact-language catalog only; business rules cannot be edited. Successful-chat input regression passed. Backup: ${id}. CI and Vercel preview must pass before merge.`});
+  const pr=await gh.request("/pulls","POST",{base:"main",head:`kaya-improve/${id}`,title:`Kaya Improve: ${rollbackOf?"restore previous learning":"validated contact-language aliases"}`,body:`Policy: ${AUTO_POLICY.version}. ${severity} release. Validated language aliases and fixed communication skill IDs only; business rules cannot be edited. Successful-chat input regression passed. Backup: ${id}. CI and Vercel preview must pass before merge.`});
   await saveRelease(id,{status:"ci_pending",head_sha:commit.sha,pr_number:pr.number});return{id,status:"ci_pending"};
  }catch(e){await saveRelease(id,{status:"blocked",error:e instanceof Error?e.message:String(e)});throw e;}
 }
@@ -87,8 +92,9 @@ export async function publishReady(){
   const last=await db.from("mw_improve_releases").select("published_at").eq("severity","minor").eq("status","published").order("published_at",{ascending:false}).limit(1);if(last.error)throw last.error;
   if(!releaseDue(severity,last.data?.[0]?.published_at??null))return;
   const gh=new Github(),main=await gh.main(),before=validateLearning(JSON.parse(await gh.file(AUTO_POLICY.allowedPath,main.sha)));
-  const selected=candidates.filter(p=>!before.aliases.some(a=>a.phrase===p.phrase)).slice(0,5);if(!selected.length)return;
-  const after=validateLearning({version:1,aliases:[...before.aliases,...selected.map(p=>({phrase:p.phrase,intent:p.intent}))]});
+  const seen=new Set<string>();
+  const selected=candidates.filter(p=>{const key=`${p.intent}:${p.phrase}`;if(seen.has(key))return false;seen.add(key);return true;}).filter(p=>p.intent==="communication_skill"?!(before.skills??[]).includes(p.phrase):!before.aliases.some(a=>a.phrase===p.phrase)).slice(0,5);if(!selected.length)return;
+  const after=validateLearning({version:1,aliases:[...before.aliases,...selected.filter(p=>p.intent!=="communication_skill").map(p=>({phrase:p.phrase,intent:p.intent}))],skills:[...(before.skills??[]),...selected.filter(p=>p.intent==="communication_skill").map(p=>p.phrase)]});
   await prepareRelease(after,selected,severity,{proposal_validations:selected.map(p=>({id:p.id,validation:p.validation}))});
  }finally{await db.rpc("kaya_improve_lease",{lease_name:"publisher",holder,release_lease:true});}
 }

@@ -2,12 +2,12 @@ import { createHash, randomUUID } from "crypto";
 import { improveDb, settings } from "./store";
 import { RunId } from "./config";
 import { Chat, detect, regression } from "./detect";
-export async function runCheck(kind:RunId, source:"manual"|"bigin"="manual", phone?:string, snapshot?:Chat) {
+export async function runCheck(kind:RunId, source:"manual"|"bigin"|"conversation"="manual", phone?:string, snapshot?:Chat) {
   const state=await settings();
   const schedule=state.config.schedules[kind];
   if(!state.config.enabled || schedule.mode==="off") return {skipped:"Disabled"};
   const db=improveDb();
-  const seconds=source==="bigin"?1:60;
+  const seconds=source!=="manual"?1:60;
   const id=`${kind}:${source}:${phone??"all"}:${Math.floor(Date.now()/(seconds*1000))}`;
   const claim=await db.from("mw_improve_runs").insert({id,kind,status:"running"});
   if(claim.error?.code==="23505") return {skipped:"Already claimed"};

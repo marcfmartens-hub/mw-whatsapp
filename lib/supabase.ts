@@ -105,7 +105,14 @@ export async function updateConversation(
       .eq("phone", phone)
       .select("*")
       .single();
-    if (!error) return data as Conversation;
+    if (!error) {
+      if(Array.isArray(fields.messages)&&fields.messages.length&&fields.messages[fields.messages.length-1]?.role==="assistant"){
+        // Review is isolated from the customer request and cannot fail the save.
+        const {waitUntil}=await import("@vercel/functions");
+        waitUntil(import("./kaya-improve/events").then(m=>m.afterConversationSave(data)).catch(e=>console.error("[kaya-improve] conversation event failed",e)));
+      }
+      return data as Conversation;
+    }
     const missing = error.code === "PGRST204" ? error.message.match(/'([a-z_]+)' column/)?.[1] : undefined;
     if (missing && missing in fields) {
       console.warn(`[supabase] column ${missing} missing in ${TABLE} — saved without it`);
