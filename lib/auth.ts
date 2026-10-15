@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-const SECRET = process.env.MONITOR_SECRET ?? process.env.CRON_SECRET ?? "mw-monitor-fallback";
+const SECRET = process.env.MONITOR_SECRET ?? process.env.CRON_SECRET ?? process.env.KAYA_IMPROVE_SECRET ?? "";
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -19,12 +19,14 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 export function createToken(username: string): string {
+  if (!SECRET) throw new Error("Monitor authentication secret is not configured");
   const payload = JSON.stringify({ username, ts: Date.now() });
   const sig = crypto.createHmac("sha256", SECRET).update(payload).digest("hex");
   return Buffer.from(`${payload}.${sig}`).toString("base64url");
 }
 
 export function verifyToken(token: string): string | null {
+  if (!SECRET) return null;
   try {
     const decoded = Buffer.from(token, "base64url").toString();
     const dotIdx = decoded.lastIndexOf(".");
