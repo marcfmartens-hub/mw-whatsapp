@@ -25,6 +25,7 @@ export async function autoReview(chat:Chat){
  try{
   const suggestions=await propose(chat),successful=await successfulMessages(),before=validateLearning(catalog);let approved=0,pending=0,rejected=0;
   for(const s of suggestions){
+   const control=await settings();if(!control.config.enabled||!control.config.autoApprove){await db.from("mw_improve_runs").update({status:"skipped",finished_at:new Date().toISOString(),summary:{reason:"Automation switched off"}}).eq("id",runId);return;}
    const id=createHash("sha256").update(s.manual?`${fingerprint}:${s.reason}`:`${s.intent}:${s.phrase}`).digest("hex");
    const exists=await db.from("mw_improve_proposals").select("id").eq("id",id).maybeSingle();if(exists.error)throw exists.error;if(exists.data)continue;
    if(s.manual){const r=await db.from("mw_improve_proposals").insert({id,status:"needs_admin",severity:s.severity,reason:s.reason,evidence:{conversation:evidence,policy:AUTO_POLICY.version}});if(r.error)throw r.error;pending++;continue;}

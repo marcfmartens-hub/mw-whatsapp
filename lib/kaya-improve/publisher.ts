@@ -25,6 +25,7 @@ export async function successfulMessages(){
 }
 async function saveRelease(id:string,update:Record<string,unknown>){const r=await improveDb().from("mw_improve_releases").update(update).eq("id",id);if(r.error)throw r.error;}
 async function doProgressRelease(release:any){
+ const control=await settings();if(!control.config.enabled)return;
  const gh=new Github();
  if(release.status==="deploying"){
   const checks=await gh.checks(release.merge_sha);
@@ -44,10 +45,12 @@ async function doProgressRelease(release:any){
  // Non-forced fast-forward is the atomic stale-base guard. A concurrent main
  // commit makes this fail instead of merging an untested base. Branch protection
  // may reject direct updates; that leaves the release blocked for Super Admin.
+ const latest=await settings();if(!latest.config.enabled||(!release.rollback_of&&!latest.config.autoApprove))return;
  await gh.request("/git/refs/heads/main","PATCH",{sha:release.head_sha,force:false});
  await saveRelease(release.id,{status:"deploying",merge_sha:release.head_sha});
 }
 async function prepareRelease(after:Learning,proposals:any[],severity:"critical"|"minor",validation:Record<string,unknown>,rollbackOf?:string,actor?:string){
+ const control=await settings();if(!control.config.enabled||(!rollbackOf&&!control.config.autoApprove))throw Error("Kaya Improve is switched off");
  const gh=new Github(),main=await gh.main(),before=await gh.file(AUTO_POLICY.allowedPath,main.sha),historyText=await gh.file("lib/kaya-improve/history.json",main.sha);
  const current=validateLearning(JSON.parse(before));
  if(!rollbackOf)validation={...validation,...validateCandidate(current,after,await successfulMessages())};
