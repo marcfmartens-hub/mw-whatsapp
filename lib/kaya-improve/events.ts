@@ -2,6 +2,7 @@ import type { Chat } from "./detect";
 import { improveDb, settings } from "./store";
 import { runCheck } from "./runner";
 import { RUNS } from "./config";
+import { PUBLIC_URL } from "./github";
 export async function afterBiginPush(chat:Chat) {
  if(process.env.VERCEL_ENV && process.env.VERCEL_ENV!=="production")return;
  const state=await settings();if(!state.config.enabled)return;
@@ -13,5 +14,9 @@ export async function afterBiginPush(chat:Chat) {
    if(data?.[0] && Date.now()-Date.parse(data[0].started_at)<schedule.minutes*60000)continue;
   }
   await runCheck(run.id,"bigin",chat.phone,chat);
+ }
+ if(state.config.autoApprove){
+  const response=await fetch(`${PUBLIC_URL}/api/kaya-improve/review`,{method:"POST",headers:{Authorization:`Bearer ${process.env.KAYA_IMPROVE_SECRET}`,"Content-Type":"application/json"},body:JSON.stringify(chat),signal:AbortSignal.timeout(10000)});
+  if(!response.ok)throw Error(`Auto-review event was not accepted (${response.status})`);
  }
 }

@@ -9,7 +9,7 @@ if (!supabaseUrl || !supabaseKey) {
 
 // Never let Next.js cache Supabase reads (GET routes like the monitor and crons were seeing stale data)
 export const supabase = createClient(supabaseUrl, supabaseKey, {
-  global: { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, cache: "no-store" }) },
+  global: { headers: process.env.KAYA_IMPROVE_SECRET ? { "x-kaya-improve-secret": process.env.KAYA_IMPROVE_SECRET } : {}, fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, cache: "no-store" }) },
 });
 
 export interface Conversation {

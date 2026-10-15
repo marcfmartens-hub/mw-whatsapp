@@ -2,13 +2,13 @@ export const RUNS = [
   { id: "confirmation", name: "Confirmation Audit", description: "Audit booking and callback evidence. Existing booking rules always apply.", defaultMode: "event", defaultMinutes: 0, recommended: "After Bigin push (recommended)" },
   { id: "reply", name: "Reply Check", description: "Detect repeated replies, confusing names and unsupported callback promises.", defaultMode: "event", defaultMinutes: 0, recommended: "After Bigin push (recommended)" },
   { id: "outcome", name: "Conversation Outcome", description: "Classify the conversation after its successful Bigin push. Silence alone is not a failure.", defaultMode: "event", defaultMinutes: 0, recommended: "After Bigin push (recommended)" },
-  { id: "review", name: "Detailed Review", description: "Review flagged chats and collect suggested corrections for human review.", defaultMode: "interval", defaultMinutes: 60, recommended: "Next Bigin push, at most hourly (recommended)" },
-  { id: "regression", name: "Improvement & Regression", description: "Group recurring issues and test the detector against successful and difficult fixtures. No automatic code publishing yet.", defaultMode: "interval", defaultMinutes: 1440, recommended: "Next Bigin push, at most daily (recommended)" },
+  { id: "review", name: "Detailed Review", description: "Review flagged chats and collect suggested corrections and proposals.", defaultMode: "interval", defaultMinutes: 60, recommended: "Next Bigin push, at most hourly (recommended)" },
+  { id: "regression", name: "Improvement & Regression", description: "Group recurring issues and test the detector against successful and difficult fixtures. Auto approval uses its own validation and publishing gate.", defaultMode: "interval", defaultMinutes: 1440, recommended: "Next Bigin push, at most daily (recommended)" },
 ] as const;
 export type RunId = typeof RUNS[number]["id"];
 export type Schedule = { mode: "event" | "interval" | "off"; minutes: number };
-export interface ImproveConfig { enabled: boolean; schedules: Record<RunId, Schedule> }
-export const DEFAULT_CONFIG: ImproveConfig = { enabled: false, schedules: Object.fromEntries(RUNS.map(r => [r.id, { mode: r.defaultMode, minutes: r.defaultMinutes }])) as ImproveConfig["schedules"] };
+export interface ImproveConfig { enabled: boolean; autoApprove: boolean; schedules: Record<RunId, Schedule> }
+export const DEFAULT_CONFIG: ImproveConfig = { enabled: false, autoApprove: false, schedules: Object.fromEntries(RUNS.map(r => [r.id, { mode: r.defaultMode, minutes: r.defaultMinutes }])) as ImproveConfig["schedules"] };
 export function validateConfig(value: unknown): ImproveConfig {
   const c = value as ImproveConfig;
   if (!c || typeof c.enabled !== "boolean" || !c.schedules) throw new Error("Invalid settings");
@@ -19,7 +19,8 @@ export function validateConfig(value: unknown): ImproveConfig {
     if (!Number.isInteger(s.minutes) || s.minutes < 0 || s.minutes > 43200 || (s.mode === "interval" && s.minutes < 1)) throw new Error("Custom interval must be 1–43,200 whole minutes");
     schedules[r.id] = { mode: s.mode, minutes: s.minutes };
   }
-  return { enabled: c.enabled, schedules };
+  if(c.autoApprove !== undefined && typeof c.autoApprove !== "boolean") throw new Error("Invalid auto-approval setting");
+  return { enabled: c.enabled, autoApprove: c.autoApprove ?? false, schedules };
 }
 export function nextRun(config: ImproveConfig, id: RunId, last: string | null): string | null {
   const s = config.schedules[id];
