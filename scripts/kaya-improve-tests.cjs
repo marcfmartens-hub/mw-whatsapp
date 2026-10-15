@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const dir=process.argv[2];
+const {DEFAULT_CONFIG,validateConfig,nextRun}=require(path.join(dir,'config.js'));
+const {detect,regression}=require(path.join(dir,'detect.js'));
+const {backupZip}=require(path.join(dir,'zip.js'));
+assert.equal(regression().every(t=>t.passed),true,JSON.stringify(regression()));
+assert.equal(validateConfig(DEFAULT_CONFIG).enabled,false);
+assert.throws(()=>validateConfig({...DEFAULT_CONFIG,schedules:{...DEFAULT_CONFIG.schedules,review:{mode:'interval',minutes:0}}}));
+assert.equal(validateConfig({...DEFAULT_CONFIG,schedules:{...DEFAULT_CONFIG.schedules,review:{mode:'event',minutes:0}}}).schedules.review.mode,'event');
+assert.equal(nextRun(DEFAULT_CONFIG,'review',null),null);
+const enabled={...DEFAULT_CONFIG,enabled:true};
+assert.equal(nextRun(enabled,'review','2026-10-15T06:00:00.000Z'),'2026-10-15T07:00:00.000Z');
+assert.equal(detect({phone:'test',messages:[{role:'user',content:'No thanks'}]}).outcome,'not_ready');
+const zip=backupZip({id:'test',files:[{path:'lib/example.ts',status:'modified',before:'before 😊',after:'after ✓'},{path:'new.txt',status:'added',before:null,after:'new'}]});
+require('node:fs').writeFileSync(path.join(dir,'test.zip'),zip);
+console.log(`${regression().length} conversation fixtures and settings validation passed; ZIP written for round-trip verification.`);
