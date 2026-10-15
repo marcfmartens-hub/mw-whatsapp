@@ -428,6 +428,14 @@ export async function createBiginContact(
       const fu = String((conversation as any).car_conditions ?? "").match(/Follow-up: (\d{4}-\d{2}-\d{2})/)?.[1];
       if (fu && savedId) await setFollowUpDate(savedId, fu, headers).catch(e => console.warn("[Bigin] follow-up date not set:", e));
     }
+    // Audit only accepted Bigin writes. No timer and no extra scheduled invocation.
+    if (savedId && process.env.KAYA_IMPROVE_SECRET && process.env.VERCEL_ENV === "production") {
+      const { waitUntil } = await import("@vercel/functions");
+      waitUntil(import("@/lib/kaya-improve/events").then(m => m.afterBiginPush({
+        ...conversation, phone: conversation.phone || conversationPhone,
+        bigin_pushed_at: new Date().toISOString(),
+      })).catch(e => console.error("[kaya-improve] Bigin event audit failed", e)));
+    }
     return true;
   } catch (error) {
     if (attempt < 3) {
