@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const SECRET = process.env.MONITOR_SECRET ?? process.env.CRON_SECRET ?? "mw-monitor-fallback";
+const SECRET = process.env.MONITOR_SECRET ?? process.env.CRON_SECRET ?? process.env.KAYA_IMPROVE_SECRET ?? "";
 
 async function verifyToken(token: string): Promise<boolean> {
+  if (!SECRET) return false;
   try {
     // token is base64url of `${jsonPayload}.${hexSig}`
     const decoded = Buffer.from(token, "base64url").toString();
