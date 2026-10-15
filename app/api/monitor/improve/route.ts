@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sessionUser } from "@/lib/monitorRole";
 import { improveDb, settings } from "@/lib/kaya-improve/store";
 import { RUNS, validateConfig, nextRun } from "@/lib/kaya-improve/config";
-import { runCheck } from "@/lib/kaya-improve/runner";
+import { runCheck, analyzeRecentChats } from "@/lib/kaya-improve/runner";
 import { history } from "@/lib/kaya-improve/history";
 import { AUTO_POLICY } from "@/lib/kaya-improve/auto-policy";
 import { connectPublisher, connectionStatus, publishReady, rollbackRelease, resumeForCommit, hash } from "@/lib/kaya-improve/publisher";
@@ -59,6 +59,7 @@ export async function POST(req:NextRequest) {
  const g=await guard(req,true);if(g.error)return g.error;
  try {
   const body=await req.json();
+  if(body.action==="analyze_recent")return NextResponse.json({ok:true,result:await analyzeRecentChats(body.count)});
   if(body.action==="connect_publishing")return NextResponse.json(await connectPublisher());
   if(body.action==="refresh_releases"){
    if(!(await connectionStatus()).ready)return NextResponse.json({error:"GitHub publishing connection is not ready"},{status:409});

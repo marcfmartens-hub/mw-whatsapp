@@ -5,6 +5,7 @@ trap 'rm -rf "$out"' EXIT
 ./node_modules/.bin/tsc lib/kaya-improve/config.ts lib/kaya-improve/detect.ts lib/kaya-improve/zip.ts lib/kaya-improve/events.ts lib/kaya-improve/approve.ts --outDir "$out" --module commonjs --target es2020 --esModuleInterop --resolveJsonModule --skipLibCheck
 ./node_modules/.bin/tsc lib/auth.ts --outDir "$out/auth" --module commonjs --target es2020 --esModuleInterop --skipLibCheck
 node scripts/kaya-auth-tests.cjs "$out/auth"
+NODE_PATH="$PWD/node_modules" node scripts/kaya-recent-tests.cjs "$out"
 node scripts/kaya-improve-tests.cjs "$out"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-event-tests.cjs "$out"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-auto-tests.cjs "$out"

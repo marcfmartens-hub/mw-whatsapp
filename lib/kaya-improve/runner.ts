@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { improveDb, settings } from "./store";
 import { RunId } from "./config";
 import { Chat, detect, regression } from "./detect";
@@ -45,4 +45,30 @@ export async function runCheck(kind:RunId, source:"manual"|"bigin"="manual", pho
     await db.from("mw_improve_runs").update({status:"failed",finished_at:new Date().toISOString(),error:e instanceof Error?e.message:String(e)}).eq("id",id);
     throw e;
   }
+}
+
+export function recentChatLimit(value:unknown):number {
+ if(typeof value!=="number"||!Number.isInteger(value)||value<1||value>100)throw Error("Choose between 1 and 100 chats");
+ return value;
+}
+export async function analyzeRecentChats(value:unknown) {
+ const limit=recentChatLimit(value);
+ if(!(await settings()).config.enabled)throw Error("Kaya Improve is switched off");
+ const db=improveDb(),id=`recent:${randomUUID()}`;
+ const claim=await db.from("mw_improve_runs").insert({id,kind:"recent_chats",status:"running"});if(claim.error)throw claim.error;
+ try {
+  const {data,error}=await db.from("mw_whatsapp").select("phone,name,step,appointment_date,appointment_time,bigin_pushed_at,car_conditions,messages,last_message_at").not("last_message_at","is",null).order("last_message_at",{ascending:false}).order("phone").limit(limit+100);
+  if(error)throw error;
+  const chats=(data??[]).filter(row=>/^\d{8,16}$/.test(row.phone)&&!/^971599900/.test(row.phone)).slice(0,limit);
+  const results=[];
+  for(const row of chats){
+   if(!(await settings()).config.enabled){const r=await db.from("mw_improve_runs").update({status:"skipped",finished_at:new Date().toISOString(),summary:{requested:limit,checked:results.length,reason:"Switched off",results}}).eq("id",id);if(r.error)throw r.error;return{checked:results.length,stopped:true};}
+   const result=detect(row as Chat);
+   const saved=await db.from("mw_improve_reviews").upsert({phone:row.phone,fingerprint:createHash("sha256").update(JSON.stringify(row)).digest("hex"),outcome:result.outcome,findings:result.findings,verification_note:result.verification_note,reviewed_at:new Date().toISOString()});if(saved.error)throw saved.error;
+   results.push({phone:row.phone,...result});
+  }
+  const summary={requested:limit,checked:results.length,flagged:results.filter(r=>r.findings.length).length,method:"Manual read-only checks; no changes to customer messages, CRM or code",results};
+  const saved=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString(),summary}).eq("id",id);if(saved.error)throw saved.error;
+  return summary;
+ }catch(e){await db.from("mw_improve_runs").update({status:"failed",finished_at:new Date().toISOString(),error:e instanceof Error?e.message:String(e)}).eq("id",id);throw e;}
 }
