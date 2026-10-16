@@ -1,3 +1,4 @@
+import {wantsOurNumber,LOCATION_TEXT,CUSTOMER_CALL_CHOICE} from "./contact";
 import {getKayaReply,KnownFields,ConversationMessage} from "../claude";
 import {improveDb,settings} from "./store";
 import {Chat} from "./detect";
@@ -32,9 +33,16 @@ export async function replayGate(before:Learning,after:Learning,observed:ReplayI
  for(let i=0;i<tests.length;i+=3){
   const state=await settings();if(!state.config.enabled||!state.config.autoApprove)throw Error("Replay stopped: automation switched off");
   output.push(...await Promise.all(tests.slice(i,i+3).map(async input=>{
+   const reply=(learning:Learning)=>{
+    if(wantsOurNumber(input.message,learning)){
+     const booked=!!(input.known.appointment_date&&input.known.appointment_time)&&input.history.some(m=>m.role==="assistant"&&/you'?re booked for/i.test(m.content));
+     return Promise.resolve([LOCATION_TEXT,...(booked?[]:[CUSTOMER_CALL_CHOICE])].join("\n[SPLIT]\n"));
+    }
+    return getKayaReply(input.step,input.history,learnedMessage(input.message,learning),input.known,learning,true);
+   };
    const [a,b]=await Promise.all([
-    getKayaReply(input.step,input.history,learnedMessage(input.message,before),input.known,before,true),
-    getKayaReply(input.step,input.history,learnedMessage(input.message,after),input.known,after,true),
+    reply(before),
+    reply(after),
    ]);return{label:input.label,input,before:a,after:b};
   })));
  }
