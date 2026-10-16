@@ -3,7 +3,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Alias, validateLearning, TARGETS } from "./learning";
 import { Chat, detect } from "./detect";
 export type Suggestion={phrase?:string;intent?:Alias["intent"];severity:"critical"|"minor";reason:string;manual?:boolean;skill?:SkillId};
-export const redact=(s:string)=>s.replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi,"[email]").replace(/(?:\+?\d[\d\s-]{6,}\d)/g,"[number]").slice(0,600);
+export const redact=(s:string)=>s.replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi,"[email]")
+ // Keep years, mileage and dates. Spaced phone masking requires a phone prefix.
+ .replace(/(?:\+|00)\d[\d ()-]{7,}\d/g,"[number]")
+ .replace(/\b(?:971[2-9]\d{8}|0[2-9]\d{8}|\d{10,15})\b/g,"[number]").slice(0,1200);
+
 export function redactMessage(content:string,name?:string|null){
  const names=(name??"").split(/\s+/).filter(n=>n.length>1&&!/^(call|callback|phone|number|contact)$/i.test(n));
  return redact(names.reduce((s,n)=>s.replace(new RegExp("\\b"+n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","gi"),"[name]"),redact(content)));
