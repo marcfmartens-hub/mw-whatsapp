@@ -15,6 +15,7 @@ NODE_PATH="$PWD/node_modules" node scripts/kaya-event-tests.cjs "$out/kaya-impro
 NODE_PATH="$PWD/node_modules" node scripts/kaya-auto-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-finding-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-publisher-tests.cjs "$out/kaya-improve"
+NODE_PATH="$PWD/node_modules" node scripts/kaya-repair-tests.cjs "$out/kaya-improve"
 python3 - "$out/kaya-improve/test.zip" <<'PY'
 import zipfile,sys,json
 with zipfile.ZipFile(sys.argv[1]) as z:

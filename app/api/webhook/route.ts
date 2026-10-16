@@ -1,3 +1,4 @@
+import {LOCATION_TEXT,CUSTOMER_CALL_CHOICE,wantsOurNumber} from "@/lib/kaya-improve/contact";
 import { learnedMessage } from "@/lib/kaya-improve/learning";
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
@@ -21,13 +22,7 @@ const LOCATION_KEYWORDS = /\b(location|address|where are you|where is|how to get
 
 const LOCATION_IMAGE_URL = ""; // add outside branch photo as public/location.jpg, then set "https://mw-whatsapp2.vercel.app/location.jpg"
 
-const LOCATION_TEXT = `📍 *Mister Wheelz Car Buyers*
-Umm Suqeim Branch, Al Quoz 4, Dubai
-https://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6
 
-🕙 Mon–Sat 10 AM – 7 PM (Fri from 12 PM), Sun closed
-📞 +971 58 582 5543
-📄 Please bring your Emirates ID and Mulkiya`;
 
 // ---- GET: Meta webhook verification ----
 export async function GET(req: NextRequest) {
@@ -65,13 +60,10 @@ const POST_PHONE_Q = "Which number is best to reach you on?";
 const CLOSING_STEP = 8;
 const BOOKING_OR_TEAM_CHOICE = "Would you like to continue with the booking, or shall I forward your details to our purchasing team so they can discuss it with you by phone?";
 const NOT_READY_CHOICE = "No problem. Would you like someone from our team to contact you personally to discuss your car?";
-const CUSTOMER_CALL_CHOICE = "Would you like to continue with the booking, or would you like our team to call you? You can also call us on the number above whenever you're ready.";
+
 
 // The customer asking for OUR number is not a request for US to call them.
-function wantsOurNumber(text: string): boolean {
-  text = learnedMessage(text);
-  return /\b(?:send|share|give|text)\s+me\s+(?:(?:your|the|a)\s+)?(?:phone|contact|mobile|customer service\s+)?number\b|\b(?:what(?:'s| is)|which|do you have)\s+(?:your|the|a)\s+(?:phone|contact|mobile|customer service\s+)?number\b|\b(?:how|where)\s+(?:can|do)\s+i\s+(?:call|phone|reach|contact)\s+you\b|\b(?:i\s*(?:will|can|want to|would like to|am going to)|i'?ll|i'?m|im)\s+(?:call|phone|ring|contact)\s+you\b|\b(?:number|phone number)\s+(?:to|i can)\s+call\b/i.test(text);
-}
+
 
 // Sell method detection
 const SELL_METHOD_CASH        = /\b(cash|direct|buy now|sell now|sell fast|quick sale|immediately|instant)\b/i;

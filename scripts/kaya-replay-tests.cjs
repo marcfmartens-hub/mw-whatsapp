@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),path=require('node:path');const dir=process.argv[2];let mode='pass',enabled=true;
 require.cache[require.resolve(path.join(dir,'store.js'))]={exports:{settings:async()=>({config:{enabled,autoApprove:true}})}};
-require.cache[require.resolve(path.join(dir,'..','claude.js'))]={exports:{getKayaReply:async(_s,_h,_m,_k,l)=>l.skills?.length?'Improved reply':'Baseline reply'}};
+require.cache[require.resolve(path.join(dir,'..','claude.js'))]={exports:{getKayaReply:async(_s,_h,_m,_k,l)=>_m==='I will call you, give me your number'?'Call 058 582 5543':l.skills?.length?'Improved reply':'Baseline reply'}};
 require.cache[require.resolve(path.join(dir,'reviewer.js'))]={exports:{jsonReview:async(_s,pairs)=>({cases:mode==='missing'?[]:pairs.map((p,index)=>({index,before_score:2,after_score:mode==='worse'?1:mode==='same'?2:3,rules_preserved:mode!=='policy',observed_problem_fixed:true,reason:'test'}))})}};
 const {replayGate}=require(path.join(dir,'replay.js'));
 const before={version:1,aliases:[]},after={...before,skills:['avoid_repetition']},input={label:'Observed issue',message:'I already told you',history:[],step:1,known:{}};

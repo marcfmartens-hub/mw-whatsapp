@@ -9,6 +9,10 @@
     {
       "path": "/api/cron/nudge",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/kaya-improve",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
