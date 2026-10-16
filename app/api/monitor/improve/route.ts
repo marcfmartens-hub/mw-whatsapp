@@ -1,3 +1,4 @@
+import {queuePendingReviews,processPendingReviews} from "@/lib/kaya-improve/pending";
 import { waitUntil } from "@vercel/functions";
 import { autoReview } from "@/lib/kaya-improve/approve";
 import { detect, Chat } from "@/lib/kaya-improve/detect";
@@ -76,6 +77,12 @@ export async function POST(req:NextRequest) {
    waitUntil(autoReview(chat,finding.code).catch(e=>console.error("[kaya-improve] finding review failed",e)));
    return NextResponse.json({ok:true,message:"Review requested. Follow its progress in Run history and Improvement proposals. Passing supported fixes follow the existing release protocol; unsupported fixes require Super Admin review."},{status:202});
   }
+  if(body.action==="review_pending"){
+   if(process.env.VERCEL_ENV!=="production")return NextResponse.json({error:"Pending review is production only"},{status:409});
+   const result=await queuePendingReviews();
+   waitUntil(processPendingReviews().catch(e=>console.error("[kaya-improve] pending review failed",e)));
+   return NextResponse.json({ok:true,result,message:"Pending reviews queued. One conversation is revalidated per step; the recovery schedule resumes remaining work automatically. Passing improvements proceed through all deployment checks without admin approval."},{status:202});
+  }
   if(body.action==="stress_test"){
    if(!["meaning","conversation"].includes(body.kind))return NextResponse.json({error:"Invalid stress test"},{status:400});
    const {isolatedStressTest}=await import("@/lib/kaya-improve/stress");
@@ -93,7 +100,7 @@ export async function POST(req:NextRequest) {
   if(body.action==="publish_ready"){
    const connection=await connectionStatus();if(!connection.ready)return NextResponse.json({error:"GitHub publishing connection is not ready"},{status:409});
    const state=await settings();if(!state.config.enabled||!state.config.autoApprove)return NextResponse.json({error:"Enable detection and auto approval first"},{status:409});
-   await publishReady();return NextResponse.json({ok:true});
+   await publishReady({processNow:true});return NextResponse.json({ok:true,message:"Approved fixes processed without waiting for the daily window. Validation, backup, CI, preview and production checks still apply."});
   }
   if(body.action==="rollback_code"){
    if(!/^[a-f0-9-]{36}$/.test(body.release??""))return NextResponse.json({error:"Invalid release"},{status:400});
