@@ -7,3 +7,8 @@ export function conditionalPriceReply(reply:string){
  const noQuote=!/\b75(?:[ ,]?000|k)\b/i.test(reply);
  return noAcceptance&&noQuote&&/\bprice\b/i.test(reply)&&/\binspection\b/i.test(reply);
 }
+/** Decimal mileage without an explicit multiplier is ambiguous, not evidence of low mileage. */
+export function mileageClarification(text:string){
+ const m=text.trim().match(/^(\d{1,3}[.,]\d{1,2})\s*(?:km|kms|kilomet(?:er|re)s?)\s*[.!?]?$/i);
+ return m?`Could you confirm the full mileage in kilometres? I don't want to misread "${m[1]} km".`:null;
+}

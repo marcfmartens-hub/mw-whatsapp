@@ -1,3 +1,4 @@
+import {mileageClarification} from "@/lib/kaya-improve/policy-checks";
 import {LOCATION_TEXT,CUSTOMER_CALL_CHOICE,wantsOurNumber} from "@/lib/kaya-improve/contact";
 import { learnedMessage } from "@/lib/kaya-improve/learning";
 import { NextRequest, NextResponse } from "next/server";
@@ -848,6 +849,13 @@ export async function POST(req: NextRequest) {
       messageText = messageText.replace(URL_RE, u => " " + u.replace(/^https?:\/\/(www\.)?/i, "").split(/[/?#]/).slice(1)
         .join(" ").replace(/[-_+=%]/g, " ").replace(/\b\d{6,}\b/g, "").replace(/\b(used|cars?|motors|listing|ad|ads|en|ar|uae|dubai|for|sale)\b/gi, " ") + " ")
         .replace(/\s+/g, " ").trim();
+    }
+    // Ask before extraction: never persist an invented expansion of decimal mileage.
+    const mileageQuestion=mileageClarification(messageText);
+    if(mileageQuestion){
+      await sendWhatsAppMessage(phone,mileageQuestion);
+      await appendHistory(phone,(conversation.messages??[]) as ConversationMessage[],messageText,mileageQuestion);
+      return NextResponse.json({status:"mileage_clarification"},{status:200});
     }
     const LINK_NOTE = "Unfortunately I'm unable to open links, so please share the details with me here.";
 
