@@ -101,7 +101,7 @@ export async function publishReady(options:{processNow?:boolean}={}){
    const reason=e instanceof Error?e.message:String(e);
    // A deterministic failed release replay must leave the approval queue.
    // Technical/provider failures keep their evidence for a later retry.
-   if(!/^Replay (?:failed:|left a|did not demonstrate)|^Historical replay requires/.test(reason))throw e;
+   if(!rejectedReleaseValidation(reason))throw e;
    for(const p of selected){const r=await db.from("mw_improve_proposals").update({status:"rejected",validation:{...p.validation,publish_recheck:{passed:false,reason,policy:AUTO_POLICY.version}},updated_at:new Date().toISOString()}).eq("id",p.id).is("release_id",null);if(r.error)throw r.error;}
   }
  }finally{await db.rpc("kaya_improve_lease",{lease_name:"publisher",holder,release_lease:true});}
@@ -132,4 +132,8 @@ export async function progressRelease(release:any){
   const transient=/timeout|timed out|fetch failed|ECONNRESET|GitHub (?:429|500|502|503|504)/i.test(message);
   await saveRelease(release.id,{...(transient?{}:{status:"blocked"}),error:message});throw e;
  }
+}
+
+export function rejectedReleaseValidation(reason:string){
+ return /^Replay (?:failed:|left a|did not demonstrate)|^Historical replay requires|^Candidate changes a protected successful conversation or locked-rule example/.test(reason);
 }
