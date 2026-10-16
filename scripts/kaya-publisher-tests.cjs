@@ -9,10 +9,11 @@ Github.prototype.main=async()=>({sha:options.main??'base'});
 Github.prototype.file=async()=>options.content??'candidate';
 Github.prototype.productionReady=async()=>options.production??false;
 Github.prototype.request=async(p,m,b)=>{requests.push({p,m,b});if(p.includes('/pulls/1/files'))return options.files??[{filename:'lib/kaya-improve/learning.json'},{filename:'lib/kaya-improve/history.json'}];if(p==='/pulls/1')return{head:{sha:options.head??'head'}};if(options.rejectWrite&&m==='PATCH')throw Error('Concurrent main update rejected');return{};};
-const {progressRelease,rejectedReleaseValidation}=require(path.join(dir,'publisher.js'));
+const {progressRelease,rejectedReleaseValidation,screenCandidates}=require(path.join(dir,'publisher.js'));
 const release={id:'r',status:'ci_pending',head_sha:'head',base_sha:'base',pr_number:1,backup:{before:'{}'},validation:{passed:true,candidate_hash:crypto.createHash('sha256').update('candidate').digest('hex'),backup_index_hash:crypto.createHash('sha256').update('candidate').digest('hex')}};
 async function run(o={},r=release){options=o;updates.length=0;requests.length=0;try{await progressRelease(r);return null}catch(e){return e}}
 (async()=>{
+ const screened=screenCandidates({version:1,aliases:[],skills:["avoid_repetition"]},[{id:"bad",intent:"request_location",phrase:"location"},{id:"good",intent:"communication_skill",phrase:"answer_in_context"}],["location"]);assert.deepEqual(screened.selected.map(p=>p.id),["good"]);assert.deepEqual(screened.rejected.map(p=>p.proposal.id),["bad"]);
  assert.equal(rejectedReleaseValidation("Candidate changes a protected successful conversation or locked-rule example"),true);assert.equal(rejectedReleaseValidation("Replay failed: regression or locked-rule risk"),true);assert.equal(rejectedReleaseValidation("GitHub 503: temporarily unavailable"),false);assert.equal(rejectedReleaseValidation("Incomplete replay evaluation"),false);
  assert.ok(await run({network:true}));assert.equal(updates.at(-1).status,undefined);assert.match(updates.at(-1).error,/503/);
  await run({checks:{ci:false,preview:true,failed:false}});assert.equal(requests.length,0);

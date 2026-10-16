@@ -94,7 +94,11 @@ export async function publishReady(options:{processNow?:boolean}={}){
   if(!options.processNow&&!releaseDue(severity,last.data?.[0]?.published_at??null))return;
   const gh=new Github(),main=await gh.main(),before=validateLearning(JSON.parse(await gh.file(AUTO_POLICY.allowedPath,main.sha)));
   const seen=new Set<string>();
-  const selected=candidates.filter(p=>{const key=`${p.intent}:${p.phrase}`;if(seen.has(key))return false;seen.add(key);return true;}).filter(p=>p.intent==="communication_skill"?!(before.skills??[]).includes(p.phrase):!before.aliases.some(a=>a.phrase===p.phrase)).slice(0,5);if(!selected.length)return;
+  const eligible=candidates.filter(p=>{const key=`${p.intent}:${p.phrase}`;if(seen.has(key))return false;seen.add(key);return true;}).filter(p=>p.intent==="communication_skill"?!(before.skills??[]).includes(p.phrase):!before.aliases.some(a=>a.phrase===p.phrase)).slice(0,5);
+  if(!eligible.length)return;
+  const screened=screenCandidates(before,eligible,await successfulMessages());
+  for(const rejected of screened.rejected){const p=rejected.proposal;const r=await db.from("mw_improve_proposals").update({status:"rejected",validation:{...p.validation,publish_recheck:{passed:false,reason:rejected.reason,policy:AUTO_POLICY.version}},updated_at:new Date().toISOString()}).eq("id",p.id).is("release_id",null);if(r.error)throw r.error;}
+  const selected=screened.selected;if(!selected.length)return;
   const after=validateLearning({version:1,aliases:[...before.aliases,...selected.filter(p=>p.intent!=="communication_skill").map(p=>({phrase:p.phrase,intent:p.intent}))],skills:[...(before.skills??[]),...selected.filter(p=>p.intent==="communication_skill").map(p=>p.phrase)]});
   try{await prepareRelease(after,selected,severity,{proposal_validations:selected.map(p=>({id:p.id,validation:p.validation}))});}
   catch(e){
@@ -136,4 +140,15 @@ export async function progressRelease(release:any){
 
 export function rejectedReleaseValidation(reason:string){
  return /^Replay (?:failed:|left a|did not demonstrate)|^Historical replay requires|^Candidate changes a protected successful conversation or locked-rule example/.test(reason);
+}
+
+export function screenCandidates(before:Learning,proposals:any[],successful:string[]){
+ const selected:any[]=[],rejected:{proposal:any;reason:string}[]=[];
+ for(const proposal of proposals){
+  try{
+   const after=validateLearning({version:1,aliases:[...before.aliases,...(proposal.intent==="communication_skill"?[]:[{phrase:proposal.phrase,intent:proposal.intent}])],skills:[...(before.skills??[]),...(proposal.intent==="communication_skill"?[proposal.phrase]:[])]});
+   validateCandidate(before,after,successful);selected.push(proposal);
+  }catch(e){const reason=e instanceof Error?e.message:String(e);if(!rejectedReleaseValidation(reason))throw e;rejected.push({proposal,reason});}
+ }
+ return{selected,rejected};
 }
