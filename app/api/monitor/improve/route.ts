@@ -76,6 +76,12 @@ export async function POST(req:NextRequest) {
    waitUntil(autoReview(chat,finding.code).catch(e=>console.error("[kaya-improve] finding review failed",e)));
    return NextResponse.json({ok:true,message:"Review requested. Follow its progress in Run history and Improvement proposals. Passing supported fixes follow the existing release protocol; unsupported fixes require Super Admin review."},{status:202});
   }
+  if(body.action==="stress_test"){
+   if(!["meaning","conversation"].includes(body.kind))return NextResponse.json({error:"Invalid stress test"},{status:400});
+   const {isolatedStressTest}=await import("@/lib/kaya-improve/stress");
+   waitUntil(isolatedStressTest(body.kind).catch(e=>console.error("[kaya-improve] isolated stress test failed",e)));
+   return NextResponse.json({ok:true,message:"Isolated stress test started. Results appear in Run history. No customer messages, CRM actions or releases are sent."},{status:202});
+  }
   if(body.action==="analyze_recent")return NextResponse.json({ok:true,result:await analyzeRecentChats(body.count)});
   if(body.action==="connect_publishing")return NextResponse.json(await connectPublisher());
   if(body.action==="refresh_releases"){

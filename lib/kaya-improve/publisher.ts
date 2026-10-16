@@ -76,7 +76,7 @@ async function prepareRelease(after:Learning,proposals:any[],severity:"critical"
  }catch(e){await saveRelease(id,{status:"blocked",error:e instanceof Error?e.message:String(e)});throw e;}
 }
 export async function publishReady(){
- const state=await settings();if(!state.config.enabled||!state.config.autoApprove)return;
+ const state=await settings();if(!state.config.enabled)return;
  const connection=await connectionStatus();if(!connection.ready)return;
  const db=improveDb(),holder=randomUUID();const lease=await db.rpc("kaya_improve_lease",{lease_name:"publisher",holder,release_lease:false});if(lease.error)throw lease.error;if(!lease.data)return;
  try{
@@ -86,7 +86,7 @@ export async function publishReady(){
    else await progressRelease(release);
   }
   // Re-read: a release completed above must not block the next eligible batch.
-  const remaining=await db.from("mw_improve_releases").select("id").in("status",["preparing","ci_pending","deploying"]);if(remaining.error)throw remaining.error;if(remaining.data?.length)return;
+  const remaining=await db.from("mw_improve_releases").select("id").in("status",["preparing","ci_pending","deploying"]);if(remaining.error)throw remaining.error;if(remaining.data?.length||!state.config.autoApprove)return;
   const pending=await db.from("mw_improve_proposals").select("*").eq("status","approved").is("release_id",null).order("created_at");if(pending.error)throw pending.error;
   const critical=(pending.data??[]).filter(p=>p.severity==="critical");const candidates=critical.length?critical:(pending.data??[]).filter(p=>p.severity==="minor");if(!candidates.length)return;
   const severity=critical.length?"critical":"minor";
@@ -119,5 +119,10 @@ export async function resumeForCommit(sha:string){
 }
 
 export async function progressRelease(release:any){
- try{return await doProgressRelease(release);}catch(e){await saveRelease(release.id,{status:"blocked",error:e instanceof Error?e.message:String(e)});throw e;}
+ try{return await doProgressRelease(release);}catch(e){
+  const message=e instanceof Error?e.message:String(e);
+  // Provider/network interruptions must not permanently strand a tested release.
+  const transient=/timeout|timed out|fetch failed|ECONNRESET|GitHub (?:429|500|502|503|504)/i.test(message);
+  await saveRelease(release.id,{...(transient?{}:{status:"blocked"}),error:message});throw e;
+ }
 }

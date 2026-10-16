@@ -4,7 +4,7 @@ const state={config:{enabled:true,autoApprove:true}};
 const chain={update(data){this.data=data;return this},eq(){updates.push(this.data);return Promise.resolve({error:null})}};
 require.cache[require.resolve(path.join(dir,'store.js'))]={exports:{settings:async()=>state,improveDb:()=>({from:()=>Object.create(chain)})}};
 const {Github}=require(path.join(dir,'github.js'));
-Github.prototype.checks=async()=>options.checks??{ci:true,preview:true,failed:false};
+Github.prototype.checks=async()=>{if(options.network)throw Error("GitHub 503: temporarily unavailable");return options.checks??{ci:true,preview:true,failed:false};};
 Github.prototype.main=async()=>({sha:options.main??'base'});
 Github.prototype.file=async()=>options.content??'candidate';
 Github.prototype.productionReady=async()=>options.production??false;
@@ -13,6 +13,7 @@ const {progressRelease}=require(path.join(dir,'publisher.js'));
 const release={id:'r',status:'ci_pending',head_sha:'head',base_sha:'base',pr_number:1,backup:{before:'{}'},validation:{passed:true,candidate_hash:crypto.createHash('sha256').update('candidate').digest('hex'),backup_index_hash:crypto.createHash('sha256').update('candidate').digest('hex')}};
 async function run(o={},r=release){options=o;updates.length=0;requests.length=0;try{await progressRelease(r);return null}catch(e){return e}}
 (async()=>{
+ assert.ok(await run({network:true}));assert.equal(updates.at(-1).status,undefined);assert.match(updates.at(-1).error,/503/);
  await run({checks:{ci:false,preview:true,failed:false}});assert.equal(requests.length,0);
  await run({checks:{ci:true,preview:false,failed:false}});assert.equal(requests.length,0);
  await run({checks:{ci:false,preview:false,failed:true}});assert.equal(updates[0].status,'tests_failed');
