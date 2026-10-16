@@ -6,6 +6,7 @@ export type Suggestion={phrase?:string;intent?:Alias["intent"];severity:"critica
 export const redact=(s:string)=>s.replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi,"[email]")
  // Keep years, mileage and dates. Spaced phone masking requires a phone prefix.
  .replace(/(?:\+|00)\d[\d ()-]{7,}\d/g,"[number]")
+ .replace(/\b0[2-9]\d(?:[ ()-]?\d){7}\b/g,"[number]")
  .replace(/\b(?:971[2-9]\d{8}|0[2-9]\d{8}|\d{10,15})\b/g,"[number]").slice(0,1200);
 
 export function redactMessage(content:string,name?:string|null){
