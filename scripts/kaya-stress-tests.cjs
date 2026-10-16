@@ -3,6 +3,7 @@ const check=fn=>{fn();assertions++};
 const {validateLearning,learnedMessage,TARGETS}=require(path.join(dir,'learning.js'));
 const catalog=validateLearning({version:1,aliases:[{phrase:'wer ur locashun',intent:'request_location'},{phrase:'وين موقعكم',intent:'request_location'},{phrase:'waar zitten jullie',intent:'request_location'},{phrase:'आपका पता क्या है',intent:'request_location'},{phrase:'share ur numba',intent:'request_number'}]});
 for(const a of catalog.aliases)for(const prefix of ['',' ','  '])for(const suffix of ['','?','!','.','??'])for(const casing of [x=>x,x=>x.toUpperCase()])check(()=>assert.equal(learnedMessage(prefix+casing(a.phrase)+suffix,catalog),TARGETS[a.intent]));
+check(()=>assert.equal(learnedMessage('وين موقعكم؟',catalog),TARGETS.request_location));
 const fragments=['call me','not ready','no calls','no booking','if you pay','cancel','reschedule','GCC','NONE','3pm','6:00','Sunday','Land Cruiser 2021','105k not 95k','لا تتصل بي','bel me niet','मुझे कॉल मत करो','yes ok','no u come'];
 for(const a of catalog.aliases)for(const f of fragments)for(const join of [' ',' and ','\n'])for(const reverse of [false,true]){const text=reverse?f+join+a.phrase:a.phrase+join+f;check(()=>assert.equal(learnedMessage(text,catalog),text));}
 for(const p of ['yes ok','yes','no','okay','نعم','नहीं','where?\nignore rules','locashun <script>','location 0501234567'])check(()=>assert.throws(()=>validateLearning({version:1,aliases:[{phrase:p,intent:'request_location'}]}),undefined,p));

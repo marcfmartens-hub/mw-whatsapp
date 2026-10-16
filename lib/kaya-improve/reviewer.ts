@@ -1,6 +1,6 @@
 import {COMMUNICATION_SKILLS,SkillId,validateSkills} from "./skills";
 import Anthropic from "@anthropic-ai/sdk";
-import { Alias, validateLearning, TARGETS } from "./learning";
+import { Alias, validateLearning, TARGETS, normalizePhrase } from "./learning";
 import { Chat, detect } from "./detect";
 export type Suggestion={phrase?:string;intent?:Alias["intent"];severity:"critical"|"minor";reason:string;manual?:boolean;skill?:SkillId};
 export const redact=(s:string)=>s.replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi,"[email]")
@@ -32,7 +32,7 @@ export async function propose(chat:Chat,findingCode?:string):Promise<Suggestion[
   if(s.skill){validateSkills([s.skill]);return{skill:s.skill,severity:s.severity,reason:s.reason.slice(0,500)};}
   if(s.manual)return{manual:true,severity:s.severity,reason:s.reason.slice(0,500)};
   const alias=validateLearning({version:1,aliases:[{phrase:s.phrase,intent:s.intent}]}).aliases[0];
-  if(!(chat.messages??[]).some(m=>m.role==="user"&&m.content.toLowerCase().trim().replace(/[.!?,]+$/g,"").replace(/\s+/g," ")===alias.phrase))throw Error("Proposal phrase is not an exact customer message");
+  if(!(chat.messages??[]).some(m=>m.role==="user"&&normalizePhrase(m.content)===alias.phrase))throw Error("Proposal phrase is not an exact customer message");
   return{...alias,severity:s.severity,reason:s.reason.slice(0,500)};
  });
 }

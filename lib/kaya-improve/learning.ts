@@ -4,7 +4,7 @@ export type Intent="customer_will_call"|"request_number"|"request_location"|"req
 export interface Alias { phrase:string; intent:Intent }
 export interface Learning { version:1; aliases:Alias[]; skills?:SkillId[] }
 export const TARGETS:Record<Intent,string>={customer_will_call:"I will call you",request_number:"send me your number",request_location:"Where is your branch?",request_hours:"What are your opening hours?",ask_inspection:"How does the car inspection work?",ask_payment:"How do you pay for my car?",ask_consignment:"How does consignment work?",ask_loan_settlement:"Can you help settle my car loan?",ask_documents:"What documents do I need to sell my car?"};
-export const normalizePhrase=(s:string)=>s.normalize("NFKC").toLowerCase().trim().replace(/[’]/g,"'").replace(/[.!?,]+$/g,"").replace(/\s+/g," ");
+export const normalizePhrase=(s:string)=>s.normalize("NFKC").toLowerCase().trim().replace(/[’]/g,"'").replace(/[.!?,؟،]+$/g,"").replace(/\s+/g," ");
 export function validateLearning(value:unknown):Learning {
  const c=value as Learning;
  if(!c||Object.keys(c).some(k=>!["version","aliases","skills"].includes(k))||c.version!==1||!Array.isArray(c.aliases)||c.aliases.length>100)throw Error("Invalid learning catalog");

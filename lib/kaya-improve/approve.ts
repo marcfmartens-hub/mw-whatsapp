@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "crypto";
 import catalog from "./learning.json";
 import { Chat, detect } from "./detect";
 import { independentlyValidate, propose, safeEvidence, retryableReviewError } from "./reviewer";
-import { validateLearning, validateCandidate } from "./learning";
+import { validateLearning, validateCandidate, normalizePhrase } from "./learning";
 import { improveDb, settings } from "./store";
 import { hash, publishReady, successfulMessages } from "./publisher";
 import { AUTO_POLICY } from "./auto-policy";
@@ -44,7 +44,7 @@ export async function autoReview(chat:Chat, findingCode?:string){
     const replay=await replayGate(before,candidate,[source],await successfulReplayInputs());
     validation={...tests,independent,replay,replay_source:source,policy:AUTO_POLICY.version,base_hash:hash(JSON.stringify(before)),evidence_hash:fingerprint};status="approved";approved++;
    }catch(e){validation={passed:false,reason:e instanceof Error?e.message:String(e),policy:AUTO_POLICY.version,retryable:retryableReviewError(e),attempts:attempts+1};if(validation.retryable)retryable++;status="rejected";rejected++;}
-   const position=(chat.messages??[]).findIndex(m=>m.role==="user"&&m.content.toLowerCase().trim().replace(/[.!?,]+$/g,"").replace(/\s+/g," ")===alias.phrase);
+   const position=(chat.messages??[]).findIndex(m=>m.role==="user"&&normalizePhrase(m.content)===alias.phrase);
    const response=position>=0?(chat.messages??[]).slice(position+1).find(m=>m.role==="assistant")?.content??"":"";
    const severity=s.severity==="critical"&&detected.findings.some(f=>f.severity==="critical")?"critical":alias.intent==="customer_will_call"&&/\b(?:our team|we|someone)\b.{0,40}\b(?:will call|will contact|will be in touch)/i.test(response)?"critical":"minor";
    const r=await db.from("mw_improve_proposals").upsert({id,status,severity,...(s.skill?{intent:"communication_skill",phrase:s.skill}:alias),reason:s.reason,evidence:{conversation:evidence,solution:s.skill?COMMUNICATION_SKILLS[s.skill]:alias,policy:AUTO_POLICY.version},validation});if(r.error&&r.error.code!=="23505")throw r.error;
