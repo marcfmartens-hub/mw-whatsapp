@@ -2,6 +2,7 @@
   "version": 1,
   "aliases": [],
   "skills": [
-    "avoid_repetition"
+    "avoid_repetition",
+    "answer_in_context"
   ]
 }
