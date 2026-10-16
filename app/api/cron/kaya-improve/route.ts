@@ -1,3 +1,4 @@
+import {processPendingReviews} from "@/lib/kaya-improve/pending";
 import {NextRequest,NextResponse} from "next/server";
 import {timingSafeEqual} from "crypto";
 import {publishReady} from "@/lib/kaya-improve/publisher";
@@ -12,6 +13,8 @@ export async function GET(req:NextRequest){
  const state=await settings();if(!state.config.enabled)return NextResponse.json({skipped:true});
  await publishReady();
  if(!state.config.autoApprove)return NextResponse.json({publishing:false});
+ const pending=await processPendingReviews();
+ if(!("idle" in pending))return NextResponse.json({pending});
  const {data,error}=await improveDb().from("mw_whatsapp").select("*").order("last_message_at",{ascending:false}).limit(5);if(error)throw error;
  let reviewed=0;const errors:string[]=[];
  for(const chat of data??[]){if(!/^\d{8,16}$/.test(chat.phone)||/^971599900/.test(chat.phone))continue;try{await autoReview(chat);reviewed++;}catch{errors.push("Review deferred; inspect run history");}}

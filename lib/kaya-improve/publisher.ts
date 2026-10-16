@@ -75,7 +75,7 @@ async function prepareRelease(after:Learning,proposals:any[],severity:"critical"
   await saveRelease(id,{status:"ci_pending",head_sha:commit.sha,pr_number:pr.number});return{id,status:"ci_pending"};
  }catch(e){await saveRelease(id,{status:"blocked",error:e instanceof Error?e.message:String(e)});throw e;}
 }
-export async function publishReady(){
+export async function publishReady(options:{processNow?:boolean}={}){
  const state=await settings();if(!state.config.enabled)return;
  const connection=await connectionStatus();if(!connection.ready)return;
  const db=improveDb(),holder=randomUUID();const lease=await db.rpc("kaya_improve_lease",{lease_name:"publisher",holder,release_lease:false});if(lease.error)throw lease.error;if(!lease.data)return;
@@ -91,12 +91,19 @@ export async function publishReady(){
   const critical=(pending.data??[]).filter(p=>p.severity==="critical");const candidates=critical.length?critical:(pending.data??[]).filter(p=>p.severity==="minor");if(!candidates.length)return;
   const severity=critical.length?"critical":"minor";
   const last=await db.from("mw_improve_releases").select("published_at").eq("severity","minor").eq("status","published").order("published_at",{ascending:false}).limit(1);if(last.error)throw last.error;
-  if(!releaseDue(severity,last.data?.[0]?.published_at??null))return;
+  if(!options.processNow&&!releaseDue(severity,last.data?.[0]?.published_at??null))return;
   const gh=new Github(),main=await gh.main(),before=validateLearning(JSON.parse(await gh.file(AUTO_POLICY.allowedPath,main.sha)));
   const seen=new Set<string>();
   const selected=candidates.filter(p=>{const key=`${p.intent}:${p.phrase}`;if(seen.has(key))return false;seen.add(key);return true;}).filter(p=>p.intent==="communication_skill"?!(before.skills??[]).includes(p.phrase):!before.aliases.some(a=>a.phrase===p.phrase)).slice(0,5);if(!selected.length)return;
   const after=validateLearning({version:1,aliases:[...before.aliases,...selected.filter(p=>p.intent!=="communication_skill").map(p=>({phrase:p.phrase,intent:p.intent}))],skills:[...(before.skills??[]),...selected.filter(p=>p.intent==="communication_skill").map(p=>p.phrase)]});
-  await prepareRelease(after,selected,severity,{proposal_validations:selected.map(p=>({id:p.id,validation:p.validation}))});
+  try{await prepareRelease(after,selected,severity,{proposal_validations:selected.map(p=>({id:p.id,validation:p.validation}))});}
+  catch(e){
+   const reason=e instanceof Error?e.message:String(e);
+   // A deterministic failed release replay must leave the approval queue.
+   // Technical/provider failures keep their evidence for a later retry.
+   if(!/^Replay (?:failed:|left a|did not demonstrate)|^Historical replay requires/.test(reason))throw e;
+   for(const p of selected){const r=await db.from("mw_improve_proposals").update({status:"rejected",validation:{...p.validation,publish_recheck:{passed:false,reason,policy:AUTO_POLICY.version}},updated_at:new Date().toISOString()}).eq("id",p.id).is("release_id",null);if(r.error)throw r.error;}
+  }
  }finally{await db.rpc("kaya_improve_lease",{lease_name:"publisher",holder,release_lease:true});}
 }
 export async function rollbackRelease(id:string,actor:string){
