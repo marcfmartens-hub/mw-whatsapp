@@ -31,7 +31,7 @@ async function doProgressRelease(release:any){
  if(release.status==="deploying"){
   const checks=await gh.checks(release.merge_sha);
   if(checks.failed){await saveRelease(release.id,{status:"deployment_failed",error:"Production checks failed; inspect the deployment before restoring."});return;}
-  if(await gh.productionReady(release.merge_sha)){await saveRelease(release.id,{status:"published",published_at:new Date().toISOString()});const r=await improveDb().from("mw_improve_proposals").update({status:"published"}).eq("release_id",release.id);if(r.error)throw r.error;}
+  if(await gh.productionReady(release.merge_sha,release.backup?.after_hash)){await saveRelease(release.id,{status:"published",published_at:new Date().toISOString()});const r=await improveDb().from("mw_improve_proposals").update({status:"published"}).eq("release_id",release.id);if(r.error)throw r.error;}
   return;
  }
  if(release.status!=="ci_pending")return;
@@ -85,7 +85,8 @@ export async function publishReady(){
    if(release.status==="preparing"&&Date.now()-Date.parse(release.created_at)>15*60000)await saveRelease(release.id,{status:"blocked",error:"Preparation was interrupted; inspect this release before retrying."});
    else await progressRelease(release);
   }
-  if(active.data?.length)return;
+  // Re-read: a release completed above must not block the next eligible batch.
+  const remaining=await db.from("mw_improve_releases").select("id").in("status",["preparing","ci_pending","deploying"]);if(remaining.error)throw remaining.error;if(remaining.data?.length)return;
   const pending=await db.from("mw_improve_proposals").select("*").eq("status","approved").is("release_id",null).order("created_at");if(pending.error)throw pending.error;
   const critical=(pending.data??[]).filter(p=>p.severity==="critical");const candidates=critical.length?critical:(pending.data??[]).filter(p=>p.severity==="minor");if(!candidates.length)return;
   const severity=critical.length?"critical":"minor";
