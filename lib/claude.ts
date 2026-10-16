@@ -1,3 +1,4 @@
+import {mileageClarification} from "./kaya-improve/policy-checks";
 import learnedCatalog from "./kaya-improve/learning.json";
 import {Learning,validateLearning,learnedMessage} from "./kaya-improve/learning";
 import {communicationPrompt} from "./kaya-improve/skills";
@@ -607,6 +608,8 @@ export async function getKayaReply(
   learning: Learning = validateLearning(learnedCatalog),
   strictReplay = false
 ): Promise<string> {
+  const clarification=mileageClarification(customerMessage);
+  if(clarification)return clarification;
   const messages: ConversationMessage[] = [
     ...history,
     { role: "user", content: learnedMessage(customerMessage.trim(),learning) || "(no message)" },
