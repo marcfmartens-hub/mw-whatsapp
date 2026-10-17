@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid offset' }, { status: 400 });
   }
   const { data, error } = await supabase.from('mw_whatsapp')
-    .select('id,phone,phone_number,name,make,model,year,mileage,specs,appointment,appointment_date,appointment_time,created_at')
+    .select('id,phone,phone_number,alternative_phone,name,make,model,year,mileage,specs,appointment,appointment_date,appointment_time,estimated_price,owner_status,car_conditions,inquiry_summary,sell_timeline,source_url,created_at')
     .order('created_at', { ascending: true }).range(offset, offset + 499);
   if (error) return NextResponse.json({ error: 'Lead read failed' }, { status: 502 });
   return NextResponse.json({ leads: data || [], nextOffset: data?.length === 500 ? offset + 500 : null },
