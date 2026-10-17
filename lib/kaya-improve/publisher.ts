@@ -88,11 +88,18 @@ export async function publishReady(options:{processNow?:boolean}={}){
   // Re-read: a release completed above must not block the next eligible batch.
   const remaining=await db.from("mw_improve_releases").select("id").in("status",["preparing","ci_pending","deploying"]);if(remaining.error)throw remaining.error;if(remaining.data?.length||!state.config.autoApprove)return;
   const pending=await db.from("mw_improve_proposals").select("*").eq("status","approved").is("release_id",null).order("created_at");if(pending.error)throw pending.error;
+  const requests=await db.from("mw_improve_runs").select("id").eq("kind","approved_processing").eq("status","running");if(requests.error)throw requests.error;
+  const drain=!!requests.data?.length;
+  if(!pending.data?.length&&drain){const done=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString(),summary:{message:"Approved queue drained; inspect releases for individual outcomes"}}).in("id",requests.data!.map(r=>r.id));if(done.error)throw done.error;}
   const critical=(pending.data??[]).filter(p=>p.severity==="critical");const candidates=critical.length?critical:(pending.data??[]).filter(p=>p.severity==="minor");if(!candidates.length)return;
   const severity=critical.length?"critical":"minor";
   const last=await db.from("mw_improve_releases").select("published_at").eq("severity","minor").eq("status","published").order("published_at",{ascending:false}).limit(1);if(last.error)throw last.error;
-  if(!options.processNow&&!releaseDue(severity,last.data?.[0]?.published_at??null))return;
+  if(!options.processNow&&!drain&&!releaseDue(severity,last.data?.[0]?.published_at??null))return;
   const gh=new Github(),main=await gh.main(),before=validateLearning(JSON.parse(await gh.file(AUTO_POLICY.allowedPath,main.sha)));
+  // Already-present learning is a no-op, not a release waiting forever.
+  for(const p of candidates.filter(p=>p.intent==="communication_skill"?(before.skills??[]).includes(p.phrase):before.aliases.some(a=>a.phrase===p.phrase&&a.intent===p.intent))){
+   const r=await db.from("mw_improve_proposals").update({status:"rejected",validation:{...p.validation,publish_recheck:{passed:false,reason:"Fix already exists on main; no additional change required"}},updated_at:new Date().toISOString()}).eq("id",p.id).is("release_id",null);if(r.error)throw r.error;
+  }
   const seen=new Set<string>();
   const eligible=candidates.filter(p=>{const key=`${p.intent}:${p.phrase}`;if(seen.has(key))return false;seen.add(key);return true;}).filter(p=>p.intent==="communication_skill"?!(before.skills??[]).includes(p.phrase):!before.aliases.some(a=>a.phrase===p.phrase)).slice(0,5);
   if(!eligible.length)return;

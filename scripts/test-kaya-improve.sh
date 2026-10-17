@@ -14,6 +14,7 @@ NODE_PATH="$PWD/node_modules" node scripts/kaya-conversation-tests.cjs "$out/kay
 NODE_PATH="$PWD/node_modules" node scripts/kaya-event-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-auto-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-finding-tests.cjs "$out/kaya-improve"
+NODE_PATH="$PWD/node_modules" node scripts/kaya-manual-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-publisher-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-repair-tests.cjs "$out/kaya-improve"
 NODE_PATH="$PWD/node_modules" node scripts/kaya-pending-tests.cjs "$out/kaya-improve"

@@ -1,6 +1,6 @@
 import {queuePendingReviews,processPendingReviews} from "@/lib/kaya-improve/pending";
 import { waitUntil } from "@vercel/functions";
-import { autoReview } from "@/lib/kaya-improve/approve";
+import { autoReview, approveProposal } from "@/lib/kaya-improve/approve";
 import { detect, Chat } from "@/lib/kaya-improve/detect";
 import { NextRequest, NextResponse } from "next/server";
 import { sessionUser } from "@/lib/monitorRole";
@@ -97,10 +97,20 @@ export async function POST(req:NextRequest) {
    for(const r of data??[])await resumeForCommit(r.merge_sha??r.head_sha);
    return NextResponse.json({ok:true});
   }
+  if(body.action==="approve_proposal"){
+   if(process.env.VERCEL_ENV!=="production")return NextResponse.json({error:"Approval is production only"},{status:409});
+   if(!/^[a-f0-9]{64}$/.test(body.proposal??""))return NextResponse.json({error:"Invalid proposal"},{status:400});
+   const runId=`manual-approval:${crypto.randomUUID()}`;
+   const db=improveDb();const inserted=await db.from("mw_improve_runs").insert({id:runId,kind:"manual_approval",status:"running",summary:{proposal:body.proposal,actor:g.user!.username}});if(inserted.error)throw inserted.error;
+   waitUntil((async()=>{try{await approveProposal(body.proposal,g.user!.username);const r=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString()}).eq("id",runId);if(r.error)throw r.error;}catch(e){await db.from("mw_improve_runs").update({status:"failed",finished_at:new Date().toISOString(),error:e instanceof Error?e.message:String(e)}).eq("id",runId);}})());
+   return NextResponse.json({ok:true,message:"Approval validation started. Independent review and before/after tests must pass before the proposal becomes approved. Follow Run history for the result."},{status:202});
+  }
   if(body.action==="publish_ready"){
    const connection=await connectionStatus();if(!connection.ready)return NextResponse.json({error:"GitHub publishing connection is not ready"},{status:409});
    const state=await settings();if(!state.config.enabled||!state.config.autoApprove)return NextResponse.json({error:"Enable detection and auto approval first"},{status:409});
-   await publishReady({processNow:true});return NextResponse.json({ok:true,message:"Approved fixes processed without waiting for the daily window. Validation, backup, CI, preview and production checks still apply."});
+   const db=improveDb();const inserted=await db.from("mw_improve_runs").insert({id:`approved-processing:${crypto.randomUUID()}`,kind:"approved_processing",status:"running",summary:{actor:g.user!.username}});if(inserted.error)throw inserted.error;
+   waitUntil(publishReady({processNow:true}).catch(e=>console.error("[kaya-improve] approved processing failed",e)));
+   return NextResponse.json({ok:true,message:"Approved-fix processing queued. All batches continue automatically through validation, replay, backup, CI, preview and production checks. See release status and Run history; queued does not mean deployed."},{status:202});
   }
   if(body.action==="rollback_code"){
    if(!/^[a-f0-9-]{36}$/.test(body.release??""))return NextResponse.json({error:"Invalid release"},{status:400});
