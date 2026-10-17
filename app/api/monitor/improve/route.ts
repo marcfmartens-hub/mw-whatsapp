@@ -1,3 +1,4 @@
+import {queueAllProposals,runAllProposalsStep} from "@/lib/kaya-improve/all-proposals";
 import {queuePendingReviews,processPendingReviews} from "@/lib/kaya-improve/pending";
 import { waitUntil } from "@vercel/functions";
 import { autoReview, approveProposal } from "@/lib/kaya-improve/approve";
@@ -97,6 +98,12 @@ export async function POST(req:NextRequest) {
    for(const r of data??[])await resumeForCommit(r.merge_sha??r.head_sha);
    return NextResponse.json({ok:true});
   }
+  if(body.action==="approve_all"){
+   if(process.env.VERCEL_ENV!=="production")return NextResponse.json({error:"Processing is production only"},{status:409});
+   const result=await queueAllProposals(g.user!.username);
+   waitUntil(runAllProposalsStep().catch(e=>console.error("[kaya-improve] all proposals failed",e)));
+   return NextResponse.json({ok:true,result,message:"Approve All queued. Each proposal is checked and tested; passing fixes deploy automatically. Unsupported or failed fixes show a reason. Remaining proposals resume automatically without admin approval."},{status:202});
+  }
   if(body.action==="approve_proposal"){
    if(process.env.VERCEL_ENV!=="production")return NextResponse.json({error:"Approval is production only"},{status:409});
    if(!/^[a-f0-9]{64}$/.test(body.proposal??""))return NextResponse.json({error:"Invalid proposal"},{status:400});
@@ -132,6 +139,7 @@ export async function POST(req:NextRequest) {
   const config=restore?null:validateConfig(body.config);
   const {data,error}=await improveDb().rpc("kaya_improve_save",{expected_revision:body.revision,next_config:config,actor_name:g.user!.username,restore_version:restore?body.version:null});
   if(error)throw new Error(error.message);
+  if(config?.enabled&&config.fullAutonomous)waitUntil(queueAllProposals(g.user!.username,true).then(()=>runAllProposalsStep()).catch(e=>console.error("[kaya-improve] autonomous processing failed",e)));
   return NextResponse.json({ok:true,revision:data});
  }catch(e){console.error("[kaya-improve] monitor action failed",e);return NextResponse.json({error:e instanceof Error?e.message:"Action failed"},{status:400});}
 }
