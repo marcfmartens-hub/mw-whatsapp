@@ -7,8 +7,8 @@ export const RUNS = [
 ] as const;
 export type RunId = typeof RUNS[number]["id"];
 export type Schedule = { mode: "event" | "interval" | "off"; minutes: number };
-export interface ImproveConfig { enabled: boolean; autoApprove: boolean; schedules: Record<RunId, Schedule> }
-export const DEFAULT_CONFIG: ImproveConfig = { enabled: false, autoApprove: false, schedules: Object.fromEntries(RUNS.map(r => [r.id, { mode: r.defaultMode, minutes: r.defaultMinutes }])) as ImproveConfig["schedules"] };
+export interface ImproveConfig { enabled: boolean; autoApprove: boolean; fullAutonomous?: boolean; schedules: Record<RunId, Schedule> }
+export const DEFAULT_CONFIG: ImproveConfig = { enabled: false, autoApprove: false, fullAutonomous: false, schedules: Object.fromEntries(RUNS.map(r => [r.id, { mode: r.defaultMode, minutes: r.defaultMinutes }])) as ImproveConfig["schedules"] };
 export function validateConfig(value: unknown): ImproveConfig {
   const c = value as ImproveConfig;
   if (!c || typeof c.enabled !== "boolean" || !c.schedules) throw new Error("Invalid settings");
@@ -20,7 +20,8 @@ export function validateConfig(value: unknown): ImproveConfig {
     schedules[r.id] = { mode: s.mode, minutes: s.minutes };
   }
   if(c.autoApprove !== undefined && typeof c.autoApprove !== "boolean") throw new Error("Invalid auto-approval setting");
-  return { enabled: c.enabled, autoApprove: c.autoApprove ?? false, schedules };
+  if(c.fullAutonomous !== undefined && typeof c.fullAutonomous !== "boolean") throw new Error("Invalid autonomous setting");
+  return { enabled: c.enabled, autoApprove: c.fullAutonomous ? true : c.autoApprove ?? false, fullAutonomous: c.fullAutonomous ?? false, schedules };
 }
 export function nextRun(config: ImproveConfig, id: RunId, last: string | null): string | null {
   const s = config.schedules[id];

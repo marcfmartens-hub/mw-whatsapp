@@ -1,3 +1,4 @@
+import {queueAllProposals,runAllProposalsStep} from "@/lib/kaya-improve/all-proposals";
 import {processPendingReviews} from "@/lib/kaya-improve/pending";
 import {NextRequest,NextResponse} from "next/server";
 import {timingSafeEqual} from "crypto";
@@ -13,6 +14,9 @@ export async function GET(req:NextRequest){
  const state=await settings();if(!state.config.enabled)return NextResponse.json({skipped:true});
  await publishReady();
  if(!state.config.autoApprove)return NextResponse.json({publishing:false});
+ if(state.config.fullAutonomous)await queueAllProposals("Kaya autonomous",true);
+ const all=await runAllProposalsStep();
+ if(!("idle" in all)&&!("paused" in all))return NextResponse.json({all});
  const pending=await processPendingReviews();
  if(!("idle" in pending))return NextResponse.json({pending});
  const {data,error}=await improveDb().from("mw_whatsapp").select("*").order("last_message_at",{ascending:false}).limit(5);if(error)throw error;

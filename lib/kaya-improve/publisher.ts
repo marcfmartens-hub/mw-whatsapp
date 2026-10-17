@@ -90,11 +90,12 @@ export async function publishReady(options:{processNow?:boolean}={}){
   const pending=await db.from("mw_improve_proposals").select("*").eq("status","approved").is("release_id",null).order("created_at");if(pending.error)throw pending.error;
   const requests=await db.from("mw_improve_runs").select("id").eq("kind","approved_processing").eq("status","running");if(requests.error)throw requests.error;
   const drain=!!requests.data?.length;
-  if(!pending.data?.length&&drain){const done=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString(),summary:{message:"Approved queue drained; inspect releases for individual outcomes"}}).in("id",requests.data!.map(r=>r.id));if(done.error)throw done.error;}
+  const reviewing=drain?await db.from("mw_improve_runs").select("id").eq("kind","all_proposals").eq("status","running").limit(1):{data:[],error:null};if(reviewing.error)throw reviewing.error;
+  if(!pending.data?.length&&drain&&!reviewing.data?.length){const done=await db.from("mw_improve_runs").update({status:"completed",finished_at:new Date().toISOString(),summary:{message:"Approved queue drained; inspect releases for individual outcomes"}}).in("id",requests.data!.map(r=>r.id));if(done.error)throw done.error;}
   const critical=(pending.data??[]).filter(p=>p.severity==="critical");const candidates=critical.length?critical:(pending.data??[]).filter(p=>p.severity==="minor");if(!candidates.length)return;
   const severity=critical.length?"critical":"minor";
   const last=await db.from("mw_improve_releases").select("published_at").eq("severity","minor").eq("status","published").order("published_at",{ascending:false}).limit(1);if(last.error)throw last.error;
-  if(!options.processNow&&!drain&&!releaseDue(severity,last.data?.[0]?.published_at??null))return;
+  if(!options.processNow&&!drain&&!state.config.fullAutonomous&&!releaseDue(severity,last.data?.[0]?.published_at??null))return;
   const gh=new Github(),main=await gh.main(),before=validateLearning(JSON.parse(await gh.file(AUTO_POLICY.allowedPath,main.sha)));
   // Already-present learning is a no-op, not a release waiting forever.
   for(const p of candidates.filter(p=>p.intent==="communication_skill"?(before.skills??[]).includes(p.phrase):before.aliases.some(a=>a.phrase===p.phrase&&a.intent===p.intent))){
