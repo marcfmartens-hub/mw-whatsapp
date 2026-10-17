@@ -54,3 +54,9 @@ GitHub check/status/deployment completion webhooks resume releases without polli
 Super Admin can Restore previous learning version for the currently active release. It verifies backup hashes, creates a fresh backup and tested restore commit, then follows the same CI/preview/deployment path. Old code remains until the restore deploys. It does not undo customer messages, Bigin actions, database schema or credentials. Uncertain/failed/stale releases do not silently retry publication.
 
 Existing public WhatsApp/monitor tables are restricted to the server-header policy after this release has deployed; server clients and the inactive cron include the header. This closes direct public-key modification of user roles and customer records before connecting the publishing credential.
+
+## Manual proposal approval and full queue processing
+
+Super Admin can use **Approve & validate** for an unreleased, supported proposal. Approval reruns independent review, candidate validation and historical before/after replay against its source conversation. The result appears as a durable manual approval run. Findings without a concrete alias or fixed communication skill cannot be approved as code; review the conversation or implement a separately reviewed code fix.
+
+**Process approved fixes now** creates a durable processing request and returns immediately. The publisher continues batches of up to five, waiting for each release's CI, preview and production confirmation. The recovery cron resumes the request and bypasses the normal minor daily window until the approved queue drains. Enabled and automatic approval switches, publishing connection, locked-file restrictions and all validation gates still apply. Already-present learning is recorded as a no-op rejection. Queue completion means processing finished; individual release statuses remain authoritative for deployment success.

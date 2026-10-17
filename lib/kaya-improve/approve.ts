@@ -59,3 +59,27 @@ export async function autoReview(chat:Chat, findingCode?:string,reviewKey?:strin
  }finally{await db.rpc("kaya_improve_lease",{lease_name:`review:${chat.phone}`,holder,release_lease:true});}
  await publishReady();
 }
+
+/** Manual approval reuses every validation gate; it cannot approve arbitrary code. */
+export async function approveProposal(id:string,actor:string){
+ const state=await settings();if(!state.config.enabled)throw Error("Enable Kaya Improve first");
+ const db=improveDb();
+ const row=await db.from("mw_improve_proposals").select("*").eq("id",id).single();if(row.error)throw row.error;
+ const p=row.data;
+ if(p.release_id||!["needs_admin","rejected"].includes(p.status))throw Error("Proposal changed; refresh the monitor");
+ if(!p.intent||!p.phrase)throw Error("This finding has no executable fix. Review the source conversation to generate a supported solution; approval cannot bypass locked rules.");
+ if(!p.evidence?.phone)throw Error("Source conversation is missing; review this finding again first");
+ const source=await db.from("mw_whatsapp").select("*").eq("phone",p.evidence.phone).single();if(source.error)throw source.error;
+ const chat=source.data as Chat;
+ const before=validateLearning(catalog),skill=p.intent==="communication_skill";
+ if(!skill&&!(chat.messages??[]).some(m=>m.role==="user"&&normalizePhrase(m.content)===p.phrase))throw Error("Proposed phrase is not an exact customer message");
+ const candidate=validateLearning({version:1,aliases:skill?before.aliases:[...before.aliases,{phrase:p.phrase,intent:p.intent}],skills:skill?[...(before.skills??[]),p.phrase]:before.skills});
+ const independent=await independentlyValidate(skill?{skill:p.phrase}:{phrase:p.phrase,intent:p.intent},chat);
+ if(!independent.passed)throw Error(`Independent review rejected: ${independent.reason}`);
+ const tests=validateCandidate(before,candidate,await successfulMessages());
+ const replay_source=replayInput(chat,"Manually approved issue",skill?undefined:p.phrase);
+ const replay=await replayGate(before,candidate,[replay_source],await successfulReplayInputs());
+ const latest=await settings();if(!latest.config.enabled)throw Error("Kaya Improve was switched off");
+ const saved=await db.from("mw_improve_proposals").update({status:"approved",validation:{...tests,independent,replay,replay_source,policy:AUTO_POLICY.version,approved_by:actor,approved_at:new Date().toISOString()},updated_at:new Date().toISOString()}).eq("id",id).eq("status",p.status).is("release_id",null).select("id");
+ if(saved.error)throw saved.error;if(!saved.data?.length)throw Error("Proposal changed during validation; refresh the monitor");
+}
