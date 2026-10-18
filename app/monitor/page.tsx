@@ -15,7 +15,7 @@ interface Conv {
   mileage: string | null; specs: string | null; loan: string | null;
   sell_timeline: string | null; appointment: string | null;
   appointment_date: string | null; appointment_time: string | null;
-  last_message_at: string | null; messages: Message[] | null;
+  created_at?: string; last_message_at: string | null; messages: Message[] | null;
 }
 
 interface LoginRecord { id: number; username: string; ip: string; user_agent: string; logged_in_at: string; }
@@ -320,12 +320,19 @@ function SettingsPanel({ onClose, me }: { onClose: () => void; me: string }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function MonitorPage() {
+  const [whatsappHealth, setWhatsappHealth] = useState("checking");
+  useEffect(() => {
+    const check = () => fetch("/api/monitor/health", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(d => setWhatsappHealth(d?.whatsapp ?? "unavailable")).catch(() => setWhatsappHealth("unavailable"));
+    check(); const id = setInterval(check, 60000); return () => clearInterval(id);
+  }, []);
   const [convs, setConvs]         = useState<Conv[]>([]);
   const [active, setActive]       = useState<string | null>(null);
   const [search, setSearch]       = useState("");
   const [filter, setFilter]       = useState<"all"|"active"|"complete">("all");
   const [loading, setLoading]     = useState(true);
   const [settings, setSettings]   = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryResult, setRecoveryResult] = useState("");
   const [resetting, setResetting] = useState(false);
   const [role, setRole]           = useState<string | null>(null);
   const [meName, setMeName]       = useState("");
@@ -373,6 +380,20 @@ export default function MonitorPage() {
   const showSidebar = isMobile ? !activeConv : !collapsed;
   const showChat = isMobile ? !!activeConv : true;
 
+  async function recoverLeads() {
+    if (recovering) return;
+    setRecovering(true);
+    setRecoveryResult("");
+    try {
+      const res = await fetch("/api/monitor/recover-leads", { method: "POST" });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Recovery failed");
+      setRecoveryResult(`Forwarded ${result.pushed} leads to Bigin. Failed: ${result.failed}.`);
+      await fetchConvs();
+    } catch (e) { setRecoveryResult(e instanceof Error ? e.message : "Recovery failed"); }
+    finally { setRecovering(false); }
+  }
+
   async function handleReset() {
     if (!active || resetting) return;
     if (!confirm("Reset this conversation? All data will be cleared.")) return;
@@ -408,6 +429,17 @@ export default function MonitorPage() {
           </div>
         </div>
 
+        {whatsappHealth !== "verified" && whatsappHealth !== "checking" && <div role="alert" style={{ padding: "10px 16px", background: "#512424", color: "#fff", fontSize: 13 }}>
+          {whatsappHealth === "authentication_required" ? "WhatsApp authentication failed. Kaya cannot send replies until the Meta connection is restored. Incoming chats are saved and leads can still be forwarded to Bigin."
+            : whatsappHealth === "configuration_missing" ? "WhatsApp connection is not configured. Kaya cannot send replies."
+            : "WhatsApp connection could not be verified. Check the connection before relying on replies."}
+        </div>}
+        {isSuper && <div style={{ padding: "8px 16px", color: "#e9edef", fontSize: 12 }}>
+          <button style={S.resetBtn} disabled={recovering} onClick={recoverLeads}>
+            {recovering ? "Forwarding leads…" : "Recover unforwarded leads"}
+          </button>
+          {recoveryResult && <div role="status" style={{ marginTop: 8 }}>{recoveryResult}</div>}
+        </div>}
         <div style={S.searchWrap}>
           <div style={S.searchBox}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8696a0" strokeWidth="2">
@@ -436,7 +468,7 @@ export default function MonitorPage() {
                   <div style={S.contactPhone}>
                     {c.name ? <><span style={S.contactName}>{c.name}</span><span style={S.contactPhoneSub}> · +{c.phone}</span></> : "+" + c.phone}
                   </div>
-                  <div style={S.contactTime}>{relativeTime(c.last_message_at)}</div>
+                  <div style={S.contactTime}>{relativeTime(c.last_message_at || (c.created_at ? `${c.created_at.replace(/Z$/, "")}Z` : null))}</div>
                 </div>
                 <div style={S.contactBottom}>
                   <div style={S.contactPreview}>{lastPreview(c)}</div>
