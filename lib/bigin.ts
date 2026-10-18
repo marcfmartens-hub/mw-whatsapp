@@ -420,6 +420,7 @@ export async function createBiginContact(
       }
       throw new Error(`Bigin ${existingId ? "update" : "create"} failed: ${res.status} ${text}`);
     }
+    if (!savedId) throw new Error("Bigin did not confirm a saved contact ID");
     console.log(`[Bigin] contact ${existingId ? "updated" : "created"}:`, text);
     if (applyTag && savedId) await tagRecord(savedId, applyTag, headers);
     // Far-away timing ("after Eid", "next month"): Next Follow up Date on the pipeline card → the

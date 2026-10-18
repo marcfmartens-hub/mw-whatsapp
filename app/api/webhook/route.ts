@@ -1,5 +1,6 @@
 import {mileageClarification} from "@/lib/kaya-improve/policy-checks";
 import {LOCATION_TEXT,CUSTOMER_CALL_CHOICE,wantsOurNumber} from "@/lib/kaya-improve/contact";
+import { saveInbound } from "@/lib/inbound";
 import { learnedMessage } from "@/lib/kaya-improve/learning";
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation, Conversation } from "@/lib/supabase";
@@ -581,6 +582,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "ignored" }, { status: 200 });
   }
 
+  let inboundCommitted = false;
   let claimedPhone: string | null = null;   // set while this request is writing a reply
   try {
     const message = extractMessage(body);
@@ -599,11 +601,20 @@ export async function POST(req: NextRequest) {
 
     // ── Voice notes / media without text ────────────────────────────
     if (message.type === "reaction") return NextResponse.json({ status: "ignored" }, { status: 200 });
+    if (message.type === "sticker") return NextResponse.json({ status: "ignored" }, { status: 200 });
+    // Commit the customer's message before Meta, Claude, or any early-return branch.
+    // Keep the pre-message snapshot for restart detection and step processing below.
+    const inbound = await saveInbound(phone, message.id,
+      (["image", "document", "video"].includes(message.type)
+        ? `[${message.type === "image" ? "photo" : "file"}]${messageText ? " " + messageText : ""}`
+        : messageText || `[${message.type}]`), getOrCreateConversation, updateConversation);
+    inboundCommitted = true;
+    if (inbound.duplicate) return NextResponse.json({ status: "duplicate" }, { status: 200 });
+    const conversation = inbound.before;
     if (!messageText && message.type === "audio") {
       await sendWhatsAppMessage(phone, "Sorry, I can't listen to voice notes. Could you type your message instead?");
       return NextResponse.json({ status: "voice_note" }, { status: 200 });
     }
-    if (message.type === "sticker") return NextResponse.json({ status: "ignored" }, { status: 200 });
     // Photos / files: Kaya can't open them. Tag them so the whole batch gets ONE reply,
     // and any caption / ad text sent with them is still read.
     const isMedia = ["image", "document", "video"].includes(message.type);
@@ -696,7 +707,6 @@ export async function POST(req: NextRequest) {
     }
     // ──────────────────────────────────────────────────────────────
 
-    const conversation = await getOrCreateConversation(phone);
     if (/^\[(photo|file)\]\s*$/.test(messageText)) {
       const cc = conversation as any;
       const carDone = ["make", "model", "year", "mileage"].every(k => cc[k] && cc[k] !== "Unknown");
@@ -781,13 +791,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (conversation.last_msg_id && conversation.last_msg_id === message.id) {
-      return NextResponse.json({ status: "duplicate" }, { status: 200 });
-    }
-
-    // Mark this message ID immediately to prevent duplicate processing during async Claude call
-    // Re-fetch after stamp so we see any reset that completed between our initial fetch and now
-    await updateConversation(phone, { last_msg_id: message.id } as any).catch(() => {});
     void sendTypingIndicator(message.id); // customer sees "typing…" during the burst wait + reply
     const freshConversation = await getConversation(phone).catch(() => null);
     if (freshConversation) Object.assign(conversation, freshConversation);
@@ -798,13 +801,9 @@ export async function POST(req: NextRequest) {
     // message, wait a few seconds, and only the LATEST message replies — covering the whole burst.
     {
       const prior = (conversation.messages ?? []) as ConversationMessage[];
-      // Photos without a caption don't write history (20 parallel writes would overwrite the ad text).
-      // Text is appended to the freshest copy to keep the race window tiny.
+      // Incoming history was saved before entering the burst wait.
       const bareMedia = /^\[(photo|file)\]$/.test(messageText);
-      if (!bareMedia) {
-        const freshest = ((await getConversation(phone).catch(() => null))?.messages ?? prior) as ConversationMessage[];
-        await updateConversation(phone, { messages: [...freshest, { role: "user", content: messageText }].slice(-40) } as any).catch(() => {});
-      }
+      // The inbound text and timestamp were already committed before any outbound call.
       await new Promise(r => setTimeout(r, message.id.startsWith("sim_") ? 200 : isMedia ? 8000 : 4000));
       let after = await getConversation(phone).catch(() => null);
       if (after && after.last_msg_id && after.last_msg_id !== message.id) {
@@ -830,7 +829,7 @@ export async function POST(req: NextRequest) {
       let i = msgs.length;
       while (i > 0 && msgs[i - 1].role === "user") i--;
       const burst = msgs.slice(i).map(m => m.content).filter(Boolean);
-      if (bareMedia) burst.push(messageText); // this photo itself (not stored)
+      if (bareMedia && !burst.includes(messageText)) burst.push(messageText);
       else if (!burst.includes(ownText)) burst.push(ownText); // our message was overwritten by the previous reply's save
       if (after) Object.assign(conversation, after);
       conversation.messages = msgs.slice(0, i) as any;
@@ -3135,7 +3134,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (error) {
     console.error("Webhook POST error:", error);
-    return NextResponse.json({ status: "error" }, { status: 200 });
+    // Retry storage failures; do not replay an already committed customer message.
+    return NextResponse.json({ status: "error" }, { status: inboundCommitted ? 200 : 503 });
   } finally {
     if (claimedPhone) await updateConversation(claimedPhone, { processing_until: null } as any).catch(() => {});
   }

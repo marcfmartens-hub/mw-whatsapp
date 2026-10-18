@@ -15,5 +15,8 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data ?? []);
+  // Some inbound chats predate durable activity timestamps. Keep them visible
+  // using their creation time without inventing a last-message timestamp.
+  const activity = (c: any) => Date.parse(c.last_message_at || `${String(c.created_at).replace(/Z$/, "")}Z`) || 0;
+  return NextResponse.json((data ?? []).sort((a, b) => activity(b) - activity(a)));
 }
