@@ -1,6 +1,7 @@
 "use client";
 import SettingsIcon from "@/components/SettingsIcon";
 import KayaImproveIcon from "@/components/KayaImproveIcon";
+import { flowState, STATUS_LABELS, type FlowState } from "@/lib/conversation-state";
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -10,6 +11,7 @@ import { useRouter } from "next/navigation";
 interface Message { role: "user" | "assistant"; content: string; }
 
 interface Conv {
+  flow_state?: FlowState | null;
   phone: string; step: number; name: string | null;
   make: string | null; model: string | null; year: string | null;
   mileage: string | null; specs: string | null; loan: string | null;
@@ -363,7 +365,8 @@ export default function MonitorPage() {
 
   const filtered = convs.filter((c) => {
     const s = c.phone.includes(search) || (c.name ?? "").toLowerCase().includes(search.toLowerCase());
-    const f = filter === "all" || (filter === "complete" && c.step >= 8) || (filter === "active" && c.step < 8);
+    const resolved = ["booked", "team_accepted", "customer_will_contact", "closed"].includes(flowState(c).status);
+    const f = filter === "all" || (filter === "complete" && resolved) || (filter === "active" && !resolved);
     return s && f;
   });
 
@@ -472,7 +475,7 @@ export default function MonitorPage() {
                 </div>
                 <div style={S.contactBottom}>
                   <div style={S.contactPreview}>{lastPreview(c)}</div>
-                  <div style={{ ...S.stepBadge, background: stepColor(c.step) }}>{stepLabel(c.step)}</div>
+                  <div style={{ ...S.stepBadge, background: stepColor(c.step), maxWidth: 180, whiteSpace: "normal" }}>{STATUS_LABELS[flowState(c).status]}</div>
                 </div>
               </div>
             </div>
@@ -501,7 +504,7 @@ export default function MonitorPage() {
               <div style={{ ...S.avatar, background: avatarColor(activeConv.phone), width: 42, height: 42, fontSize: 16, flexShrink: 0 }}>{avatarInitial(activeConv)}</div>
               <div style={S.chatHeaderInfo}>
                 <div style={S.chatHeaderName}>{activeConv.name ? `${activeConv.name} · ` : ""}+{activeConv.phone}</div>
-                <div style={S.chatHeaderStatus}><span style={S.dot} />{stepLabel(activeConv.step)} · step {activeConv.step}/8</div>
+                <div style={S.chatHeaderStatus}>{STATUS_LABELS[flowState(activeConv).status]}</div>
               </div>
               <div style={S.fieldPills}>
                 {activeConv.make && <span style={S.pill}>{activeConv.make}</span>}
@@ -510,6 +513,7 @@ export default function MonitorPage() {
                 {activeConv.mileage && <span style={S.pill}>{Number(activeConv.mileage).toLocaleString()} km</span>}
                 {activeConv.specs && <span style={S.pill}>{activeConv.specs}</span>}
                 {activeConv.appointment_date && <span style={{ ...S.pill, background: "#a855f720", color: "#a855f7" }}>📅 {activeConv.appointment_date} {activeConv.appointment_time ?? ""}</span>}
+                {activeConv.flow_state?.proposedDate && !activeConv.appointment_date && <span style={S.pill}>Proposed: {activeConv.flow_state.proposedDate} {activeConv.flow_state.proposedTime || "time pending"}</span>}
               </div>
               <button style={{ ...S.resetBtn, opacity: resetting ? 0.5 : 1 }} onClick={handleReset} disabled={resetting} title="Reset conversation">
                 {resetting ? "Resetting…" : "↺ Reset"}

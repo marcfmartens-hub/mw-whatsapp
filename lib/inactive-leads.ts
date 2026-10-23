@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
-import { createBiginContact, moveLeadToCallBack } from "@/lib/bigin";
-import { pickDefaultTime } from "@/lib/slots";
+import { createBiginContact, createChangeTask, moveLeadToCallBack } from "@/lib/bigin";
 import { sendWhatsAppMessage } from "@/lib/meta";
 import { generateInquirySummary } from "@/lib/claude";
 import type { ConversationMessage } from "@/lib/claude";
+import { flowState, inspectionBooked, STATUS_LABELS } from "./conversation-state";
+import { chooseDefault } from "./conversation-turn";
 
 // Vercel cron runs every 15 minutes.
 // It finds conversations that started but went silent, and pushes them to Bigin
@@ -67,8 +68,8 @@ export async function pushInactive(recoveryOnly = false) {
         .find((m: any) => m.role === "assistant")?.content ?? "";
       // Existing booked leads get a linked task for changes and inquiries. Do not
       // push another lead when the conversation becomes inactive afterward.
-      if (/\b(CANCELLED:|RESCHEDULE REQUESTED:)/.test(notesC)
-          || /Your appointment inquiry is recorded\./i.test(lastReply)) continue;
+      if (!conv.flow_state && (/\b(CANCELLED:|RESCHEDULE REQUESTED:)/.test(notesC)
+          || /Your appointment inquiry is recorded\./i.test(lastReply))) continue;
       const st = conv.sell_timeline ?? "";
       if (st.includes("cash"))        salesInquiry = "Cash Deal";
       else if (st.includes("consignment")) salesInquiry = "Consignment";
@@ -89,35 +90,27 @@ export async function pushInactive(recoveryOnly = false) {
       }).catch(() => "") : "WhatsApp contact recovered after reply authentication failure. Only the phone number was saved; the original message text is unavailable. No inspection has been confirmed. Please follow up.";
 
       // Only after Kaya has asked once for an exact time without getting an answer:
-      // choose a :15 slot, tell the customer, and then save it as a real booking.
+      // choose a :15 slot and save it as pending customer confirmation.
       const lastAssistant = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
       const notReady = notesC.includes("NOT READY YET");
-      const date = String(conv.appointment_date ?? "");
+      let state = flowState(conv);
+      const date = String(state.proposedDate ?? "");
       const today = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
-      const canDefault = !notReady && !conv.appointment_time && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      const canDefault = !!conv.flow_state && state.status === "visit_proposed" && state.question === "exact_time" && !state.proposedTime && /^\d{4}-\d{2}-\d{2}$/.test(date)
         && date >= today && new Date(`${date}T12:00:00Z`).getUTCDay() !== 0
-        && /what exact time would you prefer on that day\?/i.test(lastAssistant);
-      let defaulted = false;
+        && /what exact (?:arrival )?time/i.test(lastAssistant);
       if (canDefault && !recoveryOnly) {
         try {
-        const previous = [...history].reverse().find(m => m.role === "user")?.content ?? "";
-        const part = /\b(morning|afternoon|evening)\b/i.exec(previous)?.[1]?.toLowerCase() as "morning" | "afternoon" | "evening" | undefined;
-        const slot = await pickDefaultTime(date, conv.phone, part);
-        const nowDubai = new Date(Date.now() + 4 * 3600e3);
-        const slotMinutes = +slot.slice(0, 2) * 60 + +slot.slice(3);
-        if (date === today && slotMinutes < nowDubai.getUTCHours() * 60 + nowDubai.getUTCMinutes() + 60) {
-          console.warn("[cron/timeout] no future slot for", conv.phone);
-        } else {
-        const day = new Date(`${date}T12:00:00Z`);
-        const hour = +slot.slice(0, 2);
-        const when = `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day.getUTCDay()]} ${day.getUTCDate()} ${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][day.getUTCMonth()]}`;
-        const reply = `I've booked your inspection for ${when} at ${hour % 12 || 12}:${slot.slice(3)} ${hour < 12 ? "AM" : "PM"}. Our call centre will confirm the exact timing with you on the morning of the booking.\n\n📍 Mister Wheelz Car Buyers\nUmm Suqeim Branch, Al Quoz 4, Dubai\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\nMon–Sat 10 AM–7 PM (Friday from 12 PM); closed Sunday\nCustomer service: 058 582 5543`;
-        await sendWhatsAppMessage(conv.phone, reply);
-        const messages = [...history, { role: "assistant", content: reply }].slice(-40);
-        const { error: saveError } = await supabase.from(TABLE).update({ appointment_time: slot, step: 8, messages }).eq("phone", conv.phone);
-        if (saveError) throw saveError;
-        Object.assign(conv, { appointment_time: slot, step: 8, messages });
-        defaulted = true;
+        const turn = { state: structuredClone(state), updates: {} as Record<string, any>, reply: "", defaultDate: date };
+        await chooseDefault(turn, conv.phone);
+        if (turn.state.status === "default_pending") {
+          await sendWhatsAppMessage(conv.phone, turn.reply);
+          const messages = [...history, { role: "assistant", content: turn.reply }].slice(-40);
+          const patch = { ...turn.updates, messages };
+          const saved = await supabase.from(TABLE).update(patch).eq("phone", conv.phone);
+          if (saved.error) throw saved.error;
+          Object.assign(conv, patch);
+          state = flowState(conv);
         }
         } catch (e) {
           console.error("[cron/timeout] booking reply failed; forwarding lead without a new booking:", e);
@@ -127,28 +120,29 @@ export async function pushInactive(recoveryOnly = false) {
         ...conv,
         phone_number: conv.phone_number || conv.phone,
         sales_inquiry: salesInquiry,
-        // If a date + time were captured, the customer did book — don't push as "not booked"
-        inspection_booked: !!(conv.appointment_date && conv.appointment_time && (defaulted || history.some(m => m.role === "assistant" && /you'?re booked for/i.test(m.content)))),
-        inquiry_summary: [!conv.last_message_at ? "Recovered stalled WhatsApp inquiry: reply delivery failed before conversation activity was recorded. Please follow up." : "", notReady ? `NOT READY YET — ${notesC.includes("Declined personal call") ? "customer declined a call; do not call." : notesC.includes("Accepted personal call") ? "customer requested a call." : "call preference pending."}` : "", inquirySummary].filter(Boolean).join("\n\n"),
+        inspection_booked: inspectionBooked(conv),
+        clear_appointment: !inspectionBooked(conv),
+        inquiry_summary: [!conv.last_message_at ? "Recovered stalled WhatsApp inquiry." : "", STATUS_LABELS[flowState(conv).status], state.proposedDate ? `Proposed visit: ${state.proposedDate} ${state.proposedTime || "time not chosen"}` : "", state.consent === "declined" ? "No personal callback consent; customer will contact us." : "", inquirySummary].filter(Boolean).join("\n\n"),
         owner_status: conv.owner_status,
         car_conditions: conv.car_conditions,
       } as any);
 
       if (!ok) throw new Error("Bigin push failed");
-      if (notReady) await moveLeadToCallBack(conv.phone);
-      const marked = await supabase
-        .from(TABLE)
-        .update({ bigin_pushed_at: new Date().toISOString() })
-        .eq("phone", conv.phone);
+      if (state.pendingTask) {
+        const task = await createChangeTask({ ...conv, appointment_date: state.pendingTask.date, appointment_time: state.pendingTask.time }, "OTHER", `${STATUS_LABELS[state.status]} — ${state.pendingTask.request}`);
+        if (!task.ok) throw new Error("Appointment change task pending retry");
+        delete state.pendingTask;
+        const changed = await supabase.from(TABLE).update({ flow_state: state }).eq("phone", conv.phone);
+        if (changed.error) throw changed.error;
+      }
+      if (state.consent === "accepted" || !conv.flow_state && notReady && /Accepted personal call/.test(notesC)) await moveLeadToCallBack(conv.phone);
+      const marked = await supabase.from(TABLE).update({ bigin_pushed_at: new Date().toISOString() }).eq("phone", conv.phone);
       if (marked.error) throw marked.error;
-
-      console.log(`[cron/timeout] pushed ${conv.phone} → ${salesInquiry}`);
       pushed++;
     } catch (e) {
       failed++;
       console.error(`[cron/timeout] failed to push ${conv.phone}:`, e);
     }
   }
-
   return { pushed, total: stale.length, failed };
 }
