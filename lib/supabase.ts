@@ -13,6 +13,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 export interface Conversation {
+  flow_state?: import("./conversation-state").FlowState | null;
   phone: string;
   step: number;
   name: string | null;
@@ -173,6 +174,7 @@ export async function resetConversation(phone: string): Promise<void> {
       price_handoff_collecting: null,
       price_handoff_ready: null,
       messages: [],
+      flow_state: null,
   };
 
   for (let attempt = 0; attempt < 15; attempt++) {

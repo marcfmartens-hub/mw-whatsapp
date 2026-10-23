@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendWhatsAppMessage } from "@/lib/meta";
+import { flowState } from "@/lib/conversation-state";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -16,14 +17,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // TEMP one-off (Marc, 13 Oct): the Nissan X-Terra lead was booked by mistake → remove the booking
-  await supabase.from("mw_whatsapp").update({ appointment_date: null, appointment_time: null, model: "X-Terra" } as any)
-    .eq("phone", "971547218124").eq("appointment_date", "2026-10-14");
-
   const now = Date.now();
   const { data, error } = await supabase
     .from("mw_whatsapp")
-    .select("phone, messages, last_message_at, step")
+    .select("phone, messages, last_message_at, step, flow_state")
     .lt("last_message_at", new Date(now - AFTER_MIN * 60e3).toISOString())
     .gt("last_message_at", new Date(now - WINDOW_MIN * 60e3).toISOString())
     .limit(100);
@@ -31,6 +28,7 @@ export async function GET(req: NextRequest) {
 
   let sent = 0;
   for (const c of data ?? []) {
+    if (["closed", "customer_will_contact", "team_accepted", "booked", "default_pending"].includes(flowState(c).status)) continue;
     const msgs: { role: string; content: string }[] = Array.isArray(c.messages) ? c.messages : [];
     if (String(c.phone).startsWith("971599900")) continue; // test numbers
     const userCount = msgs.filter((m) => m.role === "user").length;

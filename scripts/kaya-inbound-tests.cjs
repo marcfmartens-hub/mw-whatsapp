@@ -76,6 +76,7 @@ function load(file, mocks = {}) {
     '@/lib/slots': { pickDefaultTime: async () => '16:15' },
     '@/lib/meta': { sendWhatsAppMessage: async () => { sends++; throw Error('Meta 401'); } },
     '@/lib/claude': { generateInquirySummary: async () => 'Customer inquiry' },
+    './conversation-turn': { chooseDefault: async turn => { turn.state.status = 'default_pending'; turn.state.proposedTime = '16:15'; turn.updates.flow_state = turn.state; turn.reply = 'Selected default slot; call centre confirmation pending'; } },
   });
   process.env.SUPABASE_URL = 'https://example.invalid'; process.env.SUPABASE_ANON_KEY = 'test';
   const yesterday = new Date(Date.now() - 86400000).toISOString();
@@ -92,7 +93,7 @@ function load(file, mocks = {}) {
   // Failed booking message must not prevent CRM forwarding or fabricate a booking.
   let bookingDay = new Date(Date.now() + 3 * 86400000);
   if (bookingDay.getUTCDay() === 0) bookingDay = new Date(+bookingDay + 86400000);
-  candidates = [{ phone: '971500000003', step: 7, last_message_at: yesterday, appointment_date: bookingDay.toISOString().slice(0, 10), messages: [{ role: 'assistant', content: 'What exact time would you prefer on that day?' }] }]; legacy = []; accepted = []; marks = [];
+  candidates = [{ phone: '971500000003', step: 7, last_message_at: yesterday, flow_state: { version: 1, status: 'visit_proposed', question: 'exact_time', proposedDate: bookingDay.toISOString().slice(0, 10) }, messages: [{ role: 'assistant', content: 'What exact time would you prefer on that day?' }] }]; legacy = []; accepted = []; marks = [];
   assert.equal((await pushInactive()).pushed, 1);
   assert.equal(sends, 1); assert.equal(accepted[0].inspection_booked, false);
   assert.equal(accepted[0].appointment_time, undefined);

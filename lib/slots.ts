@@ -66,6 +66,7 @@ const PART: Record<string, string[]> = {
 
 export async function pickDefaultTime(isoDate: string, excludePhone?: string, part?: "morning" | "afternoon" | "evening"): Promise<string> {
   const day = new Date(`${isoDate}T12:00:00Z`).getUTCDay();
+  if (day === 0) throw new Error("No inspection slots on Sunday");
   const open = OPEN[day] ?? 10;
   const nowDubai = new Date(Date.now() + 4 * 3600e3);
   const isToday = nowDubai.toISOString().slice(0, 10) === isoDate;
@@ -85,7 +86,8 @@ export async function pickDefaultTime(isoDate: string, excludePhone?: string, pa
 
   const valid = (part ? PART[part] : CANDIDATES).filter((c) => toMin(c) >= open * 60 && (!isToday || toMin(c) >= nowMin + 60));
   const free = valid.find((c) => booked(c) < SLOT_CAPACITY);
-  const pick = free ?? valid[0] ?? "12:15";
+  if (!free) throw new Error("No available default slot in the requested window");
+  const pick = free;
   console.log(`[slots] ${isoDate}: supabase=[${a.join(",")}] bigin=[${b.contacts.join(",")}] events=[${b.events.join(",")}] → ${pick}`);
   return pick;
 }

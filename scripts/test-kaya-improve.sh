@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+node scripts/kaya-integrity-tests.cjs
+node scripts/kaya-turn-tests.cjs
 node scripts/kaya-inbound-tests.cjs
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
