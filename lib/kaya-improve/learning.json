@@ -1,6 +1,11 @@
 {
   "version": 1,
-  "aliases": [],
+  "aliases": [
+    {
+      "phrase": "where i have to come",
+      "intent": "request_location"
+    }
+  ],
   "skills": [
     "avoid_repetition",
     "answer_in_context",
