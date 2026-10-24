@@ -106,6 +106,8 @@ export function timeFromText(text: string, answeringTime = false): string | unde
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 export function supportedVehicle(text: string, old: Vehicle, extracted: Vehicle = {}, question = ""): Vehicle {
+  // Normalize common customer spellings without changing the original message.
+  text = text.replace(/\btasla\b/gi, "Tesla").replace(/\bmille\b/gi, "mileage");
   const out: Vehicle = { ...old };
   const corrected = /\b(actually|correction|i mean|wrong|sorry)\b/i.test(text);
   const makes = [...new Set(Object.values(CAR_MAKES))];
@@ -123,8 +125,9 @@ export function supportedVehicle(text: string, old: Vehicle, extracted: Vehicle 
   const year = text.match(/\b(?:19[89]\d|20[0-3]\d)\b/)?.[0]; if (year && (!old.year || corrected)) out.year = year;
   let km = text.match(/\b(\d[\d,]*(?:\.\d+)?)[ \t]*(lakh|k(?![a-z])|kms?\b|kilomet\w*|miles?\b)/i);
   if (!km) km = text.match(/\b(?:mileage|kms?|odometer)[ \t.:=-]*(\d[\d,]*(?:\.\d+)?)[ \t]*(k)?\b/i);
+  if (!km) km = text.match(/\b(\d[\d,]*(?:\.\d+)?)[ \t]*(thousand|million)\b/i);
   if (!km && question === "mileage" && !/\b(price|aed|loan|balance|model|year)\b/i.test(text)) km = text.match(/^\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?\s*(?:gcc)?\s*$/i);
-  if (km) { const n = Number(km[1].replace(/,/g, "")) * (/lakh/i.test(km[2] ?? "") ? 100000 : /^k$/i.test(km[2] ?? "") ? 1000 : 1); if (n > 0 && n <= 2_000_000 && (!old.mileage || corrected)) out.mileage = String(n); }
+  if (km) { const value = Number(km[1].replace(/,/g, "")); const unit = km[2] ?? ""; const n = value * (/lakh/i.test(unit) ? 100000 : /million/i.test(unit) ? 1000000 : /thousand/i.test(unit) ? 1000 : /^k$/i.test(unit) && value < 1000 ? 1000 : 1); if (n > 0 && n <= 2_000_000 && (!old.mileage || corrected)) out.mileage = String(n); }
   return out;
 }
 
