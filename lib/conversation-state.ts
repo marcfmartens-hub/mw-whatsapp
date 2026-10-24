@@ -192,7 +192,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     note(check === "NON_GCC" ? "Non-GCC: Mulkiya engine number NONE/NIL/blank" : "Specs unknown: Mulkiya requires team verification");
     if (check === "NON_GCC") { updates.non_gcc_handoff = true; return end(answer("Thanks. As this is verified non-GCC, our team needs to review the details before an inspection is arranged. May they contact you?"), "callback", "collecting", "lead"); }
   } else if (spec === "CHECK_MULKIYA" && !state.specsChecked) { state.mulkiyaPending = true; updates.specs = "Unknown"; return end(answer(MULKIYA_QUESTION), "mulkiya"); }
-  else if (spec === "GCC" || spec === "Unknown") { updates.specs = spec; vehicle.specs = spec; }
+  else if (spec === "GCC" || spec === "Unknown") { updates.specs = spec; vehicle.specs = spec; if (spec === "Unknown") state.specsChecked = true; }
   else if (question === "specs" && /^(?:yes|yes gcc|gcc)[.! ]*$/i.test(text)) { updates.specs = "GCC"; vehicle.specs = "GCC"; }
   else if (question === "specs" && /^(?:unknown|not sure|don't know|no idea)[.! ]*$/i.test(text)) { updates.specs = "Unknown"; vehicle.specs = "Unknown"; state.specsChecked = true; }
   if (c.non_gcc_handoff || vehicle.specs === "Non-GCC") return end(answer("Our team needs to review the non-GCC details before arranging an inspection. Would you like a personal call?"), "callback", "collecting", "lead");
