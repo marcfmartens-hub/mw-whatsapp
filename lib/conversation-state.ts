@@ -147,7 +147,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
   const facts: Vehicle = { make: c.make || undefined, model: c.model || undefined, year: c.year || undefined, mileage: c.mileage || undefined, specs: c.specs || undefined };
-  const name = findName(text, c, question); if (name) updates.name = name;
+  const name = findName(text, c, question);
+  const newlyProvidedName = !!name && name !== c.name && !/^(?:name|my name|i am|i'm)$/i.test(text);
+  if (name && name !== c.name) updates.name = name;
+  // An out-of-order name is useful data, not a reason to repeat a question without acknowledgement.
+  // Only acknowledge a new name when it was supplied in this turn.
+  const nameAcknowledgement = newlyProvidedName ? `Thanks, ${name.split(" ")[0]}. I've saved your name.` : "";
   const isMultiple = /\b(?:also (?:i )?(?:want to )?sell|(?:selling|sell|have) (?:a |one )?(?:second|another|one more) car|(?:two|2|multiple) cars (?:for sale|to sell))\b/i.test(text);
   if (isMultiple || question === "second_vehicle") {
     const otherText = text.split(/\b(?:one more car|another car|second car)\b/i).at(-1) || text;
@@ -240,7 +245,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   }
   if (wasBooked && !date && !time) return end(answer(prefix.length ? "Let us know if you need to change the visit." : "You're welcome. Let us know if you need anything else about the inspection."), state.question);
   if (/\[(photo|file|sent photos\/files)\]/i.test(text)) { if (!state.mediaExplained) { prefix.push("I can't read photos or files, but I can use any details you type here."); state.mediaExplained = true; } }
-  const next = (q: string, reply: string) => end(answer(reply), q, "collecting");
+  const next = (q: string, reply: string) => end(answer([nameAcknowledgement, reply].filter(Boolean).join(" ")), q, "collecting");
   if (!(c.messages?.some(m => m.role === "assistant")) && !name && !vehicle.make && !prefix.length) return next("name", "I'm Kaya from Mister Wheelz. May I know your name, please?");
   if (!vehicle.make || !vehicle.model || !vehicle.year) { const missing = [!vehicle.make ? "make" : "", !vehicle.model ? "model" : "", !vehicle.year ? "year" : ""].filter(Boolean); return next("vehicle", `Could you type the car's ${missing.join(" and ")}?`); }
   if (!vehicle.mileage) return next("mileage", "What's the mileage on the car?");
