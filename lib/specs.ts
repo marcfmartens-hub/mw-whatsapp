@@ -6,7 +6,7 @@ export function specsStatement(text: string, answeringSpecsQuestion = false): "G
   if (/\b(?:no\s+gcc|us\s+specs?|usa\s+specs?|(?:korean|american|japanese|chinese|european|german|germany|canadian|us|usa)\s+import)\b/i.test(text)
       || answeringSpecsQuestion && /^\s*no\s*[.!]?\s*$/i.test(text)
       || /(?:^|\n)\s*(?:american|korean|japanese|chinese|european)\s*(?:$|\n)/i.test(text)) return "CHECK_MULKIYA";
-  if (/\b(don'?t know|not sure|unsure|no idea|idk|unknown)\b/i.test(text) && /\b(specs?|gcc|origin|mulkiya)\b/i.test(text)) return "Unknown";
+  if (/\b(don'?t know|do not know|not sure|unsure|no idea|idk|unknown|cannot tell|can't tell)\b/i.test(text) && (answeringSpecsQuestion || /\b(specs?|gcc|origin|mulkiya)\b/i.test(text))) return "Unknown";
   // Only explicit market-spec labels count. A country name or purchase location does not.
   if (/\bnon[\s-]?gcc\b|\b(not|isn'?t|is not)\s+(a\s+)?gcc\b|\b(american|european|japanese|korean|chinese)\s+(specs?|specifications?|version)\b/i.test(text)) return "CHECK_MULKIYA";
   if (answeringSpecsQuestion && /^\s*(american|european|japanese|korean|chinese)\s*[.!]?\s*$/i.test(text)) return "CHECK_MULKIYA";
