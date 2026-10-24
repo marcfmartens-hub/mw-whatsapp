@@ -208,6 +208,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   } else if (spec === "CHECK_MULKIYA" && !state.specsChecked) { state.mulkiyaPending = true; updates.specs = "Unknown"; return end(answer(MULKIYA_QUESTION), "mulkiya"); }
   else if (spec === "GCC" || spec === "Unknown") { updates.specs = spec; vehicle.specs = spec; if (spec === "Unknown") state.specsChecked = true; }
   else if (question === "specs" && /^(?:yes|yes gcc|gcc)[.! ]*$/i.test(text)) { updates.specs = "GCC"; vehicle.specs = "GCC"; }
+  else if (question === "specs" && /\b(?:unsure|not sure|don't understand|do not understand|i don't know|no idea|not certain)\b/i.test(text)) { updates.specs = "Unknown"; vehicle.specs = "Unknown"; state.specsChecked = true; }
   else if (question === "specs" && /^(?:unknown|not sure|don't know|no idea)[.! ]*$/i.test(text)) { updates.specs = "Unknown"; vehicle.specs = "Unknown"; state.specsChecked = true; }
   if (c.non_gcc_handoff || vehicle.specs === "Non-GCC") return end(answer("Our team needs to review the non-GCC details before arranging an inspection. Would you like a personal call?"), "callback", "collecting", "lead");
   const loanYes = /\b(?:under finance|on (?:a )?mortgage|yes.*loan|loan is there|still have.*loan|financed)\b/i.test(text) || question === "loan" && /^yes\b/i.test(text);
