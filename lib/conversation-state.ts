@@ -245,7 +245,16 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   }
   if (wasBooked && !date && !time) return end(answer(prefix.length ? "Let us know if you need to change the visit." : "You're welcome. Let us know if you need anything else about the inspection."), state.question);
   if (/\[(photo|file|sent photos\/files)\]/i.test(text)) { if (!state.mediaExplained) { prefix.push("I can't read photos or files, but I can use any details you type here."); state.mediaExplained = true; } }
-  const next = (q: string, reply: string) => end(answer([nameAcknowledgement, reply].filter(Boolean).join(" ")), q, "collecting");
+  // HARD RULE: Never send an identical unanswered question twice in succession.
+  // A new fact (such as a name) is acknowledged, but the missing field remains required.
+  // If no new fact was supplied, offer human help instead of looping.
+  const next = (q: string, reply: string) => {
+    const proposed = [nameAcknowledgement, reply].filter(Boolean).join(" ");
+    const sameQuestion = state.question === q && previous.trim().toLowerCase().endsWith(reply.trim().toLowerCase());
+    const newFact = !!nameAcknowledgement || Object.keys(updates).some(k => !["flow_state", "step", "appointment_date", "appointment_time"].includes(k));
+    if (sameQuestion && !newFact) return end(answer("I still need that detail to continue. Would you prefer our purchasing team to call you and help?"), "callback", "collecting");
+    return end(answer(proposed), q, "collecting");
+  };
   if (!(c.messages?.some(m => m.role === "assistant")) && !name && !vehicle.make && !prefix.length) return next("name", "I'm Kaya from Mister Wheelz. May I know your name, please?");
   if (!vehicle.make || !vehicle.model || !vehicle.year) { const missing = [!vehicle.make ? "make" : "", !vehicle.model ? "model" : "", !vehicle.year ? "year" : ""].filter(Boolean); return next("vehicle", `Could you type the car's ${missing.join(" and ")}?`); }
   if (!vehicle.mileage) return next("mileage", "What's the mileage on the car?");
