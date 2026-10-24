@@ -70,7 +70,7 @@ export const FIXTURES: { name: string; chat: Chat; codes: string[] }[] = [
   {name:"Correct customer-initiated call",chat:{phone:"test",messages:[{role:"user",content:"I'll call you"},{role:"assistant",content:"You can call us on 058 582 5543."}]},codes:[]},
   {name:"False booking confirmation",chat:{phone:"test",messages:[{role:"assistant",content:"You're booked for Saturday."}]},codes:["unsaved_booking"]},
   {name:"Repeated question",chat:{phone:"test",messages:[{role:"assistant",content:"What time would you like to come?"},{role:"user",content:"3 PM"},{role:"assistant",content:"What time would you like to come?"}]},codes:["repeated_reply"]},
-  {name:"Specs unknown must not be asked again",chat:{phone:"test",messages:[{role:"assistant",content:"Is it GCC specs, non-GCC, or are you unsure?"},{role:"user",content:"Unsure"},{role:"assistant",content:"Is it GCC specs?"}]},codes:["repeated_reply","question_after_unknown"]},
+  {name:"Specs unknown must not be asked again",chat:{phone:"test",messages:[{role:"assistant",content:"Is it GCC specs, non-GCC, or are you unsure?"},{role:"user",content:"Unsure"},{role:"assistant",content:"Is it GCC specs?"}]},codes:["question_after_unknown","question_loop"]},
   {name:"Paraphrased repeated year question",chat:{phone:"test",messages:[{role:"assistant",content:"What year is the car?"},{role:"user",content:"Annasamy Sankar"},{role:"assistant",content:"Could you type the car's year?"}]},codes:["question_loop"]},
   {name:"Successful booking stays unflagged",chat:{phone:"test",name:"Ali",appointment_date:"2026-10-17",appointment_time:"15:00",bigin_pushed_at:"2026-10-15",messages:[{role:"user",content:"Book Saturday at 3 PM"},{role:"assistant",content:"You're booked for Saturday at 3 PM."}]},codes:[]},
 ];
