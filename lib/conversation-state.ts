@@ -248,12 +248,26 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // HARD RULE: Never send an identical unanswered question twice in succession.
   // A new fact (such as a name) is acknowledged, but the missing field remains required.
   // If no new fact was supplied, offer human help instead of looping.
+  // Question history persists with the conversation; never loop on a missing field.
+  // One clarification is allowed, then offer a human handover without restarting the form.
   const next = (q: string, reply: string) => {
-    const proposed = [nameAcknowledgement, reply].filter(Boolean).join(" ");
-    const sameQuestion = state.question === q && previous.trim().toLowerCase().endsWith(reply.trim().toLowerCase());
-    const newFact = !!nameAcknowledgement || Object.keys(updates).some(k => !["flow_state", "step", "appointment_date", "appointment_time"].includes(k));
-    if (sameQuestion && !newFact) return end(answer("I still need that detail to continue. Would you prefer our purchasing team to call you and help?"), "callback", "collecting");
-    return end(answer(proposed), q, "collecting");
+    const history = (state as FlowState & { questionHistory?: Record<string, { attempts: number; lastPrompt: string }> }).questionHistory ?? {};
+    const previousEntry = history[q];
+    const changed = !!nameAcknowledgement || Object.keys(updates).some(k => !["flow_state", "step", "appointment_date", "appointment_time"].includes(k));
+    const previousIsQuestion = state.question === q;
+    const attempts = previousIsQuestion && !changed ? (previousEntry?.attempts ?? 1) : 0;
+    if (attempts >= 2) {
+      state.question = "callback";
+      return end(answer("Would you prefer our purchasing team to call you and help with the remaining details?"), "callback", "collecting");
+    }
+    if (attempts === 1) {
+      history[q] = { attempts: 2, lastPrompt: reply };
+      (state as FlowState & { questionHistory?: typeof history }).questionHistory = history;
+      return end(answer("No problem if you're unsure. " + (q === "specs" ? "We can continue with the specifications marked as unknown." : "Could you clarify that detail, or would you prefer our team to help?")), q, "collecting");
+    }
+    history[q] = { attempts: 1, lastPrompt: reply };
+    (state as FlowState & { questionHistory?: typeof history }).questionHistory = history;
+    return end(answer([nameAcknowledgement, reply].filter(Boolean).join(" ")), q, "collecting");
   };
   if (!(c.messages?.some(m => m.role === "assistant")) && !name && !vehicle.make && !prefix.length) return next("name", "I'm Kaya from Mister Wheelz. May I know your name, please?");
   if (!vehicle.make || !vehicle.model || !vehicle.year) { const missing = [!vehicle.make ? "make" : "", !vehicle.model ? "model" : "", !vehicle.year ? "year" : ""].filter(Boolean); return next("vehicle", `Could you type the car's ${missing.join(" and ")}?`); }
