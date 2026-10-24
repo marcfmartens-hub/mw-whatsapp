@@ -13,6 +13,34 @@ export function detect(chat: Chat) {
       add("repeated_reply", "warning", "The same reply was repeated", assistants[i].content, "Use information already supplied and ask only for a missing detail."); break;
     }
   }
+  // Detect semantic question loops, including paraphrases and non-adjacent repeats.
+  // The detector only reports findings; business-policy changes remain approval-locked.
+  const questionKind = (s: string): string | null => {
+    if (/\b(?:what|which).*\b(?:year|model year)|car'?s year/i.test(s)) return "year";
+    if (/\b(?:mileage|kilomet(?:er|re)s?|how many km)\b/i.test(s)) return "mileage";
+    if (/\b(?:gcc|specs|specifications)\b/i.test(s) && /\?|\b(?:is it|are you|unsure)\b/i.test(s)) return "specs";
+    if (/\b(?:your name|may i know your name)\b/i.test(s)) return "name";
+    if (/\b(?:what time|arrival time|exact time)\b/i.test(s)) return "time";
+    return null;
+  };
+  const seenQuestions = new Map<string, number>();
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    const kind = questionKind(m.content);
+    if (!kind) continue;
+    const earlier = seenQuestions.get(kind);
+    if (earlier !== undefined) {
+      const between = messages.slice(earlier + 1, i).filter(x => x.role === "user").map(x => x.content).join(" ");
+      if (normalize(messages[earlier].content) === normalize(m.content)) { seenQuestions.set(kind, i); continue; }
+      if (between && kind === "specs" && /\b(?:unsure|not sure|don'?t know|do not know|no idea|idk|unknown)\b/i.test(between)) {
+        add("question_after_unknown", "warning", "Specs question repeated after the customer said they do not know", between + " → " + m.content, "Mark specs Unknown and continue.");
+      } else if (between && (i - earlier > 2 || !/\b(?:clarify|could you clarify|prefer our team)\b/i.test(m.content))) {
+        add("question_loop", "warning", "The same information was requested again", messages[earlier].content + " → " + m.content, "Use question history, extract all supplied facts and offer assistance after one clarification.");
+      }
+    }
+    seenQuestions.set(kind, i);
+  }
   const booking = assistants.find(m => /you'?re booked for|your (?:appointment|booking) is confirmed/i.test(m.content));
   const hasSlot = !!(chat.appointment_date && chat.appointment_time);
   if (booking && !hasSlot) add("unsaved_booking", "critical", "A booking was confirmed without a stored date and time", booking.content, "Verify the appointment save before sending confirmation.");
@@ -43,6 +71,8 @@ export const FIXTURES: { name: string; chat: Chat; codes: string[] }[] = [
   {name:"Correct customer-initiated call",chat:{phone:"test",messages:[{role:"user",content:"I'll call you"},{role:"assistant",content:"You can call us on 058 582 5543."}]},codes:[]},
   {name:"False booking confirmation",chat:{phone:"test",messages:[{role:"assistant",content:"You're booked for Saturday."}]},codes:["unsaved_booking"]},
   {name:"Repeated question",chat:{phone:"test",messages:[{role:"assistant",content:"What time would you like to come?"},{role:"user",content:"3 PM"},{role:"assistant",content:"What time would you like to come?"}]},codes:["repeated_reply"]},
+  {name:"Specs unknown must not be asked again",chat:{phone:"test",messages:[{role:"assistant",content:"Is it GCC specs, non-GCC, or are you unsure?"},{role:"user",content:"Unsure"},{role:"assistant",content:"Is it GCC specs?"}]},codes:["question_after_unknown"]},
+  {name:"Paraphrased repeated year question",chat:{phone:"test",messages:[{role:"assistant",content:"What year is the car?"},{role:"user",content:"Annasamy Sankar"},{role:"assistant",content:"Could you type the car's year?"}]},codes:["question_loop"]},
   {name:"Successful booking stays unflagged",chat:{phone:"test",name:"Ali",appointment_date:"2026-10-17",appointment_time:"15:00",bigin_pushed_at:"2026-10-15",messages:[{role:"user",content:"Book Saturday at 3 PM"},{role:"assistant",content:"You're booked for Saturday at 3 PM."}]},codes:[]},
 ];
 export function regression() { return FIXTURES.map(f=>({name:f.name,passed:JSON.stringify(detect(f.chat).findings.map(x=>x.code).sort())===JSON.stringify([...f.codes].sort())})); }
