@@ -32,6 +32,7 @@ export function detect(chat: Chat) {
     const earlier = seenQuestions.get(kind);
     if (earlier !== undefined) {
       const between = messages.slice(earlier + 1, i).filter(x => x.role === "user").map(x => x.content).join(" ");
+      if (normalize(messages[earlier].content) === normalize(m.content)) { seenQuestions.set(kind, i); continue; }
       if (between && kind === "specs" && /\b(?:unsure|not sure|don'?t know|do not know|no idea|idk|unknown)\b/i.test(between)) {
         add("question_after_unknown", "warning", "Specs question repeated after the customer said they do not know", between + " → " + m.content, "Mark specs Unknown and continue.");
       } else if (between && (i - earlier > 2 || !/\b(?:clarify|could you clarify|prefer our team)\b/i.test(m.content))) {
