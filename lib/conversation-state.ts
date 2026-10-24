@@ -96,6 +96,7 @@ export function dateFromText(text: string, now = new Date()): string | undefined
 }
 export function timeFromText(text: string, answeringTime = false): string | undefined {
   const match = text.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|o'?clock)\b/i)
+    ?? (answeringTime ? text.trim().match(/^0?(\d{1,2})(\d{2})\s*(am|pm)\b/i) : null)
     ?? text.match(/\b(?:at|around|before|after)\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b/i)
     ?? (answeringTime ? text.trim().match(/^(\d{1,2})(?:[:.](\d{2}))?\s*$/) : null);
   if (!match) return undefined;
@@ -182,6 +183,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (/\b(?:consignment|selling options|best way to sell)\b/i.test(text)) prefix.push("A direct purchase offers a quicker sale after agreeing the inspected price. With consignment, we sell the car on your behalf; it can take longer. Our purchasing team can discuss which suits you.");
   if (/\b(?:opening|open|hours|timings|close)\b/i.test(text) && !prefix.includes(LOCATION)) prefix.push(LOCATION);
   const answer = (reply: string) => [...prefix, reply].filter(Boolean).join("\n\n");
+  if (/\b(?:just (?:inquiring|enquiring|inquiry|inquire)|only (?:inquiring|enquiring)|not ready|husband (?:is )?not (?:here|available)|too far|location is (?:too )?far)\b/i.test(text)) {
+    note("Not ready / objection: " + text);
+    return end(answer(/\b(?:too far|location is .*far)\b/i.test(text) ? "I understand the distance is inconvenient. Inspections are only at our Al Quoz branch. Would you prefer a call with our team instead?" : "No pressure to book. Would you prefer a call from our team, or to contact us when you're ready?"), "callback", "collecting");
+  }
   if (SELF_CONTACT.test(text)) { state.consent = "declined"; note("CUSTOMER WILL CALL: No callback requested"); if (wasBooked) { state.previousDate = state.proposedDate; state.previousTime = state.proposedTime; } return end(answer(`Understood. Contact us on ${CONTACT_NUMBER} whenever you're ready.${wasBooked ? " Your visit will need reconfirming before we treat it as definite." : " Have a nice day!"}`), "", "customer_will_contact", wasBooked ? "change" : "lead"); }
   if (/\b(cancel|already sold|sold the car|not coming|stop messaging|do not contact|don't contact|unsubscribe|remove my number)\b/i.test(text) || NO.test(text) && question !== "loan" && question !== "specs" && question !== "mulkiya") { state.consent = "declined"; return end(answer("Understood. We won't continue the booking. You're welcome to contact us whenever you need us."), "", "closed", wasBooked ? "change" : "lead"); }
   if (!facts.make && /\b(looking for marc|speak to marc|seat covers?|microfiber|microfibre|selling accessories|motorbike|motorcycle|boats?)\b/i.test(text)) return end(`For ${/marc/i.test(text) ? "Marc or our team" : "enquiries outside selling a car"}, please contact customer service on ${CONTACT_NUMBER}.`, "", "closed", "lead");
@@ -214,6 +219,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   }
   if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
   if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer(`Inspections take place only at our branch in Al Quoz 4, Dubai; we don't do home visits. Would visiting the branch work for you, or would you prefer a personal call?`), "choice", wasBooked ? "reconfirmation" : "collecting");
+  if (/\b(?:call ?back|call me|arrange a call|call tomorrow|call on tomorrow|contact me tomorrow)\b/i.test(text)) {
+    state.consent = "accepted"; note("Callback requested: " + text);
+    return end(answer("Of course. Our purchasing team can call you on this WhatsApp number."), "", "team_accepted", "lead");
+  }
   if (/\b(?:not in (?:a )?hurry|next month|in 30 days|(?:will|i'?ll) (?:check|update|inform)|let me (?:think|check)|i'?ll let you know|once i'?m free|when i'?m ready)\b/i.test(text)) return end(answer("No problem. May our team call you on this WhatsApp number to discuss the car?"), "callback", "collecting");
   if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) { state.priceRequests = (state.priceRequests ?? 0) + 1; return end(answer(`I understand that the price matters before you make the trip. The final offer follows the free 10–15 minute inspection, with no obligation to sell.${price ? " I've recorded your asking price for the team." : ""} ${state.priceRequests >= 2 ? CHOICE : "Would you like to arrange the inspection?"}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting"); }
   if (question === "callback" && !YES.test(text) && !dateFromText(text, now) && !timeFromText(text, true)) return end(answer("No problem. Contact us when you're ready, or let me know if you would like a personal call."), "callback");
@@ -255,6 +264,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // Question history persists with the conversation; never loop on a missing field.
   // One clarification is allowed, then offer a human handover without restarting the form.
   const next = (q: string, reply: string) => {
+    if (prefix.length && q === question && !Object.keys(updates).some(k => ["make","model","year","mileage","specs","name"].includes(k))) return end(answer("Is there anything else you would like to know before arranging an inspection?"), "choice", "collecting");
     const history = (state as FlowState & { questionHistory?: Record<string, { attempts: number; lastPrompt: string }> }).questionHistory ?? {};
     const previousEntry = history[q];
     const changed = !!nameAcknowledgement || Object.keys(updates).some(k => !["flow_state", "step", "appointment_date", "appointment_time"].includes(k));
