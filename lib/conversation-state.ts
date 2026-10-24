@@ -255,8 +255,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const previousEntry = history[q];
     const changed = !!nameAcknowledgement || Object.keys(updates).some(k => !["flow_state", "step", "appointment_date", "appointment_time"].includes(k));
     const previousIsQuestion = state.question === q;
-    const attempts = previousIsQuestion && !changed ? (previousEntry?.attempts ?? 1) : 0;
+    const attempts = !changed ? (previousEntry?.attempts ?? (previousIsQuestion ? 1 : 0)) : 0;
     if (attempts >= 2) {
+      if (state.question === "callback") return end(answer("You can contact our purchasing team whenever you are ready. " + CONTACT_NUMBER), "", "customer_will_contact");
       state.question = "callback";
       return end(answer("Would you prefer our purchasing team to call you and help with the remaining details?"), "callback", "collecting");
     }
