@@ -108,6 +108,7 @@ export function timeFromText(text: string, answeringTime = false): string | unde
 export function supportedVehicle(text: string, old: Vehicle, extracted: Vehicle = {}, question = ""): Vehicle {
   // Normalize common customer spellings without changing the original message.
   text = text.replace(/\btasla\b/gi, "Tesla").replace(/\bmille\b/gi, "mileage");
+  if (/\bTesla\b/i.test(text)) text = text.replace(/\bX\s+model\b/gi, "Model X");
   const out: Vehicle = { ...old };
   const corrected = /\b(actually|correction|i mean|wrong|sorry)\b/i.test(text);
   const makes = [...new Set(Object.values(CAR_MAKES))];
