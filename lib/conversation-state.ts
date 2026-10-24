@@ -255,13 +255,13 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const reply = answer(`You're booked for ${state.proposedDate} at ${state.proposedTime}. Our team will be in touch to confirm the details. Please bring your Emirates ID and Mulkiya.\n\n${LOCATION}`);
     const result = end(reply, "", "booked", wasBooked ? "change" : "booking"); result.confirm = true; result.updates.appointment_date = state.proposedDate; result.updates.appointment_time = state.proposedTime; return result;
   }
+  // Answer side questions without repeating the pending booking question.
+  if (prefix.length && !date && !time && ["time", "exact_time", "day"].includes(question)) return end(prefix.join("\n\n"), question, state.status);
   if (essential && financeReady && state.proposedDate && !state.proposedTime) {
     if (new Date(`${state.proposedDate}T12:00:00Z`).getUTCDay() === 0) { state.proposedDate = undefined; return end(answer("We're closed on Sundays. Which other day would suit you?"), "time", "visit_proposed"); }
     if (question === "exact_time" && !prefix.length && (dayPart || /\b(anytime|any time|you choose)\b/i.test(text))) { const result = end("", "exact_time", "visit_proposed"); result.defaultDate = state.proposedDate; return result; }
     return end(answer(`Ok, great! ${closedOpening ? closedOpening.message + " " : ""}What time can you bring the car in for an inspection?`), "time", "visit_proposed");
   }
-  // Answer side questions without repeating the pending booking question.
-  if (prefix.length && !date && !time && ["time", "exact_time", "day"].includes(question)) return end(prefix.join("\n\n"), question, state.status);
   if (wasBooked && !date && !time) return end(answer(prefix.length ? "Let us know if you need to change the visit." : "You're welcome. Let us know if you need anything else about the inspection."), state.question);
   if (/\[(photo|file|sent photos\/files)\]/i.test(text)) { if (!state.mediaExplained) { prefix.push("I can't read photos or files, but I can use any details you type here."); state.mediaExplained = true; } }
   const next = (q: string, reply: string) => end(answer(reply), q, "collecting");
