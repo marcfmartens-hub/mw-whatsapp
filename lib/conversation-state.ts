@@ -73,6 +73,24 @@ export function flowState(c: Chat): FlowState {
 export function inspectionBooked(c: Chat): boolean { return flowState(c).status === "booked"; }
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const mins = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
+const OPEN_HOUR: Record<number, number | null> = { 0: null, 1: 10, 2: 10, 3: 10, 4: 10, 5: 12, 6: 10 };
+function nextInspectionOpening(now: Date): { date: string; message: string } | null {
+  const local = new Date(+now + 4 * 3600e3);
+  const day = local.getUTCDay();
+  const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+  const open = OPEN_HOUR[day];
+  if (open !== null && minute >= open * 60 && minute < 19 * 60) return null;
+  const beforeOpen = open !== null && minute < open * 60;
+  let next = new Date(local);
+  if (!beforeOpen) {
+    do { next = new Date(+next + 86400e3); } while (OPEN_HOUR[next.getUTCDay()] === null);
+  }
+  const hour = OPEN_HOUR[next.getUTCDay()]!;
+  const nextDay = next.getTime() - local.getTime() < 2 * 86400e3;
+  const dayLabel = beforeOpen ? "today" : nextDay ? "tomorrow" : "Monday";
+  const opening = hour === 12 ? `${dayLabel} at 12 PM` : `${dayLabel === "today" ? "this" : dayLabel} morning at ${hour} AM`;
+  return { date: iso(next), message: `We're closed right now, but we open again ${opening}.` };
+}
 export function slotValid(date: string, time: string, now = new Date()): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time) || +time.slice(3) >= 60) return false;
   const d = new Date(`${date}T12:00:00Z`), local = new Date(+now + 4 * 3600e3);
@@ -130,7 +148,7 @@ export function supportedVehicle(text: string, old: Vehicle, extracted: Vehicle 
 
 export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = new Date()): Turn {
   const state = flowState(c), text = raw.replace(/[’‘]/g, "'").replace(/\s*\(location pin already sent[^)]*\)/gi, "").trim();
-  const previous = lastAssistant(c), local = new Date(+now + 4 * 3600e3);
+  const previous = lastAssistant(c);
   const inferredQuestion = /your name/i.test(previous) ? "name" : /outstanding balance/i.test(previous) ? "balance" : /any.*loan|mortgage on/i.test(previous) ? "loan" : /mileage/i.test(previous) ? "mileage" : /gcc.*right|specs.*\?/i.test(previous) ? "specs" : /what exact time/i.test(previous) ? "exact_time" : /what time/i.test(previous) ? "time" : /personal call|team to contact/i.test(previous) ? "callback" : undefined;
   const question = state.question ?? inferredQuestion ?? "";
   const updates: Record<string, any> = {};
@@ -203,18 +221,22 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const amount = text.match(/\b(\d[\d,]*(?:\.\d+)?)\s*(k|thousand)?\b/i);
     if (amount && !/\b(?:km|kms|model|year|fines)\b/i.test(text) && !(Number(amount[1]) >= 1980 && Number(amount[1]) <= 2035 && !amount[2])) updates.mortgage_amount = String(Number(amount[1].replace(/,/g, "")) * (amount[2] ? 1000 : 1));
   }
-  if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
+  if ((question === "sell" && /\b(?:today|now|tonight|immediately|asap)\b/i.test(text) || /\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text)) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
   if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer(`Inspections take place only at our branch in Al Quoz 4, Dubai; we don't do home visits. Would visiting the branch work for you, or would you prefer a personal call?`), "choice", wasBooked ? "reconfirmation" : "collecting");
   if (/\b(?:not in (?:a )?hurry|next month|in 30 days|(?:will|i'?ll) (?:check|update|inform)|let me (?:think|check)|i'?ll let you know|once i'?m free|when i'?m ready)\b/i.test(text)) return end(answer("No problem. May our team call you on this WhatsApp number to discuss the car?"), "callback", "collecting");
   if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) { state.priceRequests = (state.priceRequests ?? 0) + 1; return end(answer(`I understand that the price matters before you make the trip. The final offer follows the free 10–15 minute inspection, with no obligation to sell.${price ? " I've recorded your asking price for the team." : ""} ${state.priceRequests >= 2 ? CHOICE : "Would you like to arrange the inspection?"}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting"); }
   if (question === "callback" && !YES.test(text) && !dateFromText(text, now) && !timeFromText(text, true)) return end(answer("No problem. Contact us when you're ready, or let me know if you would like a personal call."), "callback");
   // Explicit travel-time statements are not arrival commitments.
-  if ((/\b(leav(?:e|ing)|depart|before|after|between|onwards)\b/i.test(text) || /\d\s*(?:am|pm)?\s+(?:to|and)\s+\d/i.test(text)) && /\d/.test(text)) { state.proposedTime = undefined; const range = text.match(/(?:between\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:to|and|[-–])\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/i); if (range) { const a = timeFromText(`${range[1]}:${range[2] ?? "00"}${range[3] || range[6] || ""}`, true), b = timeFromText(`${range[4]}:${range[5] ?? "00"}${range[6] || range[3] || ""}`, true); if (a && b) { state.timeMin = mins(a); state.timeMax = mins(b); } } const day = dateFromText(text, now); if (day) state.proposedDate = day; return end(answer(/leav|depart/i.test(text) ? "What time would you arrive at our branch? Our last inspection starts at 6:30 PM." : "What exact arrival time within that availability would you prefer?"), "exact_time", "visit_proposed"); }
+  if ((/\b(leav(?:e|ing)|depart|before|after|between|onwards)\b/i.test(text) || /\d\s*(?:am|pm)?\s+(?:to|and)\s+\d/i.test(text)) && /\d/.test(text)) { state.proposedTime = undefined; const range = text.match(/(?:between\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:to|and|[-–])\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/i); if (range) { const a = timeFromText(`${range[1]}:${range[2] ?? "00"}${range[3] || range[6] || ""}`, true), b = timeFromText(`${range[4]}:${range[5] ?? "00"}${range[6] || range[3] || ""}`, true); if (a && b) { state.timeMin = mins(a); state.timeMax = mins(b); } } const day = dateFromText(text, now); if (day) state.proposedDate = day; return end(answer(/leav|depart/i.test(text) ? "What time can you bring the car in for an inspection? Our last inspection starts at 6:30 PM." : "What time can you bring the car in for an inspection?"), "time", "visit_proposed"); }
   let date = dateFromText(text, now), time = timeFromText(text, ["time", "exact_time", "confirm"].includes(question));
   const dayPart = text.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase() as FlowState["part"];
   if (dayPart) state.part = dayPart;
   if (date && state.proposedDate && date !== state.proposedDate) { state.proposedTime = undefined; state.customerAgreedSlot = false; state.timeMin = undefined; state.timeMax = undefined; }
   if (date) state.proposedDate = date;
+  // "Now" and "today" indicate urgency, not permission to visit while closed.
+  const wantsToday = !!date && /\b(?:today|now|tonight)\b/i.test(text);
+  const closedOpening = wantsToday ? nextInspectionOpening(now) : null;
+  if (closedOpening) { state.proposedDate = closedOpening.date; state.proposedTime = undefined; }
   if (question === "confirm" && YES.test(text)) { date = state.proposedDate; time = state.proposedTime; }
   if (time) {
     if (!state.proposedDate) { const suggested = /tomorrow/i.test(previous) ? "tomorrow" : /today|this afternoon|this evening/i.test(previous) ? "today" : undefined; if (suggested) state.proposedDate = dateFromText(suggested, now); }
@@ -236,8 +258,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (essential && financeReady && state.proposedDate && !state.proposedTime) {
     if (new Date(`${state.proposedDate}T12:00:00Z`).getUTCDay() === 0) { state.proposedDate = undefined; return end(answer("We're closed on Sundays. Which other day would suit you?"), "time", "visit_proposed"); }
     if (question === "exact_time" && !prefix.length && (dayPart || /\b(anytime|any time|you choose)\b/i.test(text))) { const result = end("", "exact_time", "visit_proposed"); result.defaultDate = state.proposedDate; return result; }
-    return end(answer(`What exact arrival time would you prefer on ${state.proposedDate}?${new Date(`${state.proposedDate}T12:00:00Z`).getUTCDay() === 5 ? " We open at noon on Friday." : ""}`), "exact_time", "visit_proposed");
+    return end(answer(`Ok, great! ${closedOpening ? closedOpening.message + " " : ""}What time can you bring the car in for an inspection?`), "time", "visit_proposed");
   }
+  // Answer side questions without repeating the pending booking question.
+  if (prefix.length && !date && !time && ["time", "exact_time", "day"].includes(question)) return end(prefix.join("\n\n"), question, state.status);
   if (wasBooked && !date && !time) return end(answer(prefix.length ? "Let us know if you need to change the visit." : "You're welcome. Let us know if you need anything else about the inspection."), state.question);
   if (/\[(photo|file|sent photos\/files)\]/i.test(text)) { if (!state.mediaExplained) { prefix.push("I can't read photos or files, but I can use any details you type here."); state.mediaExplained = true; } }
   const next = (q: string, reply: string) => end(answer(reply), q, "collecting");
@@ -250,7 +274,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount)) return next("balance", "We can help with free loan settlement. How much is the outstanding balance?");
   if (!(updates.sell_timeline || c.sell_timeline) && question !== "sell") return next("sell", "When are you planning to sell the car?");
   if (/\bnext week\b/i.test(text)) return next("time", "Which day next week would suit you for the inspection?");
-  const today = local.getUTCDay() !== 0 && local.getUTCHours() < 18;
-  const day = today ? "today" : "tomorrow";
-  return next("time", `Which day and arrival time would suit you for the free inspection? We can look at ${day}, or a later day that works for you.`);
+  const opening = nextInspectionOpening(now);
+  state.proposedDate = opening?.date ?? iso(new Date(+now + 4 * 3600e3));
+  if (opening) return next("time", `Ok, great! ${opening.message} What time can you bring the car in for an inspection?`);
+  return next("time", "What time is best for you to bring the car in for an inspection?");
 }
+
