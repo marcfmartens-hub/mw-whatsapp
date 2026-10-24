@@ -152,7 +152,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (name && name !== c.name) updates.name = name;
   // An out-of-order name is useful data, not a reason to repeat a question without acknowledgement.
   // Only acknowledge a new name when it was supplied in this turn.
-  const nameAcknowledgement = newlyProvidedName ? `Thanks, ${name.split(" ")[0]}. I've saved your name.` : "";
+  const nameAcknowledgement = newlyProvidedName ? `Thank you, ${name.split(" ")[0]}.` : "";
   const isMultiple = /\b(?:also (?:i )?(?:want to )?sell|(?:selling|sell|have) (?:a |one )?(?:second|another|one more) car|(?:two|2|multiple) cars (?:for sale|to sell))\b/i.test(text);
   if (isMultiple || question === "second_vehicle") {
     const otherText = text.split(/\b(?:one more car|another car|second car)\b/i).at(-1) || text;
