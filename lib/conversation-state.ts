@@ -18,7 +18,7 @@ export type FlowState = {
   customerAgreedSlot?: boolean;
   askedFields?: Record<string, boolean>;
   externalMediaPending?: boolean; externalMediaReminderCount?: number;
-  salesConsultation?: boolean; salesMethod?: "Cash Deal" | "Consignment"; visitDeclinedForPrice?: boolean; awaitingUaeCallbackNumber?: boolean;
+  consultAction?: "booking" | "callback"; salesConsultation?: boolean; salesMethod?: "Cash Deal" | "Consignment"; visitDeclinedForPrice?: boolean; awaitingUaeCallbackNumber?: boolean;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
 export type Turn = { updates: Record<string, any>; state: FlowState; reply: string; confirm?: boolean; crm?: "lead" | "booking" | "change"; defaultDate?: string };
@@ -346,6 +346,19 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const missing = missingCarDetails(carDetails);
     const carSummary = [carDetails.make,carDetails.model,carDetails.year,carDetails.mileage ? carDetails.mileage+" km":"",carDetails.specs,updates.loan||c.loan ? "loan: "+(updates.loan||c.loan):""].filter(Boolean).join(", ");
     const chosen = state.salesMethod ? "I've noted your preference for "+(state.salesMethod==="Cash Deal"?"direct cash purchase":"free consignment")+". " : "";
+    const chooseBooking = /^(?:book|booking|inspection|appointment|free inspection|book appointment|book inspection|i want to book|i prefer inspection)[.! ]*$/i.test(text);
+    const chooseCallback = /^(?:call|callback|call back|call me|phone call|team call|have them call|i prefer callback|i prefer a call)[.! ]*$/i.test(text);
+    if (chooseBooking) state.consultAction = "booking";
+    if (chooseCallback) state.consultAction = "callback";
+    if (state.consultAction && missing.length) {
+      return end("Of course. Before I arrange that, could you please share the missing vehicle information: "+missing.join(", ")+"? I have kept the details you already provided.", "consult_details", "collecting", "lead");
+    }
+    if (state.consultAction === "booking") {
+      state.salesConsultation = false;
+      state.consultAction = undefined;
+      state.visitDeclinedForPrice = false;
+      return end("Certainly. Which day would you like to visit us for your free car inspection? We are closed on Sundays.", "time", "visit_proposed", "lead");
+    }
     const phone = numberFromMessage(text);
     if (state.awaitingUaeCallbackNumber) {
       if (phone && uaeNumber(phone)) {
@@ -357,7 +370,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       }
       return end("Please share a UAE mobile number starting with +971 5 or 05 so our team can call you. We won't arrange an inspection unless you request one.", "uae_callback", "collecting");
     }
-    const callbackRequested = /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|want.*call|yes.*call|phone me)\b/i.test(text) || question === "consult_choice" && YES.test(text);
+    const callbackRequested = state.consultAction === "callback" || /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|want.*call|yes.*call|phone me)\b/i.test(text) || question === "consult_choice" && YES.test(text);
     if (callbackRequested) {
       if (!uaeNumber(String(c.phone||""))) {
         state.awaitingUaeCallbackNumber = true;
