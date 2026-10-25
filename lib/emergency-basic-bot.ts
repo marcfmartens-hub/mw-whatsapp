@@ -69,7 +69,7 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
    if(objection && !/\b(today|tomorrow|this week|next week|month|asap|urgent|soon)\b/i.test(msg)){b.basicStep="choice";reply=CHOICE;}
    else {updates.sell_timeline=msg.slice(0,200); b.basicStep="choice"; reply="Thanks! We can arrange a free, no-obligation inspection at our location. Would you like to book an inspection, or prefer a callback from our team?";}
  } else if(b.basicStep==="choice") {
-   if((booking||affirmative) && !no){b.basicStep="daytime";reply="Of course! Which day and time would you prefer to bring the car for inspection? "+HOURS";}
+   if((booking||affirmative) && !no){b.basicStep="daytime";reply="Of course! Which day and time would you prefer to bring the car for inspection? "+HOURS;}
    else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" To help our team, please share the car make, model and year if you haven\'t already.";status="Callback requested";}
    else reply=CHOICE;
  } else if(b.basicStep==="daytime") {
@@ -93,7 +93,7 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
      else if(!b.proposedDate||!b.proposedTime||!validInspection(b.proposedDate,b.proposedTime)){b.basicStep="daytime";reply="Please choose a valid inspection day and time.";}
      else {updates.appointment_date=b.proposedDate;updates.appointment_time=b.proposedTime;updates.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";status="Inspection booked";reply="Your free inspection is confirmed for "+b.proposedDate+" at "+b.proposedTime+".\n\n"+LOCATION+"\n\nPlease bring your Emirates ID and vehicle registration. See you soon!";}
    } else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?";status="Callback requested";}
-   else {b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;reply="No problem. Which day and time would you prefer instead? "+HOURS";}
+   else {b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;reply="No problem. Which day and time would you prefer instead? "+HOURS;}
  } else {reply="Thank you. Our team will follow up if you requested a callback."; }
  const fresh=await getConversation(c.phone).catch(()=>null);
  const messages=[...((fresh?.messages||c.messages||[]) as any[]),{role:"assistant",content:reply}].slice(-40);
