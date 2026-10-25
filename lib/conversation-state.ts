@@ -373,7 +373,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (refusesVisitForPrice(text)) {state.visitDeclinedForPrice = true; note("PRICE FIRST: Customer declined inspection");}
     if (hasFutureValuation && !c.sell_timeline) updates.sell_timeline = text;
     if (firstConsultation) state.consultExplained = true;
-    if (apology) return end(["No problem at all! 😊","We can book a free inspection appointment, or have our purchasing team call you to discuss your car and selling options.","Which would you prefer?"].join(String.fromCharCode(10,10)), "consult_choice", "collecting");
+    if (apology) return end("No problem at all! 😊 Take your time. Please share the car details whenever you are ready.", "consult_details", "collecting");
     const priceFollowup = /how much|what.*offer|offer.*price|price first|give.*price/i.test(text);
     if (missing.length && priceFollowup && !firstConsultation) {
       note("VALUATION QUESTION: Purchasing team callback requested");
