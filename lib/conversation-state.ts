@@ -203,7 +203,15 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     return end(contextualIntro + " Please let me know which car you're selling (make, model and year).", "vehicle", "collecting");
   }
 
-  if (LOCATION_REQUEST.test(text)) prefix.push(LOCATION);
+  // Location requests are answered on their own, without repeating the inspection pitch.
+  // Keep the pending appointment question so the next customer reply can supply a time.
+  if (LOCATION_REQUEST.test(text)) {
+    const pending = state.question === "time" || state.question === "exact_time" || state.status === "visit_proposed";
+    if (pending) {
+      return end(LOCATION, state.question || "time", "visit_proposed");
+    }
+    return end(LOCATION, state.question || undefined);
+  }
   if (/\b(free|fees?|charges?|commission|cost.*inspection)\b/i.test(text)) prefix.push("The inspection is free, takes 10–15 minutes, and there's no obligation to sell.");
   if (/\b(number|phone number|call you|call them)\b/i.test(text)) prefix.push(`Our customer service number is ${CONTACT_NUMBER}.`);
   if (/\b(?:do you buy|you buy cars|buy.*(?:yourself|your self|own stock))\b/i.test(text)) prefix.push("We buy cars directly. After the inspection and agreeing a price, our team handles the purchase and transfer.");
