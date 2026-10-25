@@ -13,7 +13,7 @@ const SELL_INTENT = /\b(sell|selling|car|vehicle|buyer|buy my|trade)\b/i;
 const VEHICLE_INTENT = /\b(19\d{2}|20\d{2}|toyota|nissan|bmw|mercedes|audi|lexus|porsche|rover|volkswagen|honda|ford|kia|hyundai|mazda|mitsubishi)\b/i;
 const OBJECT = /\b(price|how much|offer|valuation|home visit|come to me|pickup|pick up|can't come|cannot come|not interested|not ready|don't want|do not want|why|how does|explain|loan|mortgage|consignment|cash|human|person|manager|call me|callback|call back)\b/i;
 const WANT_CALL = /\b(call\s*(me|back)|callback|call back|phone me|team|human|person|speak to|contact me)\b/i;
-const WANT_BOOK = /\b(book|inspection|appointment|visit|bring|come|yes|sure|ok|okay)\b/i;
+const WANT_BOOK = /\b(book|inspection|appointment|visit|bring|come)\b/i;
 const REFUSE = /\b(no|not now|later|don't|do not|refuse|stop|never)\b/i;
 const normalName = (s:string) => s.trim().replace(/^(my name is|i am|i'm|this is)\s+/i,"").replace(/[.!]+$/,"");
 function nameFrom(s:string):string|null { const n=normalName(s); return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/^(hi|hello|hey|call|yes|no|okay|ok|price|cash|consignment|today|tomorrow|book|inspection)$/i.test(n) && !OBJECT.test(n) ? n : null; }
@@ -35,14 +35,19 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
  const objection=OBJECT.test(msg);
  const call=WANT_CALL.test(msg);
  const booking=WANT_BOOK.test(msg);
+ const affirmative=/^(yes|yeah|yep|correct|sure|ok|okay|fine|that is right)$/i.test(msg);
  const no=REFUSE.test(msg);
  const extracted= /\b(19\d{2}|20\d{2})\b|\b(car|toyota|nissan|bmw|mercedes|audi|lexus|porsche|range rover|volkswagen|honda|ford)\b/i.test(msg)
    ? await extractVehicleInfo(msg,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({})) : {};
  for(const k of ["make","model","year","mileage","specs"] as const) if((extracted as any)[k]) updates[k]=(extracted as any)[k];
  if(FORBIDDEN.test(msg)) { reply="I can only help with selling your car. I can book a free inspection or arrange a callback from our team. Which would you prefer?"; b.basicStep="choice"; }
  else if(!state.basicMode && !(c.messages||[]).some(m=>m.role==="assistant")) { b.basicStep="name"; reply=GREETING; }
- else if(call || (objection && b.basicStep!=="name" && b.basicStep!=="vehicle" && b.basicStep!=="timeline" && b.basicStep!=="callback" && !booking)) {
-   b.basicStep="callback"; reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?"; status="Callback requested";
+ else if(b.basicStep==="callback") {
+   // A callback is terminal: an acknowledgement can NEVER restart inspection booking.
+   b.basicStep="done"; status="Callback requested";
+   reply=CALLBACK+" Our team will contact you on this WhatsApp number.";
+ } else if(call || (objection && b.basicStep!=="name" && b.basicStep!=="vehicle" && b.basicStep!=="timeline" && !booking)) {
+   b.basicStep="callback"; reply=CALLBACK+" To help our team, please share the car make, model and year if you haven\'t already."; status="Callback requested";
  } else if(b.basicStep==="name") {
    const n=nameFrom(msg);
    if(n){updates.name=n; b.basicStep="vehicle"; reply="Nice to meet you! Which car are you selling? Please share the make, model and year.";}
@@ -58,8 +63,8 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
    if(objection && !/\b(today|tomorrow|this week|next week|month|asap|urgent|soon)\b/i.test(msg)){b.basicStep="choice";reply=CHOICE;}
    else {updates.sell_timeline=msg.slice(0,200); b.basicStep="choice"; reply="Thanks! We can arrange a free, no-obligation inspection at our location. Would you like to book an inspection, or prefer a callback from our team?";}
  } else if(b.basicStep==="choice") {
-   if(booking && !no){b.basicStep="daytime";reply="Of course! Which day and time would you prefer to bring the car for inspection?";}
-   else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?";status="Callback requested";}
+   if((booking||affirmative) && !no){b.basicStep="daytime";reply="Of course! Which day and time would you prefer to bring the car for inspection?";}
+   else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" To help our team, please share the car make, model and year if you haven\'t already.";status="Callback requested";}
    else reply=CHOICE;
  } else if(b.basicStep==="daytime") {
    if(no||call||objection && !/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(msg)){b.basicStep="callback";reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?";status="Callback requested";}
@@ -82,10 +87,7 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
      else {updates.appointment_date=b.proposedDate;updates.appointment_time=b.proposedTime;updates.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";status="Inspection booked";reply="Your free inspection is confirmed for "+b.proposedDate+" at "+b.proposedTime+".\n\n"+LOCATION+"\n\nPlease bring your Emirates ID and vehicle registration. See you soon!";}
    } else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?";status="Callback requested";}
    else {b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;reply="No problem. Which day and time would you prefer instead?";}
- } else if(b.basicStep==="callback") {
-   if(booking&&!no){b.basicStep="daytime";reply="Of course. Which day and time would suit you for a free inspection?";}
-   else {b.basicStep="done";status="Callback requested";reply="Thank you. I've forwarded your details to our team. They'll contact you on this WhatsApp number. If you'd prefer another number, please send it here.";}
- } else {reply=booking?"Certainly. Which day and time would you prefer for a free inspection?": "Thanks for your message. Our team can help further if needed.";if(booking)b.basicStep="daytime";}
+ } else {reply="Thank you. Our team will follow up if you requested a callback."; }
  const fresh=await getConversation(c.phone).catch(()=>null);
  const messages=[...((fresh?.messages||c.messages||[]) as any[]),{role:"assistant",content:reply}].slice(-40);
  updates.flow_state={...state,...b,version:1,status:status==="Inspection booked"?"booked":status==="Callback requested"?"team_accepted":"collecting"};
