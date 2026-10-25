@@ -7,7 +7,7 @@ const now=new Date('2026-10-26T06:00:00Z');
 const base=()=>({phone:'971501234567',messages:[]});
 function turn(c,text,fields={}){const r=planEmergencyTurn(c,text,fields,now);Object.assign(c,r.updates);c.messages.push({role:'user',content:text},{role:'assistant',content:r.reply});return r;}
 let c=base();assert.match(turn(c,'Start').reply,/name/);turn(c,'Marc');assert.equal(c.name,'Marc');turn(c,'Toyota Camry 2022',{make:'Toyota',model:'Camry',year:'2022'});assert.equal(c.flow_state.basicStep,'vehicle');turn(c,'50000 GCC',{mileage:'50000',specs:'GCC'});assert.equal(c.flow_state.basicStep,'timeline');turn(c,'Today');assert.equal(c.flow_state.basicStep,'daytime');let r=turn(c,'Book tomorrow at 11 am');assert.equal(c.flow_state.basicStep,'done');assert.doesNotMatch(r.reply,/Please confirm|Is that correct|Dubai time|2026-10|Mon–Sat/);assert.equal(r.action,'booked');assert.equal(c.appointment_date,'2026-10-27');assert.match(r.reply,/maps.app/);r=turn(c,'Thanks');assert.equal(r.action,'collecting');assert.equal(c.flow_state.status,'booked');
-c=base();turn(c,'Start');turn(c,'How much?');assert.match(c.messages.at(-1).content,/virtual assistant/);r=turn(c,'Why?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
+c=base();turn(c,'Start');r=turn(c,'How much?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
 c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.equal(r.action,'callback');c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
 c={...base(),name:'Marc',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'I cannot come');assert.equal(r.action,'callback');assert.doesNotMatch(r.reply,/make|model|year/);
 console.log('Emergency V1: booking, missing fields, objections, callbacks, terminal state, Friday and Sunday checks passed');
@@ -127,10 +127,23 @@ console.log('Greetings and media: time-aware greeting, photos, files, audio, lin
 // Exact report: capture make AND selling timeline, finish details, skip answered timeframe.
 c=base();turn(c,'Start');turn(c,'Hi');r=turn(c,"I'm selling my bmw next month");
 assert.equal(c.make,'BMW');assert.equal(c.sell_timeline,'next month');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(r.state.basicStep,'vehicle');
-r=turn(c,'X5 2020');assert.equal(r.reply,'What is the mileage?');r=turn(c,'125k km');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,"I'm not sure");assert.equal(r.reply,'Which day and time do you want for the inspection?');assert.equal(c.sell_timeline,'next month');assert.doesNotMatch(r.reply,/When are you planning/);
+r=turn(c,'X5 2020');assert.equal(r.reply,'What is the mileage?');r=turn(c,'125k km');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,"I'm not sure");assert.equal(r.reply,'Would you like to book a free inspection this week or next month?');assert.equal(c.sell_timeline,'next month');assert.doesNotMatch(r.reply,/When are you planning/);
 // Same rule in name stage and for every brand, including when some details are known.
 for(const input of ['I want to sell my Toyota next month','Selling my Nissan next week']){
  c=base();turn(c,'Start');r=turn(c,input);assert.match(r.reply,/model and year/);assert.equal(r.state.basicStep,'vehicle');assert.ok(c.sell_timeline);
 }
 c={...base(),name:'Jace',make:'Toyota',model:'Corolla',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'Selling next month');assert.equal(r.reply,'No problem, we can help you with that. What year is it?');assert.equal(c.sell_timeline,'next month');
 console.log('Combined selling data: capture timeline, finish missing car fields and skip answered timeframe passed');
+
+// Future seller is offered this week or next month after details, then books their selection.
+for(const window of ['This week','Next month']){
+ c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',sell_timeline:'next month',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};
+ r=turn(c,'GCC');assert.equal(r.reply,'Would you like to book a free inspection this week or next month?');assert.equal(r.state.basicStep,'inspection_window');
+ r=turn(c,window);assert.equal(r.state.basicStep,'daytime');
+ r=turn(c,window==='This week'?'tomorrow at 2 pm':'5 November at 2 pm');assert.equal(r.action,'booked');assert.equal(c.appointment_date,window==='This week'?'2026-10-27':'2026-11-05');
+}
+for(const inquiry of ['What price can you offer?','Do you offer home service?','How does the inspection work?','How much for an inspection tomorrow?']){
+ c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'inspection_window'}};
+ r=turn(c,inquiry);assert.equal(r.action,'callback');assert.equal(r.state.basicStep,'done');assert.doesNotMatch(r.reply,/Which would you prefer/);
+}
+console.log('Future-inspection choices and direct inquiry-to-callback protocol passed');

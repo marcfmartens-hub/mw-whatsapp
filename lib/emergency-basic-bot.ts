@@ -5,6 +5,7 @@ import { createBiginContact, moveLeadToCallBack } from "./bigin";
 import { slotValid, LOCATION, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
 
 export const EMERGENCY_MODE = "Emergency Chat Bot V1";
+const FUTURE_QUESTION = "Would you like to book a free inspection this week or next month?";
 const SCHEDULE_QUESTION = "Which day and time do you want for the inspection?";
 export function inspectionDay(date:string):string {
  const d=new Date(date+"T12:00:00Z"), n=d.getUTCDate();
@@ -18,7 +19,7 @@ export function inspectionTime(time:string):string {
 // Keep location and contact information without appending the old opening-hours line.
 const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
-type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[] };
+type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[]; inspectionWindow?:string };
 const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
  return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
@@ -88,9 +89,25 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
  const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
  const refuse=/\b(no|not now|not interested|not ready|can't|cannot|don't(?! know)|do not(?! know)|refuse|stop|never)\b/i.test(msg);
+ const inquiry=/\b(price|how much|offer|valuation|home (?:visit|service|inspection)|come to (?:me|my|our)|pick[ -]?up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i;
  const objection=/\?|\b(price|how much|offer|valuation|home visit|pickup|pick up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i.test(msg);
  const yes=/^(yes|yes please|yeah|yep|confirm|confirmed|correct|sure|ok|okay|fine)[.!]?$/i.test(msg);
- const date=dateFromText(msg,now), time=timeFromText(msg,true);
+ let date=dateFromText(msg,now);
+ const time=timeFromText(msg,true);
+ const monthNames=["january","february","march","april","may","june","july","august","september","october","november","december"];
+ const explicit=msg.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b/i);
+ const localDate=new Date(+now+4*3600e3);
+ if(explicit){
+   let year=explicit[3]?Number(explicit[3]):localDate.getUTCFullYear();
+   const month=monthNames.indexOf(explicit[2].toLowerCase());
+   if(!explicit[3]&&month<localDate.getUTCMonth())year++;
+   const d=new Date(Date.UTC(year,month,Number(explicit[1]),12));
+   if(d.getUTCMonth()===month&&d.getUTCDate()===Number(explicit[1]))date=d.toISOString().slice(0,10);
+ }
+ else if(b.inspectionWindow==="next_month"){
+   const day=msg.match(/\b(\d{1,2})(?:st|nd|rd|th)\b|\bon (\d{1,2})\b/i);
+   if(day){const target=new Date(Date.UTC(localDate.getUTCFullYear(),localDate.getUTCMonth()+1,1,12)),month=target.getUTCMonth();target.setUTCDate(Number(day[1]||day[2]));if(target.getUTCMonth()===month)date=target.toISOString().slice(0,10);}
+ }
  if(b.basicStep==="vehicle" && /mileage/i.test(history.filter(m=>m.role==="assistant").at(-1)?.content||"") && /^\d[\d,]*$/.test(msg))u.mileage=msg.replace(/,/g,"");
  let reply="", action="collecting";
  const vehicleKeys=["make","model","year","mileage","specs"];
@@ -102,6 +119,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const nextVehicle=()=>{
    const k=vehicleKeys.find(k=>!value(k)&&!b.askedVehicle!.includes(k));
    if(k){b.askedVehicle!.push(k);b.basicStep="vehicle";reply=questions[k];}
+   else if(/next month/i.test(value("sell_timeline")||"")){b.basicStep="inspection_window";reply=FUTURE_QUESTION;}
    else if(value("sell_timeline")){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
    else {b.basicStep="timeline";reply="When are you planning to sell the car?";}
  };
@@ -156,6 +174,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else if(b.basicStep==="daytime")reply=b.proposedDate?"Please type the time you can come for the inspection.":"Please type your preferred inspection day and time.";
    else if(b.basicStep==="contact"||b.basicStep==="confirm")reply=!value("name")?"Please type your name for the booking.":"Please type your contact phone number.";
    else if(b.basicStep==="callback")reply=!value("name")?"Please type your name for the team.":"Please type your contact phone number.";
+   else if(b.basicStep==="inspection_window")reply="Please type this week or next month for the inspection.";
    else reply="Please type inspection or callback.";
  }
  else if(greeting&&b.basicStep==="name"){
@@ -172,7 +191,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  else if(call || refuse)callback();
  else if(sellerIntent && ["name","choice"].includes(b.basicStep))continueSeller();
  else if(!(c.messages||[]).some((m:any)=>m.role==="assistant") && !old.basicMode){reply="Hi, I'm Kaya, Mister Wheelz's virtual assistant. What’s your name?";b.basicStep="name";}
- else if(objection && !date && !time && !book && !(vehicleStage && /\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(msg))){if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}}
+ else if(inquiry.test(msg)||(objection&&!date&&!time&&!book&&!(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know|gcc|non-gcc)\b/i.test(msg))))callback();
  else if(b.basicStep==="name"){
    const n=nameFrom(msg);
    if(n){u.name=n;b.basicStep="vehicle";reply="Which car are you planning to sell?";}
@@ -187,6 +206,18 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    if(book||/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|immediately|ready|day|sell|selling)\b/i.test(msg)){
      if(!book)u.sell_timeline=msg.slice(0,200);
      b.basicStep="daytime";reply=SCHEDULE_QUESTION;
+   }else callback();
+ }
+ else if(b.basicStep==="inspection_window"){
+   if(/\bnext month\b/i.test(msg)){
+     b.inspectionWindow="next_month";b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;
+     reply="Which date and time next month would you like for the inspection?";
+   }else if(/\bthis week\b/i.test(msg)){
+     b.inspectionWindow="this_week";b.basicStep="daytime";reply=SCHEDULE_QUESTION;
+   }else if(date||time){
+     b.basicStep="daytime";if(date)b.proposedDate=date;if(time)b.proposedTime=time;
+     if(b.proposedDate&&b.proposedTime){b.basicStep="contact";contact();}
+     else reply=b.proposedDate?"What time do you want for the inspection?":"Which day do you want for the inspection?";
    }else callback();
  }
  else if(b.basicStep==="choice"){
@@ -219,6 +250,9 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else if(!date&&!time){callback();}
    else if(!b.proposedDate)reply="Which day do you want for the inspection?";
    else if(!b.proposedTime)reply="What time do you want for the inspection?";
+   else if(b.inspectionWindow==="next_month" && b.proposedDate.slice(0,7)!==new Date(Date.UTC(new Date(+now+4*3600e3).getUTCFullYear(),new Date(+now+4*3600e3).getUTCMonth()+1,1)).toISOString().slice(0,7)){
+     b.proposedDate=undefined;b.proposedTime=undefined;reply="Please provide the date and time in the month you selected.";
+   }
    else if(!slotValid(b.proposedDate,b.proposedTime,now)){b.proposedDate=undefined;b.proposedTime=undefined;reply="That time isn't available. "+SCHEDULE_QUESTION;}
    else {b.basicStep="contact";contact();}
  }
