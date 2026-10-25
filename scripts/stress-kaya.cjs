@@ -74,7 +74,7 @@ const accepted=turn(urgent,"Ok");
 assert(accepted.state.status==="team_accepted","Accepted callback not handed over");
 const late={name:"Daniel",make:"BMW",model:"X5",year:"2023",mileage:"Unknown",specs:"GCC",loan:"No",sell_timeline:"Now",messages:[]};
 const lateReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T19:30:00Z"));
-assert(/Monday/i.test(lateReply.reply) && !/Sunday/i.test(lateReply.reply),"After-hours must offer Monday, not Sunday");
+assert(/Monday/i.test(lateReply.reply) && /closed on Sundays/i.test(lateReply.reply),"After-hours must offer Monday and explain Sunday closure");
 const earlyReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T22:30:00Z"));
 assert(/Monday/i.test(earlyReply.reply) && /closed on Sundays/i.test(earlyReply.reply),"Sunday must offer Monday and explain closure");
 
