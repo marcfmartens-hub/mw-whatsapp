@@ -231,7 +231,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const arrival = () => open ? "What time can you bring your car today?" : `We're currently closed, but we open ${daysAhead ? "again " + when + " at" : "at"} ${openAt}. What time can you bring your car ${when}?`;
   const followUp = () => (updates.sell_timeline || c.sell_timeline || state.askedFields?.sell) ? arrival() : "When are you planning to sell your car?";
   if (/\b(?:not sure|don't know|cannot say|can't say) when i can (?:come|bring)/i.test(text)) return end(answer("No problem! Would you prefer that our team gives you a call tomorrow to arrange a convenient time?"), "callback", "collecting", "lead");
-  if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("All our inspections take place at our branch in Al Quoz. It takes about 10–15 minutes, and if we agree on the price, we can buy your car and pay cash straight away. ${followUp()}"), "time", wasBooked ? "reconfirmation" : "collecting");
+  if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("All our inspections take place at our branch in Al Quoz. It takes about 10–15 minutes, and if we agree on the price, we can buy your car and pay cash straight away. " + followUp()), "time", wasBooked ? "reconfirmation" : "collecting");
   if (/\b(?:call ?back|call me|arrange a call|call tomorrow|call on tomorrow|contact me tomorrow)\b/i.test(text)) {
     state.consent = "accepted"; note("Callback requested: " + text);
     return end(answer("Of course. Our purchasing team can call you on this WhatsApp number."), "", "team_accepted", "lead");
@@ -281,6 +281,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   for (const message of c.messages ?? []) {
     if (message.role !== "assistant") continue;
     const spoken = message.content.toLowerCase();
+    if (/may i know your name|what is your name|what's your name/.test(spoken)) asked.name = true;
     if (/what car|car's (?:make|model)|model and year|make and model/.test(spoken)) asked.vehicle = true;
     if (/what's the mileage|how many kilometres|mileage on the car/.test(spoken)) asked.mileage = true;
     if (/is it gcc specs|gcc specs, non-gcc/.test(spoken)) asked.specs = true;
@@ -295,6 +296,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     return end(answer([nameAcknowledgement, reply].filter(Boolean).join(" ")), key, "collecting");
   };
   // The customer can give facts in any order. Never restart the questionnaire.
+  if (!validName(name || c.name) && !asked.name) return askOnce("name", "Hi! I’m Kaya from Mister Wheelz. May I know your name, please?")!;
   if (!vehicle.make && !asked.vehicle) return askOnce("vehicle", "What car are you selling?")!;
   if (vehicle.make && (!vehicle.model || !vehicle.year) && !asked.vehicle) return askOnce("vehicle", "What's the model and year?")!;
   if (!vehicle.mileage && !asked.mileage) return askOnce("mileage", "What's the mileage?")!;
@@ -303,6 +305,6 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (Number(vehicle.year) >= 2020 && !/^(yes|no)$/i.test(loan ?? "") && !asked.loan) return askOnce("loan", "Does the car have a loan?")!;
   if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount) && !asked.balance) return askOnce("balance", "How much is left on the loan?")!;
   if (!(updates.sell_timeline || c.sell_timeline) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
-  if (!state.proposedDate) return end(answer("When would you like to come for a free inspection?"), "time", "visit_proposed");
+  if (!state.proposedDate) return end(answer(arrival()), "time", "visit_proposed");
   return end(answer(`What time would you like to come on ${state.proposedDate}?`), "exact_time", "visit_proposed");
 }
