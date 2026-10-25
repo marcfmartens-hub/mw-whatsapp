@@ -8,6 +8,9 @@ type Basic = { basicMode: "Emergency Basic Bot V1"; basicStep: "name"|"vehicle"|
 const GREETING = "Hi! 👋 Welcome to Mister Wheelz. I'm Kaya, your virtual car-selling assistant. I'll help you take the next step towards selling your car. May I have your name, please?";
 const CHOICE = "I'm a virtual assistant 😊 I can book a free inspection or arrange a callback from our team. Which would you prefer?";
 const CALLBACK = "No problem, I understand. I'll forward this to our team so they can help you personally.";
+const FORBIDDEN = /\b(politics|political|president|election|government|religion|religious|islam|christian|christianity|muslim|hindu|staff|employee|salary|colleague|manager name|owner name|personal number|private details|internal information)\b/i;
+const SELL_INTENT = /\b(sell|selling|car|vehicle|buyer|buy my|trade)\b/i;
+const VEHICLE_INTENT = /\b(19\d{2}|20\d{2}|toyota|nissan|bmw|mercedes|audi|lexus|porsche|rover|volkswagen|honda|ford|kia|hyundai|mazda|mitsubishi)\b/i;
 const OBJECT = /\b(price|how much|offer|valuation|home visit|come to me|pickup|pick up|can't come|cannot come|not interested|not ready|don't want|do not want|why|how does|explain|loan|mortgage|consignment|cash|human|person|manager|call me|callback|call back)\b/i;
 const WANT_CALL = /\b(call\s*(me|back)|callback|call back|phone me|team|human|person|speak to|contact me)\b/i;
 const WANT_BOOK = /\b(book|inspection|appointment|visit|bring|come|yes|sure|ok|okay)\b/i;
@@ -36,13 +39,16 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
  const extracted= /\b(19\d{2}|20\d{2})\b|\b(car|toyota|nissan|bmw|mercedes|audi|lexus|porsche|range rover|volkswagen|honda|ford)\b/i.test(msg)
    ? await extractVehicleInfo(msg,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({})) : {};
  for(const k of ["make","model","year","mileage","specs"] as const) if((extracted as any)[k]) updates[k]=(extracted as any)[k];
- if(!state.basicMode && !(c.messages||[]).some(m=>m.role==="assistant")) { b.basicStep="name"; reply=GREETING; }
+ if(FORBIDDEN.test(msg)) { reply="I can only help with selling your car. I can book a free inspection or arrange a callback from our team. Which would you prefer?"; b.basicStep="choice"; }
+ else if(!state.basicMode && !(c.messages||[]).some(m=>m.role==="assistant")) { b.basicStep="name"; reply=GREETING; }
  else if(call || (objection && b.basicStep!=="name" && b.basicStep!=="vehicle" && b.basicStep!=="timeline" && b.basicStep!=="callback" && !booking)) {
    b.basicStep="callback"; reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?"; status="Callback requested";
  } else if(b.basicStep==="name") {
    const n=nameFrom(msg);
    if(n){updates.name=n; b.basicStep="vehicle"; reply="Nice to meet you! Which car are you selling? Please share the make, model and year.";}
-   else reply=objection?CHOICE:"May I have your name, please?";
+   else if(SELL_INTENT.test(msg)) { b.basicStep="vehicle"; reply="Of course, I can help you sell your car 😊 Which make, model and year is it?"; }
+   else if(objection) { b.basicStep="choice"; reply=CHOICE; }
+   else { b.basicStep="vehicle"; reply="I can help you with that. Which car would you like to sell? Please share the make, model and year."; }
  } else if(b.basicStep==="vehicle") {
    const make=updates.make||c.make,model=updates.model||c.model,year=updates.year||c.year;
    if(make && model && year){ b.basicStep="timeline"; reply="Thank you! When are you planning to sell your car?"; }
@@ -65,11 +71,14 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
      if(!date)reply="Which day would suit you for the free inspection?";
      else if(!time)reply="What time would suit you on "+date+"?";
      else if(!slotValid(date,time))reply="Sorry, that time isn't available within our opening hours. Could you choose another day or time? We're closed on Sundays.";
+     else if(!(updates.name||c.name)) { b.basicStep="confirm"; reply="I have "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+" for "+date+" at "+time+". Before confirming, may I have your name for the booking?"; }
      else {b.basicStep="confirm";reply="Please confirm: "+(updates.name||c.name||"Customer")+", "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+", inspection on "+date+" at "+time+". Your contact number is +"+c.phone.replace(/^\+/,"")+". Reply YES to confirm, or tell me what to change.";}
    }
  } else if(b.basicStep==="confirm") {
-   if(/^(yes|yes please|confirm|confirmed|correct|ok|okay|sure)$/i.test(msg)){
-     if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime)){b.basicStep="daytime";reply="Please choose a valid inspection day and time.";}
+   if(!(updates.name||c.name) && nameFrom(msg)) {updates.name=nameFrom(msg);reply="Thank you! Please confirm your inspection for "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+" on "+b.proposedDate+" at "+b.proposedTime+". Reply YES to confirm.";}
+   else if(/^(yes|yes please|confirm|confirmed|correct|ok|okay|sure)$/i.test(msg)){
+     if(!(updates.name||c.name)) {reply="Before I confirm, may I have your name for the booking?";}
+     else if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime)){b.basicStep="daytime";reply="Please choose a valid inspection day and time.";}
      else {updates.appointment_date=b.proposedDate;updates.appointment_time=b.proposedTime;updates.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";status="Inspection booked";reply="Your free inspection is confirmed for "+b.proposedDate+" at "+b.proposedTime+".\n\n"+LOCATION+"\n\nPlease bring your Emirates ID and vehicle registration. See you soon!";}
    } else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?";status="Callback requested";}
    else {b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;reply="No problem. Which day and time would you prefer instead?";}
