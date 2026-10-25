@@ -38,12 +38,12 @@ for (let mask = 0; mask < 128; mask++) {
   }
   assert(bookingPrompt,"Never reached booking mask="+mask);
 }
-const mileage = {make:"Kia",model:"Seltos",year:"2023",messages:[]};
+const mileage = {name:"Daniel",make:"Kia",model:"Seltos",year:"2023",messages:[]};
 turn(mileage,"Hi");
 const m=turn(mileage,"65k");
 assert(m.updates.mileage==="65000","65k not captured");
 assert(!/mileage/i.test(m.reply),"Repeated mileage after 65k");
-const unknown={make:"Toyota",model:"Camry",year:"2020",mileage:"80000",messages:[]};
+const unknown={name:"Daniel",make:"Toyota",model:"Camry",year:"2020",mileage:"80000",messages:[]};
 turn(unknown,"Hi");
 const u=turn(unknown,"I don't know");
 assert(u.updates.specs==="Unknown"||unknown.specs==="Unknown"||u.state.question!=="specs","Stuck on specs");
