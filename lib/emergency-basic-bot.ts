@@ -149,8 +149,18 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    const immediate=/^(now|immediately|asap)[.!]?$/i.test(msg);
    if(!immediate){if(date)b.proposedDate=date;if(time)b.proposedTime=time;}
    if(immediate){
-     if(b.scheduleClarified)callback();
-     else {b.scheduleClarified=true;reply=b.proposedDate?"What time do you want for the inspection on "+inspectionDay(b.proposedDate)+"?":SCHEDULE_QUESTION;}
+     const local=new Date(+now+4*3600e3),today=local.toISOString().slice(0,10);
+     const minutes=local.getUTCHours()*60+local.getUTCMinutes();
+     const open=local.getUTCDay()!==0&&minutes>=(local.getUTCDay()===5?720:600)&&minutes<1110;
+     let target=today;
+     if(!open){let next=new Date(+local+86400e3);while(next.getUTCDay()===0)next=new Date(+next+86400e3);target=next.toISOString().slice(0,10);}
+     const tomorrow=new Date(+local+86400e3).toISOString().slice(0,10);
+     const label=target===today?"today":target===tomorrow?"tomorrow":inspectionDay(target);
+     b.proposedDate=target;b.proposedTime=undefined;
+     const question="What time can you come "+label+"?";
+     if(history.some(m=>m.role==="assistant"&&m.content.includes(question))){
+       callback();
+     }else reply=(open?"":"We're closed now. ")+question;
    }
    else if(!date&&!time){callback();}
    else if(!b.proposedDate)reply="Which day do you want for the inspection?";
@@ -169,6 +179,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    b.basicStep="contact";contact();
  }
  else {b.basicStep="choice";reply=CHOICE;}
+ if(reply.includes("?")&&history.some(m=>m.role==="assistant"&&m.content.trim()===reply.trim()))callback();
  b.status=b.basicStep==="done" && action==="collecting" ? (old.status||"collecting") : action==="booked"?"booked":action==="callback"?"team_accepted":"collecting";
  u.flow_state={...old,...b,version:1};
  return {reply,updates:u,action,state:b};

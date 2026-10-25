@@ -8,7 +8,7 @@ const base=()=>({phone:'971501234567',messages:[]});
 function turn(c,text,fields={}){const r=planEmergencyTurn(c,text,fields,now);Object.assign(c,r.updates);c.messages.push({role:'user',content:text},{role:'assistant',content:r.reply});return r;}
 let c=base();assert.match(turn(c,'Hi').reply,/name/);turn(c,'Marc');assert.equal(c.name,'Marc');turn(c,'Toyota Camry 2022',{make:'Toyota',model:'Camry',year:'2022'});assert.equal(c.flow_state.basicStep,'vehicle');turn(c,'50000 GCC',{mileage:'50000',specs:'GCC'});assert.equal(c.flow_state.basicStep,'timeline');turn(c,'Today');assert.equal(c.flow_state.basicStep,'daytime');let r=turn(c,'Book tomorrow at 11 am');assert.equal(c.flow_state.basicStep,'done');assert.doesNotMatch(r.reply,/Please confirm|Is that correct|Dubai time|2026-10|Mon–Sat/);assert.equal(r.action,'booked');assert.equal(c.appointment_date,'2026-10-27');assert.match(r.reply,/maps.app/);r=turn(c,'Thanks');assert.equal(r.action,'collecting');assert.equal(c.flow_state.status,'booked');
 c=base();turn(c,'Hi');turn(c,'How much?');assert.match(c.messages.at(-1).content,/virtual assistant/);r=turn(c,'Why?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
-c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
+c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.equal(r.action,'callback');c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
 c={...base(),name:'Marc',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'I cannot come');assert.equal(r.action,'callback');assert.doesNotMatch(r.reply,/make|model|year/);
 console.log('Emergency V1: booking, missing fields, objections, callbacks, terminal state, Friday and Sunday checks passed');
 
@@ -61,4 +61,20 @@ assert.equal(turn(c,'Now').state.basicStep,'daytime');assert.equal(turn(c,'maybe
 console.log('Historical Patrol regression: stored facts, 2022 year, 47000 mileage, NOW-to-booking and noncompliance passed');
 
 c={...base(),name:'mo',make:'Nissan',model:'Patrol',year:'2022',mileage:'22',specs:'GCC',messages:[{role:'user',content:'47000 km'},{role:'assistant',content:"We're closed on Sundays. What time can you bring your car on Monday?"}]};
-r=planEmergencyTurn(c,'Now',{},new Date('2026-10-25T12:00:00Z'));assert.equal(r.state.basicStep,'daytime');assert.match(r.reply,/Monday 26th of October/);assert.equal(r.updates.mileage,'47000');assert.doesNotMatch(r.reply,/make|model|year/);
+r=planEmergencyTurn(c,'Now',{},new Date('2026-10-25T12:00:00Z'));assert.equal(r.state.basicStep,'daytime');assert.match(r.reply,/What time can you come tomorrow/);assert.equal(r.updates.mileage,'47000');assert.doesNotMatch(r.reply,/make|model|year/);
+
+// NOW in scheduling uses inspection opening hours in Dubai and never repeats.
+for(const [clock,expected,day] of [
+ ['2026-10-26T08:00:00Z','What time can you come today?','2026-10-26'],
+ ['2026-10-25T13:04:00Z',"We're closed now. What time can you come tomorrow?",'2026-10-26'],
+ ['2026-10-26T15:00:00Z',"We're closed now. What time can you come tomorrow?",'2026-10-27'],
+ ['2026-10-30T07:00:00Z',"We're closed now. What time can you come tomorrow?",'2026-10-31'],
+ ['2026-10-31T15:00:00Z',"We're closed now. What time can you come Monday 2nd of November?",'2026-11-02'],
+]){
+ c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',specs:'Unknown',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};
+ r=planEmergencyTurn(c,'Now',{},new Date(clock));assert.equal(r.reply,expected);assert.equal(r.state.proposedDate,day);
+ Object.assign(c,r.updates);c.messages.push({role:'assistant',content:r.reply});
+ const booked=planEmergencyTurn(structuredClone(c),'2 pm',{},new Date(clock));assert.equal(booked.action,'booked');assert.equal(booked.updates.appointment_date,day);
+ r=planEmergencyTurn(c,'Now',{},new Date(clock));assert.notEqual(r.reply,expected);assert.equal(r.action,'callback');
+}
+console.log('NOW opening-hours checks: today, closed Sunday, after closing, Friday, weekend and no repetition passed');
