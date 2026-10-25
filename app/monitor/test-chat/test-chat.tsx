@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import ImprovementMonitor from "./improvement-monitor";
+
 type Msg = { role: "user" | "assistant"; content: string };
 export default function TestChat() {
  const [messages,setMessages] = useState<Msg[]>([]);
@@ -22,7 +22,7 @@ export default function TestChat() {
    const res=await fetch("/api/test-chat",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,chat})});
    const data=await res.json();if(!res.ok||data.source!=="production-conversation-engine")throw Error(data.error||"Unexpected test response");
    setChat(data.chat);setState(data.state);setNote(data.note||"");
-   setMessages(m=>[...m,{role:"assistant",content:data.reply}]);
+   setMessages(m=>[...m,{role:"assistant",content:String(data.reply)}]);
   } catch(e:any){setError(e.message||"Connection failed");}
   finally {setBusy(false);}
  }
@@ -54,6 +54,6 @@ export default function TestChat() {
  {report&&<div><p>Proposal prepared locally. No AI analysis or Vercel deployment performed.</p><button onClick={()=>navigator.clipboard.writeText(report)}>Copy report</button><details><summary>View report</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",fontSize:11}}>{report}</pre></details></div>}
  </div>
  </section>
- <section style={{background:"white",borderRadius:16,padding:16}}><ImprovementMonitor key={messages.length===0?"reset":"active"} messages={messages}/><strong>Real engine state</strong><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",fontSize:12,background:"#f4f6f8",padding:12,borderRadius:10}}>{JSON.stringify(state||{status:"No messages yet"},null,2)}</pre></section>
+ <section style={{background:"white",borderRadius:16,padding:16}}><strong>Real engine state</strong><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",fontSize:12,background:"#f4f6f8",padding:12,borderRadius:10}}>{JSON.stringify(state||{status:"No messages yet"},null,2)}</pre></section>
  </div></div></main>;
 }
