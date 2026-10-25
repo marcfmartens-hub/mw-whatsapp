@@ -1,3 +1,4 @@
+import { emergencyBasicTurn } from "@/lib/emergency-basic-bot";
 import {mileageClarification} from "@/lib/kaya-improve/policy-checks";
 import {LOCATION_TEXT,CUSTOMER_CALL_CHOICE,wantsOurNumber} from "@/lib/kaya-improve/contact";
 import { handleConversationTurn } from "@/lib/conversation-turn";
@@ -715,9 +716,14 @@ export async function POST(req: NextRequest) {
       if (mediaInBurst) messageText = burst.map(b => b.replace(MEDIA_TAG, "").trim()).filter(Boolean).join("\n");
     }
 
+    const status = await emergencyBasicTurn(conversation,
+      messageText || (mediaInBurst ? "[photo]" : message.type === "location" ? "Where is your location?" : "[unsupported]"));
+    return NextResponse.json({ status, mode: "Emergency Basic Bot V1" }, { status: 200 });
+
+    /* Previous Kaya engine preserved for rollback.
     const status = await handleConversationTurn(conversation,
       messageText || (mediaInBurst ? "[photo]" : message.type === "location" ? "Where is your location?" : "[unsupported]"));
-    return NextResponse.json({ status }, { status: 200 });
+    return NextResponse.json({ status }, { status: 200 }); */
   } catch (error) {
     console.error("Webhook POST error:", error);
     // Retry storage failures; do not replay an already committed customer message.
