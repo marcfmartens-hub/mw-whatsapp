@@ -206,11 +206,23 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // Location requests are answered on their own, without repeating the inspection pitch.
   // Keep the pending appointment question so the next customer reply can supply a time.
   if (LOCATION_REQUEST.test(text)) {
-    const pending = state.question === "time" || state.question === "exact_time" || state.status === "visit_proposed";
-    if (pending) {
-      return end(LOCATION, state.question || "time", "visit_proposed");
-    }
-    return end(LOCATION, state.question || undefined);
+    // Answer the interruption, then resume exactly the pending question.
+    // Never repeat the sales explanation or restart the conversation.
+    const pendingQuestion = state.question || question;
+    const continuation: Record<string, string> = {
+      time: "What time can you bring your car?",
+      exact_time: "What time can you bring your car?",
+      name: "May I know your name please?",
+      vehicle: "Which car are you selling (make, model and year)?",
+      mileage: "What's the mileage?",
+      specs: "Is it GCC specs?",
+      loan: "Does the car have a loan?",
+      balance: "How much is left on the loan?",
+      sell: "When are you planning to sell?"
+    };
+    const pendingBooking = pendingQuestion === "time" || pendingQuestion === "exact_time" || state.status === "visit_proposed";
+    const followUpQuestion = pendingBooking ? "What time can you bring your car?" : continuation[pendingQuestion] || "";
+    return end(LOCATION + (followUpQuestion ? "\\n\\n" + followUpQuestion : ""), pendingBooking ? "time" : pendingQuestion || undefined, pendingBooking ? "visit_proposed" : undefined);
   }
   if (/\b(free|fees?|charges?|commission|cost.*inspection)\b/i.test(text)) prefix.push("The inspection is free, takes 10–15 minutes, and there's no obligation to sell.");
   if (/\b(number|phone number|call you|call them)\b/i.test(text)) prefix.push(`Our customer service number is ${CONTACT_NUMBER}.`);
