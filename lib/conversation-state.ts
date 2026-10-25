@@ -174,7 +174,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const reply = repeated
       ? "I understand the details are in the link, but I still can't open external links or read the advertisement here. Please type the car details in this chat so I can help you."
       : "Thanks for sharing. I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" + (missing.length ? " (" + missing.join(", ") + ")" : "") + "?";
-    return end(reply, state.question || (!c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : "specs"), "collecting");
+    return end(reply, !c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : !c.specs ? "specs" : (state.question || "sell"), "collecting");
   }
   if (/^(?:crazy|stupid|useless|dumb|bad|terrible)\s+(?:bot|robot|ai)|^(?:you(?:'re| are)\s+)?(?:not\s+listening|not\s+understanding)|^this\s+(?:bot|robot|ai)\s+(?:is\s+)?(?:crazy|stupid|useless|bad)/i.test(text)) {
     state.externalMediaPending = mediaContext;
