@@ -25,7 +25,7 @@ const SELF_CONTACT = /\b(?:i\s*(?:will|shall)|i'?ll)\s+(?:call|contact|phone|rin
 const YES = /^\s*(?:yes(?: please)?|yes sure|sure|sure please|okay|ok|please|that (?:will|would) be (?:good|great)|works(?: for me)?|yes[.! ]+sure)[\s.!👍]*$/i;
 const NO = /^\s*(?:no(?: thanks)?|nope|not interested|no need|don't call|do not call)[\s.!]*$/i;
 const PRICE = /\b(how much|price|offer|estimate|valuation|ballpark|worth|what.*pay)\b/i;
-const LOCATION_REQUEST = /\b(where|location|loction|loctb|loctn|loct|address|map|directions)\b/i;
+const LOCATION_REQUEST = /\b(where|location|locating|locations?|loction|loctb|loctn|loct|address|map|directions)\b/i;
 export const LOCATION = "📍 Mister Wheelz Car Buyers\nUmm Suqeim Branch, Al Quoz 4, Dubai\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\nMon–Sat 10 AM–7 PM (Friday from 12 PM); closed Sunday\nCustomer service: +971 58 582 5543";
 const CONTACT_NUMBER = "+971 58 582 5543";
 const CHOICE = "Would you like to arrange the inspection, or would you prefer a personal call from our purchasing team?";
@@ -222,7 +222,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     };
     const pendingBooking = pendingQuestion === "time" || pendingQuestion === "exact_time" || state.status === "visit_proposed";
     const followUpQuestion = pendingBooking ? "What time can you bring your car?" : continuation[pendingQuestion] || "";
-    return end(LOCATION + (followUpQuestion ? "\\n\\n" + followUpQuestion : ""), pendingBooking ? "time" : pendingQuestion || undefined, pendingBooking ? "visit_proposed" : undefined);
+    return end(LOCATION + (followUpQuestion ? "\n\n\n" + followUpQuestion : ""), pendingBooking ? "time" : pendingQuestion || undefined, pendingBooking ? "visit_proposed" : undefined);
   }
   if (/\b(free|fees?|charges?|commission|cost.*inspection)\b/i.test(text)) prefix.push("The inspection is free, takes 10–15 minutes, and there's no obligation to sell.");
   if (/\b(number|phone number|call you|call them)\b/i.test(text)) prefix.push(`Our customer service number is ${CONTACT_NUMBER}.`);
@@ -284,7 +284,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const label = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()];
     const currentWeek = Date.UTC(dubaiLocalTime.getUTCFullYear(),dubaiLocalTime.getUTCMonth(),dubaiLocalTime.getUTCDate()-((day+6)%7));
     const targetWeek = Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()-((d.getUTCDay()+6)%7));
-    if (targetWeek <= currentWeek) return label;
+    if (targetWeek <= currentWeek + 7 * 86400e3) return label;
     const n=d.getUTCDate(), suffix=n%100>=11&&n%100<=13?"th":n%10===1?"st":n%10===2?"nd":n%10===3?"rd":"th";
     return "next week "+label+" "+n+suffix+" of "+d.toLocaleString("en-GB",{month:"long",timeZone:"UTC"});
   };
