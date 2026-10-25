@@ -199,11 +199,11 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   }
   if (!wasBooked && customerFrustrated) return end("I'm sorry — I haven't been listening properly. I can arrange for our team to help you directly. Would you like a callback?", "callback", "collecting", "lead");
   // Buying enquiries override the seller questionnaire, including after an earlier car-model message.
-  const buyingNow = /\b(?:looking\s+to\s+buy|want\s+to\s+buy|wish\s+to\s+buy|looking\s+for\s+(?:a|an|the)?\s*(?:car|vehicle|sonata|camry)|do\s+you\s+have\s+(?:a|an|the)?\s*[a-z0-9]|have\s+(?:a|an)\s+[a-z]+\s+for\s+sale|i\s+am\s+(?:buying|a\s+buyer)|buy\s+instead|looking\s+to\s+purchase)\b/i.test(text);
+  const buyingNow = /\b(?:looking\s+to\s+buy|want\s+to\s+buy|wish\s+to\s+buy|looking\s+for\s+(?:a|an|the)?\s*(?:car|vehicle|sonata|camry)|do\s+you\s+have\s+(?:a|an|the)?\s*[a-z0-9]|have\s+(?:a|an)\s+[a-z]+\s+for\s+sale|i\s+am\s+(?:buying|a\s+buyer)|buy\s+instead|looking\s+to\s+purchase)\b/i.test(text) || /\b(?:do\s+(?:you|u)\s+(?:have|sell|stock)|any\s+(?:cars?|sonata|camry)\s+(?:available|for sale)|looking\s+to\s+(?:buy|purchase))\b/i.test(text);
   const sellerNow = /\b(?:selling\s+my\s+car|sell\s+my\s+car|want\s+to\s+sell|i\s+am\s+selling)\b/i.test(text);
   if (!wasBooked && (buyingNow && !sellerNow || state.buyerInquiry && !sellerNow)) {
     state.buyerInquiry = true;
-    const buyerName = updates.name || c.name || findName(text, c, "name");
+    const buyerName = updates.name || c.name || (buyingNow ? undefined : findName(text, c, "name"));
     const buyerPhone = numberFromMessage(text) || String(c.phone || "");
     if (buyerName && !c.name) updates.name = buyerName;
     if (numberFromMessage(text)) updates.alternative_phone = numberFromMessage(text);
