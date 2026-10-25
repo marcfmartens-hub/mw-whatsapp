@@ -613,10 +613,7 @@ export async function POST(req: NextRequest) {
     inboundCommitted = true;
     if (inbound.duplicate) return NextResponse.json({ status: "duplicate" }, { status: 200 });
     const conversation = inbound.before;
-    if (!messageText && message.type === "audio") {
-      await sendWhatsAppMessage(phone, "Sorry, I can't listen to voice notes. Could you type your message instead?");
-      return NextResponse.json({ status: "voice_note" }, { status: 200 });
-    }
+    if (message.type === "audio") messageText="[audio]";
     // Photos / files: Kaya can't open them. Tag them so the whole batch gets ONE reply,
     // and any caption / ad text sent with them is still read.
     const isMedia = ["image", "document", "video"].includes(message.type);
@@ -710,10 +707,11 @@ export async function POST(req: NextRequest) {
       if (after) Object.assign(conversation, after);
       conversation.messages = msgs.slice(0, i) as any;
       if (burst.length > 1) messageText = burst.join("\n");
-      // Photos/files in the burst: keep only the text the customer sent with them
-      const MEDIA_TAG = /^\[(photo|file)\]\s*/;
+      // Preserve attachment types through batching; the emergency engine explains
+      // only the types actually received and can still collect typed captions.
+      const MEDIA_TAG = /^\[(photo|file|audio)\]\s*/;
       mediaInBurst = burst.some(b => MEDIA_TAG.test(b));
-      if (mediaInBurst) messageText = burst.map(b => b.replace(MEDIA_TAG, "").trim()).filter(Boolean).join("\n");
+      if (mediaInBurst) messageText = burst.join("\n");
     }
 
     const status = await emergencyBasicTurn(conversation,

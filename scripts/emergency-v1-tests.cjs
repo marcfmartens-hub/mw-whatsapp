@@ -6,8 +6,8 @@ const {planEmergencyTurn}=require('../lib/emergency-basic-bot.ts');
 const now=new Date('2026-10-26T06:00:00Z');
 const base=()=>({phone:'971501234567',messages:[]});
 function turn(c,text,fields={}){const r=planEmergencyTurn(c,text,fields,now);Object.assign(c,r.updates);c.messages.push({role:'user',content:text},{role:'assistant',content:r.reply});return r;}
-let c=base();assert.match(turn(c,'Hi').reply,/name/);turn(c,'Marc');assert.equal(c.name,'Marc');turn(c,'Toyota Camry 2022',{make:'Toyota',model:'Camry',year:'2022'});assert.equal(c.flow_state.basicStep,'vehicle');turn(c,'50000 GCC',{mileage:'50000',specs:'GCC'});assert.equal(c.flow_state.basicStep,'timeline');turn(c,'Today');assert.equal(c.flow_state.basicStep,'daytime');let r=turn(c,'Book tomorrow at 11 am');assert.equal(c.flow_state.basicStep,'done');assert.doesNotMatch(r.reply,/Please confirm|Is that correct|Dubai time|2026-10|Mon–Sat/);assert.equal(r.action,'booked');assert.equal(c.appointment_date,'2026-10-27');assert.match(r.reply,/maps.app/);r=turn(c,'Thanks');assert.equal(r.action,'collecting');assert.equal(c.flow_state.status,'booked');
-c=base();turn(c,'Hi');turn(c,'How much?');assert.match(c.messages.at(-1).content,/virtual assistant/);r=turn(c,'Why?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
+let c=base();assert.match(turn(c,'Start').reply,/name/);turn(c,'Marc');assert.equal(c.name,'Marc');turn(c,'Toyota Camry 2022',{make:'Toyota',model:'Camry',year:'2022'});assert.equal(c.flow_state.basicStep,'vehicle');turn(c,'50000 GCC',{mileage:'50000',specs:'GCC'});assert.equal(c.flow_state.basicStep,'timeline');turn(c,'Today');assert.equal(c.flow_state.basicStep,'daytime');let r=turn(c,'Book tomorrow at 11 am');assert.equal(c.flow_state.basicStep,'done');assert.doesNotMatch(r.reply,/Please confirm|Is that correct|Dubai time|2026-10|Mon–Sat/);assert.equal(r.action,'booked');assert.equal(c.appointment_date,'2026-10-27');assert.match(r.reply,/maps.app/);r=turn(c,'Thanks');assert.equal(r.action,'collecting');assert.equal(c.flow_state.status,'booked');
+c=base();turn(c,'Start');turn(c,'How much?');assert.match(c.messages.at(-1).content,/virtual assistant/);r=turn(c,'Why?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
 c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.equal(r.action,'callback');c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
 c={...base(),name:'Marc',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'I cannot come');assert.equal(r.action,'callback');assert.doesNotMatch(r.reply,/make|model|year/);
 console.log('Emergency V1: booking, missing fields, objections, callbacks, terminal state, Friday and Sunday checks passed');
@@ -28,11 +28,11 @@ assert.equal(turn(c,'Yes').action,'booked');
 console.log('Simplified scheduling: exact transcript, automatic confirmation, missing data and legacy YES passed');
 
 // Current report: uncertainty is a complete specs answer and must not be repeated.
-c=base();turn(c,'Hi');assert.equal(turn(c,'Jace').reply,'Which car are you planning to sell?');
+c=base();turn(c,'Start');assert.equal(turn(c,'Jace').reply,'Which car are you planning to sell?');
 r=turn(c,'Bmw 2020 x5 not sure',{make:'BMW',model:'X5',year:'2020'});assert.equal(c.specs,'Unknown');assert.equal(r.reply,'What is the mileage?');
 r=turn(c,'125k km');assert.equal(c.mileage,'125000');assert.equal(r.reply,'When are you planning to sell the car?');assert.doesNotMatch(r.reply,/GCC|mileage/);
 // Each missing field is asked once. Ignored answers do not cause loops or block booking.
-c=base();turn(c,'Hi');turn(c,'Jace');let prompts=[];
+c=base();turn(c,'Start');turn(c,'Jace');let prompts=[];
 for(let i=0;i<6;i++)prompts.push(turn(c,'okay').reply);
 assert.equal(new Set(prompts.slice(0,5)).size,5);assert.equal(prompts.filter(p=>p==='What is the mileage?').length,1);assert.equal(prompts.filter(p=>p==='Is it GCC or non-GCC?').length,1);assert.ok(prompts.includes('When are you planning to sell the car?'));
 turn(c,'book');turn(c,'tomorrow');r=turn(c,'2 pm');assert.equal(r.action,'booked');
@@ -80,21 +80,21 @@ for(const [clock,expected,day] of [
 console.log('NOW opening-hours checks: today, closed Sunday, after closing, Friday, weekend and no repetition passed');
 
 // Ignoring the name to give selling intent is valid input, not an objection.
-c=base();turn(c,'Hi');r=turn(c,'I want to sell my bmw');assert.equal(c.make,'BMW');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(c.flow_state.basicStep,'vehicle');assert.doesNotMatch(r.reply,/virtual assistant|callback/);
+c=base();turn(c,'Start');r=turn(c,'I want to sell my bmw');assert.equal(c.make,'BMW');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(c.flow_state.basicStep,'vehicle');assert.doesNotMatch(r.reply,/virtual assistant|callback/);
 r=turn(c,'X5 2020');assert.equal(c.model,'X5');assert.equal(c.year,'2020');assert.equal(r.reply,'What is the mileage?');turn(c,'125k km');turn(c,"I don't know");turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
 for(const [input,data,question] of [
  ['I want to sell my car',{},'Which car are you planning to sell?'],
  ['I want to sell my BMW X5',{make:'BMW',model:'X5'},'What year is it?'],
  ['Selling my BMW X5 2020',{make:'BMW',model:'X5',year:'2020'},'What is the mileage?'],
-]){c=base();turn(c,'Hi');r=turn(c,input);for(const [k,v]of Object.entries(data))assert.equal(c[k],v);assert.equal(r.reply,'No problem, we can help you with that. '+question);}
+]){c=base();turn(c,'Start');r=turn(c,input);for(const [k,v]of Object.entries(data))assert.equal(c[k],v);assert.equal(r.reply,'No problem, we can help you with that. '+question);}
 // A seller who was already shown the fallback can return to collecting details.
 c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'choice',offscript:true}};r=turn(c,'I want to sell my BMW');assert.match(r.reply,/model and year/);assert.equal(r.state.offscript,false);
 console.log('Selling intent: missing-name bypass, known vehicle fields, fallback recovery and booking passed');
 
 for(const [input,make]of [['I want to sell my Toyota','Toyota'],['I want to sell my Nissan','Nissan'],['I want to sell my Ford','Ford'],['I want to sell my Audi','Audi'],['I want to sell my Porsche','Porsche'],['I want to sell my Honda','Honda']]){
- c=base();turn(c,'Hi');r=turn(c,input);assert.equal(c.make,make);assert.match(r.reply,/model and year/);assert.doesNotMatch(r.reply,/virtual assistant|callback/);
+ c=base();turn(c,'Start');r=turn(c,input);assert.equal(c.make,make);assert.match(r.reply,/model and year/);assert.doesNotMatch(r.reply,/virtual assistant|callback/);
 }
-for(const input of ['My car','Car','I want to sell a vehicle']){c=base();turn(c,'Hi');r=turn(c,input);assert.match(r.reply,/Which car are you planning to sell/);assert.equal(c.name,undefined);}
+for(const input of ['My car','Car','I want to sell a vehicle']){c=base();turn(c,'Start');r=turn(c,input);assert.match(r.reply,/Which car are you planning to sell/);assert.equal(c.name,undefined);}
 console.log('Brand-independent selling intent and generic car/vehicle messages passed');
 
 // Exact report: acknowledgement after a missing-name request never repeats that request.
@@ -108,3 +108,18 @@ c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'callback'}
 // Persistent dedupe survives message truncation and harmless punctuation differences.
 c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'done',status:'team_accepted',sentReplies:['thank you']},messages:[]};r=turn(c,'Ok');assert.equal(r.reply,'');
 console.log('All-reply dedupe: callback acknowledgement, legacy state, terminal messages and persistent history passed');
+
+for(const [clock,expected]of [['2026-10-26T05:00:00Z','Good morning'],['2026-10-26T10:00:00Z','Good afternoon'],['2026-10-26T14:00:00Z','Good evening']]){
+ for(const hello of ['Hi','Hello','Hey','Good morning']){
+  c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name please?'}]};
+  r=planEmergencyTurn(c,hello,{},new Date(clock));assert.equal(r.reply,expected+'. Which car are you planning to sell?');assert.equal(r.state.basicStep,'vehicle');assert.equal(r.updates.name,undefined);
+ }
+}
+for(const [input,label]of [['[photo]','pictures'],['[file]','files'],['[audio]','voice notes'],['https://example.com/car','links']]){
+ c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['mileage']},messages:[{role:'assistant',content:'What is the mileage?'}]};
+ r=turn(c,input);assert.match(r.reply,new RegExp('not able to open '+label));assert.match(r.reply,/type the mileage/);assert.equal(r.state.basicStep,'vehicle');assert.equal(c.mileage,undefined);
+ r=turn(c,'125k km');assert.equal(c.mileage,'125000');assert.equal(r.reply,'Is it GCC or non-GCC?');
+}
+c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'timeline'}};r=turn(c,'[audio]');assert.match(r.reply,/when you are planning to sell/);assert.equal(r.state.basicStep,'timeline');
+c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['mileage']}};r=turn(c,'[photo] 125k km');assert.equal(c.mileage,'125000');assert.match(r.reply,/pictures/);assert.match(r.reply,/GCC/);
+console.log('Greetings and media: time-aware greeting, photos, files, audio, links, pending stage and captions passed');

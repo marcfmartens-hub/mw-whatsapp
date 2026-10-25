@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionUser } from "@/lib/monitorRole";
-import { planEmergencyTurn } from "@/lib/emergency-basic-bot";
+import { planEmergencyTurn, emergencyInput } from "@/lib/emergency-basic-bot";
 import { type Chat, type Vehicle } from "@/lib/conversation-state";
 import { extractVehicleInfo } from "@/lib/claude";
 import { detect, regression } from "@/lib/kaya-improve/detect";
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   try {
     const interpreted = message;
     const fields: Vehicle = /\d|\b(car|model|gcc|spec|sell|selling)\b/i.test(message)
-      ? await extractVehicleInfo(message, { make: chat.make || undefined, model: chat.model || undefined, year: chat.year || undefined }).catch(() => ({})) : {};
+      ? await extractVehicleInfo(emergencyInput(message).text, { make: chat.make || undefined, model: chat.model || undefined, year: chat.year || undefined }).catch(() => ({})) : {};
     const turn = planEmergencyTurn(chat, interpreted, fields);
     const next: Chat = { ...chat, ...turn.updates, messages: [...messages, { role: "user", content: message }, { role: "assistant", content: turn.reply }].slice(-30) };
     const analysis = detect({phone:"00000000",name:next.name,appointment_date:next.appointment_date,appointment_time:next.appointment_time,messages:next.messages});

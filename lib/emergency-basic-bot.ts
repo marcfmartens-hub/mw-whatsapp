@@ -23,7 +23,18 @@ const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
  return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
 };
+export function emergencyInput(text:string){
+ const kinds:string[]=[];
+ if(/\[(?:photo|image)\]/i.test(text))kinds.push("pictures");
+ if(/\[(?:file|document|video)\]/i.test(text))kinds.push("files");
+ if(/\[(?:audio|voice|voice note)\]/i.test(text))kinds.push("voice notes");
+ if(/https?:\/\/|www\./i.test(text))kinds.push("links");
+ const clean=text.replace(/\[(?:photo|image|file|document|video|audio|voice|voice note)\]/gi," ").replace(/(?:https?:\/\/|www\.)\S+/gi," ").trim();
+ return {kinds,text:clean};
+}
 export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>={}, now=new Date()) {
+ const media=emergencyInput(text);
+ text=media.text;
  const old=c.flow_state||{};
  const b:State = /Emergency (Basic|Chat) Bot V1/.test(old.basicMode||"") ? {...old,basicMode:EMERGENCY_MODE} : {basicMode:EMERGENCY_MODE,basicStep:c.name?"vehicle":"name"};
  const u:Record<string,any>={};
@@ -70,6 +81,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const value=(k:string)=>u[k]||c[k];
  const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
  const msg=text.trim();
+ const greeting=/^(?:(?:hi+|hello+|hey+)(?: there| kaya)?|hiya|howdy|salaam|salam|good\s+(?:morning|afternoon|evening|day))[\s!.,👋😊]*$/i.test(msg);
  const sellerIntent=/\b(sell|selling|car|vehicle)\b/i.test(msg) || !!supportedVehicle(msg,{},{}).make;
  const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
  const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
@@ -130,7 +142,25 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    }
  };
  // Terminal acknowledgements must never restart booking or create another callback.
- if(b.basicStep==="done") {reply="Thank you.";}
+ if(media.kinds.length&&!msg){
+   // Attachments never answer a pending field and never advance the flow.
+   const lastField=[...(b.askedVehicle||[])].reverse().find(k=>!value(k));
+   const pending:Record<string,string>={make:"Please type the car make.",model:"Please type the model.",year:"Please type the year.",mileage:"Please type the mileage.",specs:"Please type GCC, non-GCC, or not sure."};
+   if(b.basicStep==="done")reply="";
+   else if(b.basicStep==="name"){b.basicStep="vehicle";reply="Please type which car you are planning to sell.";}
+   else if(b.basicStep==="vehicle")reply=lastField?pending[lastField]:"Please type which car you are planning to sell.";
+   else if(b.basicStep==="timeline")reply="Please type when you are planning to sell the car.";
+   else if(b.basicStep==="daytime")reply=b.proposedDate?"Please type the time you can come for the inspection.":"Please type your preferred inspection day and time.";
+   else if(b.basicStep==="contact"||b.basicStep==="confirm")reply=!value("name")?"Please type your name for the booking.":"Please type your contact phone number.";
+   else if(b.basicStep==="callback")reply=!value("name")?"Please type your name for the team.":"Please type your contact phone number.";
+   else reply="Please type inspection or callback.";
+ }
+ else if(greeting&&b.basicStep==="name"){
+   const hour=new Date(+now+4*3600e3).getUTCHours();
+   const salutation=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+   b.basicStep="vehicle";reply=salutation+". Which car are you planning to sell?";
+ }
+ else if(b.basicStep==="done") {reply="Thank you.";}
  else if(b.basicStep==="callback") {
    if(!value("name")){const n=nameFrom(msg.replace(/\+?\d[\d ()-]{7,18}\d/g, "").trim());if(n)u.name=n;}
    const number=msg.match(/\+?\d[\d ()-]{7,18}\d/);if(number)u.phone_number=number[0].replace(/[^\d+]/g,"");
@@ -201,6 +231,10 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    b.basicStep="contact";contact();
  }
  else {b.basicStep="choice";reply=CHOICE;}
+ if(media.kinds.length){
+   const kinds=media.kinds.join(", ").replace(/, ([^,]+)$/, " or $1");
+   reply="Unfortunately, I'm not able to open "+kinds+"."+(reply?" "+reply:"");
+ }
  // Final guard applies to EVERY reply, including statements and callback prompts.
  // Keep sent text in state so trimming message history cannot re-enable repeats.
  const normalize=(s:string)=>s.toLowerCase().replace(/[’‘]/g,"'").replace(/[^a-z0-9]+/g," ").trim();
@@ -216,7 +250,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  return {reply,updates:u,action,state:b};
 }
 export async function emergencyBasicTurn(c:Conversation,text:string) {
- const fields=await extractVehicleInfo(text,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({}));
+ const fields=await extractVehicleInfo(emergencyInput(text).text,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({}));
  const turn=planEmergencyTurn(c,text,fields);
  const fresh=await getConversation(c.phone);
  const messages=[...(fresh?.messages||c.messages||[]),...(turn.reply?[{role:"assistant" as const,content:turn.reply}]:[])].slice(-40);
