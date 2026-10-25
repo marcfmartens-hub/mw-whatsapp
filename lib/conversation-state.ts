@@ -220,8 +220,8 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (amount && !/\b(?:km|kms|model|year|fines)\b/i.test(text) && !(Number(amount[1]) >= 1980 && Number(amount[1]) <= 2035 && !amount[2])) updates.mortgage_amount = String(Number(amount[1].replace(/,/g, "")) * (amount[2] ? 1000 : 1));
   }
   if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
-  const local = new Date(now.getTime() + 4 * 3600000);
-  const day = local.getUTCDay(), hour = local.getUTCHours();
+  const dubaiLocalTime = new Date(now.getTime() + 4 * 3600000);
+  const day = dubaiLocalTime.getUTCDay(), hour = dubaiLocalTime.getUTCHours();
   const open = day !== 0 && hour >= (day === 5 ? 12 : 10) && hour < 19;
   let nextDay = day, daysAhead = 0;
   if (day === 0 || hour >= 19) { nextDay = (day + 1) % 7; daysAhead = 1; }
