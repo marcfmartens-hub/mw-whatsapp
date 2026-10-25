@@ -12,7 +12,7 @@ export default function IntelligenceLab(){
  const [notice,setNotice]=useState("");
  const [tab,setTab]=useState("Overview");
  async function load(){
-  try{const r=await fetch("/api/monitor/improve",{cache:"no-store"});const j=await r.json();if(!r.ok)throw Error(j.error||"Unable to load");setData(j);setError("");}
+  try{const r=await fetch("/api/monitor/improve",{cache:"no-store"});const j=await r.json();if(!r.ok)throw Error(j.error||"Unable to load");if(!j?.state?.config)throw Error("Improvement settings unavailable");setData({...j,runs:Array.isArray(j.runs)?j.runs:[],reviews:Array.isArray(j.reviews)?j.reviews:[],proposals:Array.isArray(j.proposals)?j.proposals:[],autoReleases:Array.isArray(j.autoReleases)?j.autoReleases:[]});setError("");}
   catch(e:any){setError(e.message||"Unable to load");}finally{setLoading(false);}
  }
  useEffect(()=>{load();},[]);
@@ -36,7 +36,7 @@ export default function IntelligenceLab(){
  <div><h1 style={{margin:"0 0 6px",fontSize:30}}><span style={{color:"#fd9800"}}>KAYA</span> Intelligence Lab</h1><p style={{margin:0,color:"#bac4d4"}}>Conversation quality · autonomous improvement monitor · Super Admin</p></div>
  <Link href="/monitor" style={{color:"white"}}>← Kaya Monitor</Link></div>
  <div style={{marginTop:22,background:"#273346",padding:16,borderRadius:14,display:"flex",gap:14,alignItems:"center",flexWrap:"wrap"}}>
- <div style={{flex:1,minWidth:170}}><strong>Improvement engine</strong><div style={{color:"#c7d0de",fontSize:13,marginTop:5}}>{data?.state.config.enabled?"ON · automatic checks allowed":"OFF · improvement jobs disabled"}</div></div>
+ <div style={{flex:1,minWidth:170}}><strong>Improvement engine</strong><div style={{color:"#c7d0de",fontSize:13,marginTop:5}}>{data?.state?.config.enabled?"ON · automatic checks allowed":"OFF · improvement jobs disabled"}</div></div>
  <button role="switch" aria-checked={!!data?.state.config.enabled} onClick={toggle} disabled={!data||busy} style={{...btn,background:data?.state.config.enabled?"#c9f7d9":"#fff",color:"#17202d",minWidth:130}}>{busy?"Saving…":data?.state.config.enabled?"● ON — switch off":"○ OFF — switch on"}</button>
  </div>
  </header>
