@@ -3,7 +3,7 @@ import { sendWhatsAppMessage } from "./meta";
 import { extractVehicleInfo } from "./claude";
 import { createBiginContact, moveLeadToCallBack } from "./bigin";
 import { CAR_MAKES, CAR_MODELS } from "./carData";
-import { slotValid, LOCATION, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
+import { slotValid, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
 
 export const EMERGENCY_MODE = "Emergency Chat Bot V1";
 const FUTURE_QUESTION = "Would you like to book a free inspection this week or next month?";
@@ -18,7 +18,7 @@ export function inspectionTime(time:string):string {
  return (h%12||12)+(m?":"+String(m).padStart(2,"0"):"")+" "+(h>=12?"pm":"am");
 }
 // Keep location and contact information without appending the old opening-hours line.
-const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
+const BOOKING_LOCATION = "📍 Mister Wheelz Car Buyers\n\nUmm Suqeim Branch, Al Quoz 4, Dubai\n\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\n\nCall Center\n+971 58 582 5543\n\n*We will confirm the details and timing with you in the morning*";
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
 type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[]; inspectionWindow?:string; resumeStep?:string; askingPriceAed?:string };
 const nameFrom = (text:string) => {
@@ -126,7 +126,12 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const objection=/\?|\b(price|how much|offer|valuation|home visit|pickup|pick up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i.test(msg);
  const yes=/^(yes|yes please|yeah|yep|confirm|confirmed|correct|sure|ok|okay|fine)[.!]?$/i.test(msg);
  let date=dateFromText(msg,now);
- const time=timeFromText(msg,true);
+ let time=timeFromText(msg,true);
+ // An "after" boundary is not an arrival time. Schedule one hour later.
+ if(time&&/\b(?:after|later than)\s+(?:(?:about|around)\s+)?\d/i.test(msg)){
+   const minutes=Number(time.slice(0,2))*60+Number(time.slice(3))+60;
+   time=String(Math.floor(minutes/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");
+ }
  const monthNames=["january","february","march","april","may","june","july","august","september","october","november","december"];
  const explicit=msg.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b/i);
  const localDate=new Date(+now+4*3600e3);
@@ -201,7 +206,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else {
      u.appointment_date=b.proposedDate;u.appointment_time=b.proposedTime;
      u.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";action="booked";
-     reply="Your free inspection is confirmed for "+inspectionDay(b.proposedDate)+" at "+inspectionTime(b.proposedTime)+".\n\n"+BOOKING_LOCATION;
+     reply="Your free inspection is confirmed for\n\n"+inspectionDay(b.proposedDate)+" at "+inspectionTime(b.proposedTime)+".\n\n"+BOOKING_LOCATION;
    }
  };
  const arrangeSoon=()=>{

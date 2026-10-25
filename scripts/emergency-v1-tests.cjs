@@ -207,3 +207,15 @@ for(const uncertain of ["I don't know","I'm not sure",'Not sure','No idea','Dont
  r=turn(c,uncertain);assert.equal(r.reply,'No problem. When are you planning to sell the car?');assert.equal(c.specs,'Unknown');
 }
 console.log('Urgency phrases: Sunday next opening, late-time correction, retained day, booking and uncertainty acknowledgements passed');
+
+// AFTER is a lower bound: add an hour, preserve the day, then confirm automatically.
+for(const [phrase,expected]of [['Any time after 12 pm','13:00'],['after 12:30 pm','13:30'],['After 5 pm','18:00'],['Later than 1 pm','14:00']]){
+ c={...base(),name:'Jace',make:'Mercedes-Benz',model:'S500',year:'2020',mileage:'125000',specs:'Unknown',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime',proposedDate:'2026-10-26'}};
+ r=planEmergencyTurn(c,phrase,{},sundayEvening);assert.equal(r.action,'booked');assert.equal(r.updates.appointment_time,expected);
+}
+c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};
+r=planEmergencyTurn(c,'Any time after 12 pm',{},sundayEvening);assert.equal(r.state.proposedTime,'13:00');Object.assign(c,r.updates);c.messages.push({role:'assistant',content:r.reply});r=planEmergencyTurn(c,'Tomorrow',{},sundayEvening);assert.equal(r.action,'booked');assert.equal(r.updates.appointment_date,'2026-10-26');assert.equal(r.updates.appointment_time,'13:00');
+assert.equal(r.reply,"Your free inspection is confirmed for\n\nMonday 26th of October at 1 pm.\n\n📍 Mister Wheelz Car Buyers\n\nUmm Suqeim Branch, Al Quoz 4, Dubai\n\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\n\nCall Center\n+971 58 582 5543\n\n*We will confirm the details and timing with you in the morning*");
+c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime',proposedDate:'2026-10-26'}};r=planEmergencyTurn(c,'After 6 pm',{},sundayEvening);assert.notEqual(r.action,'booked');assert.equal(r.state.proposedDate,'2026-10-26');assert.match(r.reply,/6:30 pm/);
+c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=planEmergencyTurn(c,'Day after tomorrow at 12 pm',{},sundayEvening);assert.equal(r.updates.appointment_time,'12:00');
+console.log('After-time scheduling: +1 hour, split day/time answers, hours limits and exact spaced confirmation passed');
