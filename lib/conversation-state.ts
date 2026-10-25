@@ -154,6 +154,13 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
+  // Only an uncertain answer to the SELLING-TIMELINE question triggers the
+  // flexible cash-purchase / free-consignment explanation. Uncertainty about
+  // specs, availability or inspection times must not enter this branch.
+  if (question === "sell" && /^(?:i\\s+)?(?:don'?t know|do not know|not sure|unsure|no idea|haven'?t decided|haven't decided|undecided|not decided|not certain|maybe later|i'm not sure|i am not sure)[.! ]*$/i.test(text)) {
+    updates.sell_timeline = "Undecided / not ready";
+    return end("No problem! We can buy your car whenever you're ready. Our process is easy, quick and straightforward. After a free inspection and agreeing on a price, we can pay you cash the same day.\\n\\nIf you're not in a hurry, we also offer a free consignment service and can sell the car for you.\\n\\nLet me know how we can help you best, and I'll arrange for someone from our team to contact you to discuss your car and the options.", "callback", "collecting", "lead");
+  }
   const facts: Vehicle = { make: c.make || undefined, model: c.model || undefined, year: c.year || undefined, mileage: c.mileage || undefined, specs: c.specs || undefined };
   // Social replies are not names or vehicle information. Respond naturally and resume collecting the car.
   if (/^(?:hi|hello|hey|hiya|good morning|good afternoon|good evening)[!. ]*$/i.test(text)) {
