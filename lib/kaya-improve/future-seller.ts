@@ -3,7 +3,7 @@
  * Never quotes a value, never books without consent and never changes a booking.
  */
 export const PRICE_CONCERN = /\b(?:how much|price|prive|worth|valuation|value|estimate|offer|quote|figure|ballpark)\b/i;
-const FUTURE = /\b(?:in\s+(?:november|december|january|february|march|april|may|june|july|august|september|october)|next\s+(?:month|year)|in\s+\d+\s+(?:weeks?|months?)|after\s+\d+\s+(?:weeks?|months?)|in\s+(?:a|couple of|few|several)\s+(?:weeks?|months?)|not\s+(?:selling|ready)\s+(?:now|yet)|later\s+this\s+year|towards?\s+the\s+end\s+of\s+the\s+year)\b/i;
+const FUTURE = /\b(?:in\s+(?:november|december|january|february|march|april|may|june|july|august|september|october)|next\s+(?:week|month|year)|in\s+\d+\s+(?:weeks?|months?)|after\s+\d+\s+(?:weeks?|months?)|in\s+(?:a|couple of|few|several)\s+(?:weeks?|months?)|not\s+(?:selling|ready)\s+(?:now|yet)|later\s+this\s+year|towards?\s+the\s+end\s+of\s+the\s+year)\b/i;
 const NOW = /\b(?:sell|selling|book|inspection|bring|come)\b.{0,65}\b(?:today|tomorrow|this\s+week|right\s+now|asap|immediately)\b|\b(?:today|tomorrow|this\s+week|right\s+now|asap|immediately)\b.{0,65}\b(?:sell|selling|book|inspection|bring|come)\b/i;
 export function futureSellerPriceInquiry(text:string,previous:string[],alreadyConsulting=false){
  const history=[...previous,text].join("\n");
