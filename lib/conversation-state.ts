@@ -160,7 +160,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     return end(greeting + " Which car are you selling (make, model and year)?", "vehicle", "collecting");
   }
   if (/\\b(?:you(?:'re| are)|ur|u r)\\s+(?:a\\s+)?(?:robot|bot|ai)\\b|\\bare you (?:a )?(?:robot|bot|ai)\\b/i.test(text)) {
-    return end("I'm Kaya, Mister Wheelz's virtual assistant 😊 I can help arrange your car inspection. Which car are you selling (make, model and year)?", "vehicle", "collecting");
+    return end("I'm Kaya, Mister Wheelz's virtual assistant 😊 I can help you sell your car quickly and arrange a free car inspection. Which car are you selling (make, model and year)?", "vehicle", "collecting");
   }
   const name = findName(text, c, question);
   const newlyProvidedName = !!name && name !== c.name && !/^(?:name|my name|i am|i'm)$/i.test(text);
