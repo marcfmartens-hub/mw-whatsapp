@@ -31,7 +31,7 @@ const CONTACT_NUMBER = "+971 58 582 5543";
 const CHOICE = "Would you like to arrange the inspection, or would you prefer a personal call from our purchasing team?";
 const lastAssistant = (c: Chat) => [...(c.messages ?? [])].reverse().find(m => m.role === "assistant")?.content ?? "";
 const namedWords = new Set([...Object.keys(CAR_MAKES), ...Object.values(CAR_MAKES), ...Object.values(CAR_MODELS).flat()].flatMap(s => [s.toLowerCase(), ...s.toLowerCase().split(/\s+/)]));
-const NOT_NAME = /^(?:only|under|finance|financed|loan|usa?|gcc|non|american|korean|japanese|german|canadian|specs?|hi|hello|hey|yes|no|sure|okay|ok|thanks?|please|call|contact|price|offer|cash|selling|sell|sale|buy|car|cars|model|year|morning|afternoon|evening|today|tomorrow|now|early|asap|available|ready|busy|owner|registered|company|name|i|im|am|my|the|is|it|here|when|want|need|not|still|with|without|under|warranty|petrol|diesel|free|good|fine|new|used|noon|mileage|km|tomorrow|saturday|sunday|monday|tuesday|wednesday|thursday|friday)$/i;
+const NOT_NAME = /^(?:you\x27re|youre|robot|bot|ai|artificial|assistant|only|under|finance|financed|loan|usa?|gcc|non|american|korean|japanese|german|canadian|specs?|hi|hello|hey|yes|no|sure|okay|ok|thanks?|please|call|contact|price|offer|cash|selling|sell|sale|buy|car|cars|model|year|morning|afternoon|evening|today|tomorrow|now|early|asap|available|ready|busy|owner|registered|company|name|i|im|am|my|the|is|it|here|when|want|need|not|still|with|without|under|warranty|petrol|diesel|free|good|fine|new|used|noon|mileage|km|tomorrow|saturday|sunday|monday|tuesday|wednesday|thursday|friday)$/i;
 export function validName(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z'-]*(?:\s+[a-z][a-z'-]*){0,3}$/i.test(value.trim()) && value.length <= 60
     && value.trim().split(/\s+/).every(w => !NOT_NAME.test(w) && !/^(?:great|perfect|noted|understood|sold|bro|brother|dear|sir|madam|in|at|on|to|for|from|of|and|or|but|me|you|your|we|they|them|this|that|will|would|could|can|have|has|got|do|does|don't|not|just|let|looking|leaving|coming|going|bring|arrive|selling|thinking|working|driving|planning|visit|send|share|location|address|number|tell|know|there|thanks|thank|please|person|soon|approx|as|possible|immediately|later|next|week|month|before|after|when|want|no|yes|under|finance|fully|option|insurance|warranty|fines|registration|american|european|gulf|japan|korea|china|germany|uk|uae|us|seats|seat|cover|covers)$/i.test(w) && !namedWords.has(w.toLowerCase()));
@@ -153,6 +153,15 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
   const facts: Vehicle = { make: c.make || undefined, model: c.model || undefined, year: c.year || undefined, mileage: c.mileage || undefined, specs: c.specs || undefined };
+  // Social replies are not names or vehicle information. Respond naturally and resume collecting the car.
+  if (/^(?:hi|hello|hey|hiya|good morning|good afternoon|good evening)[!. ]*$/i.test(text)) {
+    const hour = local.getUTCHours();
+    const greeting = hour < 12 ? "Good morning!" : hour < 17 ? "Good afternoon!" : "Good evening!";
+    return end(greeting + " Which car are you selling (make, model and year)?", "vehicle", "collecting");
+  }
+  if (/\\b(?:you(?:'re| are)|ur|u r)\\s+(?:a\\s+)?(?:robot|bot|ai)\\b|\\bare you (?:a )?(?:robot|bot|ai)\\b/i.test(text)) {
+    return end("I'm Kaya, Mister Wheelz's virtual assistant 😊 I can help arrange your car inspection. Which car are you selling (make, model and year)?", "vehicle", "collecting");
+  }
   const name = findName(text, c, question);
   const newlyProvidedName = !!name && name !== c.name && !/^(?:name|my name|i am|i'm)$/i.test(text);
   if (name && name !== c.name) updates.name = name;
