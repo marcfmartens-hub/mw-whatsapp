@@ -37,4 +37,9 @@ export function numberFromMessage(value:string):string|null {
  const match=value.match(/(?:\+?971[\s-]?5\d(?:[\s-]?\d){7}|\b05\d(?:[\s-]?\d){7})/);
  return match?match[0].replace(/[\s-]/g,""):null;
 }
-export const METHOD_EXPLANATION="We offer two ways to sell: 🚗 Direct Cash Sale — after a free inspection and agreeing a price, we can buy your car and pay the same day. 🤝 Free Consignment — we help market the car to buyers, which may achieve a better price but can take longer. The price depends on your car's condition and the selling method. We can't give a reliable final price without inspection.";
+export const METHOD_EXPLANATION = [
+ "We offer two ways to sell your car:",
+ "🚗 *Direct Cash Sale* — After a free inspection and agreeing on a price, we can buy your car and pay the same day.",
+ "🤝 *Free Consignment* — We help market your car to buyers. This may achieve a better price, but it can take longer.",
+ "The price depends on the car's condition and the selling method. We can't confirm a final purchase price without inspection."
+].join("\\n\\n");
