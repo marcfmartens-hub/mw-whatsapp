@@ -1,7 +1,7 @@
 import { type Conversation, updateConversation, getConversation } from "./supabase";
 import { sendWhatsAppMessage } from "./meta";
 import { extractVehicleInfo } from "./claude";
-import { createBiginContact, moveLeadToCallBack } from "./bigin";
+import { syncBiginOutcome } from "./bigin-outcome";
 import { CAR_MAKES, CAR_MODELS } from "./carData";
 import { slotValid, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
 
@@ -171,7 +171,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    reply=(/\b(sell|selling)\b/i.test(msg)?"No problem, we can help you with that. ":"Ok, nice. ")+reply;
  };
  const callback=()=>{
-   b.basicStep="callback";
+   action="callback";b.basicStep="callback";
    const missing=[!value("name")?"name":null,!phone()?"phone number":null].filter(Boolean);
    const asked=new Set(b.callbackAsked||[]);
    for(const m of history.filter(m=>m.role==="assistant")){
@@ -365,13 +365,9 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
  const messages=[...(fresh?.messages||c.messages||[]),...(turn.reply?[{role:"assistant" as const,content:turn.reply}]:[])].slice(-40);
  // Record the request before telling the customer it is confirmed.
  await updateConversation(c.phone,{...turn.updates,messages,step:turn.action==="booked"?8:Math.max(c.step||0,1)});
- if(turn.reply)await sendWhatsAppMessage(c.phone,turn.reply);
  const saved=await getConversation(c.phone);
- if(saved && turn.action!=="collecting") {
-   const note=EMERGENCY_MODE+" — "+turn.action+"\nSelling timeline: "+(saved.sell_timeline||"unknown")+"\nSeller asking price (not a valuation): "+((saved.flow_state as any)?.askingPriceAed||"not provided");
-   const ok=await createBiginContact({...saved,phone_number:saved.phone_number||saved.phone,inspection_booked:turn.action==="booked",inquiry_summary:note,sales_inquiry:turn.action==="booked"?"Not Sure - Need Advise":"Other"} as any);
-   if(ok){if(turn.action==="callback")await moveLeadToCallBack(c.phone);await updateConversation(c.phone,{bigin_pushed_at:new Date().toISOString(),inquiry_summary:note});}
-   else console.error("[emergency] Bigin write not confirmed",c.phone);
- }
+ // Explicit callbacks are pushed even while a missing name/number is being collected.
+ try {if(turn.reply)await sendWhatsAppMessage(c.phone,turn.reply);}
+ finally {if(saved&&turn.action!=="collecting")await syncBiginOutcome(saved,turn.action==="booked"?"booked":"callback");}
  return turn.action;
 }

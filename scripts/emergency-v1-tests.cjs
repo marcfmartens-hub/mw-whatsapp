@@ -1,7 +1,7 @@
 const fs=require('fs'),ts=require('typescript'),Module=require('module'),assert=require('assert/strict');
 require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,f);
 const real=Module._load;
-Module._load=function(id,parent,...rest){if(parent?.filename.endsWith('emergency-basic-bot.ts')&&['./supabase','./meta','./claude','./bigin'].includes(id))return {};if(id==='@/lib/carData')return real.call(this,require('path').resolve(__dirname,'../lib/carData.ts'),parent,...rest);return real.call(this,id,parent,...rest);};
+Module._load=function(id,parent,...rest){if(parent?.filename.endsWith('emergency-basic-bot.ts')&&['./supabase','./meta','./claude','./bigin','./bigin-outcome'].includes(id))return {};if(id==='@/lib/carData')return real.call(this,require('path').resolve(__dirname,'../lib/carData.ts'),parent,...rest);return real.call(this,id,parent,...rest);};
 const {planEmergencyTurn}=require('../lib/emergency-basic-bot.ts');
 const now=new Date('2026-10-26T06:00:00Z');
 const base=()=>({phone:'971501234567',messages:[]});

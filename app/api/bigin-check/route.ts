@@ -6,6 +6,17 @@ export const dynamic = "force-dynamic";
 // TEMPORARY read-only check of Bigin setup (fields, pipelines, org). Remove after use.
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("key") !== "23cbb6d336c8439bb033cda5") return NextResponse.json({ error: "no" }, { status: 404 });
+  if(req.nextUrl.searchParams.get("audit")==="1"){
+    const token=await getAccessToken();const headers={Authorization:`Zoho-oauthtoken ${token}`};
+    const {pipelineTarget}=await import("@/lib/bigin-pipeline");
+    const targets=await Promise.all([pipelineTarget(token,"callback"),pipelineTarget(token,"booked")]);
+    const card=req.nextUrl.searchParams.get("card");
+    if(card&&/^\d+$/.test(card)){
+      const r=await fetch(`https://www.zohoapis.com/bigin/v2/Pipelines/${card}?fields=Stage,Contact_Name,Sub_Pipeline,Appointment_Date_and_Time,Inspection_Booked`,{headers,cache:"no-store"});
+      return NextResponse.json({targets,status:r.status,record:await r.json()});
+    }
+    return NextResponse.json({targets});
+  }
   const dt = req.nextUrl.searchParams.get("dealtest");
   if (dt) {
     const tk = await getAccessToken(); const hh = { Authorization: `Zoho-oauthtoken ${tk}` };

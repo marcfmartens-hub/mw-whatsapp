@@ -1,3 +1,4 @@
+import { ensureBiginPipeline } from "./bigin-pipeline";
 import type { Conversation } from "./supabase";
 import { campaignOf, parseReferral } from "./campaigns";
 
@@ -405,7 +406,7 @@ export async function createBiginContact(
     let text = "";
     let savedId: string | null = null;
     for (let tries = 0; tries < 6; tries++) {
-      const body = JSON.stringify({ data: [existingId ? { id: existingId, ...data } : data] });
+      const body = JSON.stringify({ data: [existingId ? { id: existingId, ...data } : data], ...((conversation as any).bigin_outcome?{trigger:[]}:{} ) });
       console.log(`[Bigin] ${existingId ? "updating " + existingId : "creating"}:`, body);
       const res = await fetch(BIGIN_CONTACTS_URL, { method: existingId ? "PUT" : "POST", headers, body });
       text = await res.text();
@@ -428,6 +429,9 @@ export async function createBiginContact(
     {
       const fu = String((conversation as any).car_conditions ?? "").match(/Follow-up: (\d{4}-\d{2}-\d{2})/)?.[1];
       if (fu && savedId) await setFollowUpDate(savedId, fu, headers).catch(e => console.warn("[Bigin] follow-up date not set:", e));
+    }
+    if((conversation as any).bigin_outcome){
+      (conversation as any).bigin_sync_result=await ensureBiginPipeline(savedId,conversation,accessToken);
     }
     // Audit only accepted Bigin writes. No timer and no extra scheduled invocation.
     if (savedId && process.env.KAYA_IMPROVE_SECRET && process.env.VERCEL_ENV === "production") {
@@ -554,12 +558,12 @@ export async function moveLeadToCallBack(phone: string): Promise<boolean> {
     const contact = contacts[0];
     if (!contact) return false;
     for (let attempt = 0; attempt < 4; attempt++) {
-      const r = await fetch(`https://www.zohoapis.com/bigin/v1/Contacts/${contact.id}/Pipelines?fields=Stage,Created_Time`, { headers, cache: "no-store" });
+      const r = await fetch(`https://www.zohoapis.com/bigin/v2/Contacts/${contact.id}/Pipelines?pipeline_id=6489077000001791018&fields=Stage,Created_Time`, { headers, cache: "no-store" });
       const deals = r.status === 200 ? ((await r.json())?.data ?? []) as any[] : [];
       deals.sort((a, b) => String(b.Created_Time ?? "").localeCompare(String(a.Created_Time ?? "")));
       if (deals[0]?.id) {
         if (String(deals[0].Stage ?? "").toLowerCase() === "call back") return true;
-        const u = await fetch("https://www.zohoapis.com/bigin/v1/Pipelines", {
+        const u = await fetch("https://www.zohoapis.com/bigin/v2/Pipelines", {
           method: "PUT", headers, body: JSON.stringify({ data: [{ id: deals[0].id, Stage: "Call Back" }] }),
         });
         const body = await u.json().catch(() => null);
@@ -585,7 +589,7 @@ async function setFollowUpDate(contactId: string, date: string, headers: Record<
     const deals = r.status === 200 ? ((await r.json())?.data ?? []) : [];
     const latest = deals.sort((a: any, b: any) => String(b.Created_Time).localeCompare(String(a.Created_Time)))[0];
     if (latest?.id) {
-      const u = await fetch("https://www.zohoapis.com/bigin/v1/Pipelines", { method: "PUT", headers, body: JSON.stringify({ data: [{ id: latest.id, Next_Follow_up_Date: date }] }) });
+      const u = await fetch("https://www.zohoapis.com/bigin/v2/Pipelines", { method: "PUT", headers, body: JSON.stringify({ data: [{ id: latest.id, Next_Follow_up_Date: date }] }) });
       console.log(`[Bigin] follow-up date ${date} on deal ${latest.id}: ${u.status}`);
       return;
     }
