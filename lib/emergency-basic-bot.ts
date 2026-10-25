@@ -19,10 +19,10 @@ export function inspectionTime(time:string):string {
 // Keep location and contact information without appending the old opening-hours line.
 const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
-type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[]; inspectionWindow?:string };
+type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[]; inspectionWindow?:string; resumeStep?:string; askingPriceAed?:string };
 const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
- return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
+ return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|now|asap|immediately|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
 };
 export function emergencyInput(text:string){
  const kinds:string[]=[];
@@ -86,8 +86,12 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const sellingTime=msg.match(/\b(next month|this month|next week|this week|end of (?:the |this )?month|in (?:\d+|a|one|two|three|four) (?:days?|weeks?|months?)|today|tomorrow|asap|urgent|soon|now|immediately)\b/i)?.[0];
  if(sellingTime&&(["name","vehicle","timeline"].includes(b.basicStep)||/\b(sell|selling)\b/i.test(msg)))u.sell_timeline=sellingTime;
  const sellerIntent=/\b(sell|selling|car|vehicle)\b/i.test(msg) || !!supportedVehicle(msg,{},{}).make;
+ const priceMatch=msg.match(/\b(?:asking(?: price)?|selling price|my price(?: is)?|looking for|want)\s*(?:is\s*)?(?:aed|dhs?|dirhams?)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?\b/i);
+ const priceQuestion=/\?|\b(how much|what.*(?:price|offer)|can you|will you|would you|worth|valuation|estimate|your offer|you pay|you give)\b/i.test(msg);
+ const statedPrice=!!priceMatch&&!priceQuestion;
+ if(priceMatch)b.askingPriceAed=String(Math.round(Number(priceMatch[1].replace(/,/g,""))*(priceMatch[2]?1000:1)));
  const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
- const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
+ const book=/\b(book(?:ing)?|inspection|appointment|visit|bring|come)\b/i.test(msg);
  const refuse=/\b(no|not now|not interested|not ready|can't|cannot|don't(?! know)|do not(?! know)|refuse|stop|never)\b/i.test(msg);
  const inquiry=/\b(price|how much|offer|valuation|home (?:visit|service|inspection)|come to (?:me|my|our)|pick[ -]?up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i;
  const objection=/\?|\b(price|how much|offer|valuation|home visit|pickup|pick up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i.test(msg);
@@ -149,6 +153,15 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
      reply=missing.length?"Understood. I'll pass the details you've shared to the team.":"Thank you, "+value("name")+". I've recorded your callback request for the team.";
    }
  };
+ const objectionChoice=()=>{
+   if(b.offscript||b.basicStep==="objection_choice")callback();
+   else {
+     b.resumeStep=b.basicStep;b.basicStep="objection_choice";b.offscript=true;
+     reply=["daytime","contact","confirm","inspection_window"].includes(b.resumeStep)
+       ?"I understand. I'm a virtual assistant. I can continue booking your free inspection or arrange a callback from the team. Would you like to continue booking or prefer a callback?"
+       :CHOICE;
+   }
+ };
  const contact=()=>{
    if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime,now)){
      b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;
@@ -188,10 +201,24 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    const number=msg.match(/\+?\d[\d ()-]{7,18}\d/);if(number)u.phone_number=number[0].replace(/[^\d+]/g,"");
    callback();
  }
- else if(call || refuse)callback();
- else if(sellerIntent && ["name","choice"].includes(b.basicStep))continueSeller();
+ else if(call)callback();
+ else if(refuse)objectionChoice();
+ else if((sellerIntent||statedPrice) && ["name","choice"].includes(b.basicStep))continueSeller();
  else if(!(c.messages||[]).some((m:any)=>m.role==="assistant") && !old.basicMode){reply="Hi, I'm Kaya, Mister Wheelz's virtual assistant. What’s your name?";b.basicStep="name";}
- else if(inquiry.test(msg)||(objection&&!date&&!time&&!book&&!(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know|gcc|non-gcc)\b/i.test(msg))))callback();
+ else if(!statedPrice&&(inquiry.test(msg)||(objection&&!date&&!time&&!book&&!(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know|gcc|non-gcc)\b/i.test(msg)))))objectionChoice();
+ else if(b.basicStep==="objection_choice"){
+   if(book||yes||date||time){
+     b.basicStep="daytime";
+     if(date)b.proposedDate=date;if(time)b.proposedTime=time;
+     if(b.proposedDate&&b.proposedTime){b.basicStep="contact";contact();}
+     else reply=b.proposedDate?"To continue your booking, please type the time you can come.":"To continue your booking, please share your preferred inspection day and time.";
+   }else if(statedPrice){reply="Thank you. To continue your booking, please share your preferred inspection day and time.";b.basicStep="daytime";}
+   else callback();
+ }
+ else if(statedPrice&&!date&&!time&&!book&&["timeline","daytime","inspection_window","contact","confirm","choice"].includes(b.basicStep)){
+   // A seller's expected amount is information, not an objection or a slot answer.
+   reply="Thank you. "+(b.basicStep==="timeline"?"Please let me know when you plan to sell.":b.proposedDate?"Please type the time you can come for the inspection.":"Please share your preferred inspection day and time.");
+ }
  else if(b.basicStep==="name"){
    const n=nameFrom(msg);
    if(n){u.name=n;b.basicStep="vehicle";reply="Which car are you planning to sell?";}
@@ -199,6 +226,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  }
  else if(b.basicStep==="vehicle"){
    if(book){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
+   else if(statedPrice)nextVehicle();
    else if(/\b(sell|selling)\b/i.test(msg))continueSeller();
    else nextVehicle();
  }
@@ -295,7 +323,7 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
  if(turn.reply)await sendWhatsAppMessage(c.phone,turn.reply);
  const saved=await getConversation(c.phone);
  if(saved && turn.action!=="collecting") {
-   const note=EMERGENCY_MODE+" — "+turn.action+"\nSelling timeline: "+(saved.sell_timeline||"unknown");
+   const note=EMERGENCY_MODE+" — "+turn.action+"\nSelling timeline: "+(saved.sell_timeline||"unknown")+"\nSeller asking price (not a valuation): "+((saved.flow_state as any)?.askingPriceAed||"not provided");
    const ok=await createBiginContact({...saved,phone_number:saved.phone_number||saved.phone,inspection_booked:turn.action==="booked",inquiry_summary:note,sales_inquiry:turn.action==="booked"?"Not Sure - Need Advise":"Other"} as any);
    if(ok){if(turn.action==="callback")await moveLeadToCallBack(c.phone);await updateConversation(c.phone,{bigin_pushed_at:new Date().toISOString(),inquiry_summary:note});}
    else console.error("[emergency] Bigin write not confirmed",c.phone);

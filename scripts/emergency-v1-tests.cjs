@@ -7,9 +7,9 @@ const now=new Date('2026-10-26T06:00:00Z');
 const base=()=>({phone:'971501234567',messages:[]});
 function turn(c,text,fields={}){const r=planEmergencyTurn(c,text,fields,now);Object.assign(c,r.updates);c.messages.push({role:'user',content:text},{role:'assistant',content:r.reply});return r;}
 let c=base();assert.match(turn(c,'Start').reply,/name/);turn(c,'Marc');assert.equal(c.name,'Marc');turn(c,'Toyota Camry 2022',{make:'Toyota',model:'Camry',year:'2022'});assert.equal(c.flow_state.basicStep,'vehicle');turn(c,'50000 GCC',{mileage:'50000',specs:'GCC'});assert.equal(c.flow_state.basicStep,'timeline');turn(c,'Today');assert.equal(c.flow_state.basicStep,'daytime');let r=turn(c,'Book tomorrow at 11 am');assert.equal(c.flow_state.basicStep,'done');assert.doesNotMatch(r.reply,/Please confirm|Is that correct|Dubai time|2026-10|Mon–Sat/);assert.equal(r.action,'booked');assert.equal(c.appointment_date,'2026-10-27');assert.match(r.reply,/maps.app/);r=turn(c,'Thanks');assert.equal(r.action,'collecting');assert.equal(c.flow_state.status,'booked');
-c=base();turn(c,'Start');r=turn(c,'How much?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
+c=base();turn(c,'Start');r=turn(c,'How much?');assert.equal(c.flow_state.basicStep,'objection_choice');r=turn(c,'How much will you pay?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
 c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.equal(r.action,'callback');c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
-c={...base(),name:'Marc',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'I cannot come');assert.equal(r.action,'callback');assert.doesNotMatch(r.reply,/make|model|year/);
+c={...base(),name:'Marc',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'I cannot come');assert.equal(r.state.basicStep,'objection_choice');assert.match(r.reply,/virtual assistant/);r=turn(c,'I still cannot come');assert.equal(r.action,'callback');assert.doesNotMatch(r.reply,/make|model|year/);
 console.log('Emergency V1: booking, missing fields, objections, callbacks, terminal state, Friday and Sunday checks passed');
 
 // Exact customer transcript: no repeated hours, ISO date or final YES needed.
@@ -144,6 +144,19 @@ for(const window of ['This week','Next month']){
 }
 for(const inquiry of ['What price can you offer?','Do you offer home service?','How does the inspection work?','How much for an inspection tomorrow?']){
  c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'inspection_window'}};
- r=turn(c,inquiry);assert.equal(r.action,'callback');assert.equal(r.state.basicStep,'done');assert.doesNotMatch(r.reply,/Which would you prefer/);
+ r=turn(c,inquiry);assert.equal(r.state.basicStep,'objection_choice');assert.match(r.reply,/virtual assistant/);assert.match(r.reply,/continue booking|free inspection/);r=turn(c,inquiry);assert.equal(r.action,'callback');
 }
 console.log('Future-inspection choices and direct inquiry-to-callback protocol passed');
+
+// A stated asking price is data, never a quote request or mileage.
+c=base();turn(c,'Start');turn(c,'Hi');turn(c,'I want to sell my Toyota Camry');turn(c,'2020');r=turn(c,'Only 20k km\nAsking 75k');assert.equal(c.mileage,'20000');assert.equal(c.flow_state.askingPriceAed,'75000');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,'GCC');assert.equal(r.reply,'When are you planning to sell the car?');r=turn(c,'Now');assert.equal(r.state.basicStep,'daytime');assert.doesNotMatch(r.reply,/callback/);
+for(const input of ['Asking price 75k','My price is AED 75000','Selling price 75,000']){
+ c={...base(),name:'Jace',make:'Toyota',model:'Camry',year:'2020',mileage:'20000',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};
+ r=turn(c,input);assert.equal(c.flow_state.askingPriceAed,'75000');assert.equal(c.mileage,'20000');assert.equal(r.reply,'Is it GCC or non-GCC?');assert.equal(r.action,'collecting');
+}
+// Booking interruption: offer resume or callback. Resume preserves the proposed day.
+c={...base(),name:'Jace',make:'Toyota',model:'Camry',year:'2020',mileage:'20000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime',proposedDate:'2026-10-27'}};
+r=turn(c,'How much will you pay?');assert.equal(r.state.basicStep,'objection_choice');assert.match(r.reply,/continue booking/);assert.match(r.reply,/callback/);r=turn(c,'Continue booking');assert.equal(r.state.proposedDate,'2026-10-27');r=turn(c,'2 pm');assert.equal(r.action,'booked');
+// A price statement alone during scheduling does not become a callback.
+c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Asking 75k');assert.equal(r.state.basicStep,'daytime');assert.equal(r.action,'collecting');assert.doesNotMatch(r.reply,/virtual assistant/);
+console.log('Stated asking prices, retained mileage, objection choice, repeated objections and resumed bookings passed');
