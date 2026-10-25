@@ -18,6 +18,7 @@ export type FlowState = {
   customerAgreedSlot?: boolean;
   askedFields?: Record<string, boolean>;
   externalMediaPending?: boolean; externalMediaReminderCount?: number;
+  buyerInquiry?: boolean; buyerInterest?: string;
   consultExplained?: boolean; consultAction?: "booking" | "callback"; salesConsultation?: boolean; salesMethod?: "Cash Deal" | "Consignment"; visitDeclinedForPrice?: boolean; awaitingUaeCallbackNumber?: boolean;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
@@ -180,6 +181,24 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
+  // Buying enquiries override the seller questionnaire, including after an earlier car-model message.
+  const buyingNow = /\b(?:looking\s+to\s+buy|want\s+to\s+buy|wish\s+to\s+buy|looking\s+for\s+(?:a|an|the)?\s*(?:car|vehicle|sonata|camry)|do\s+you\s+have\s+(?:a|an|the)?\s*[a-z0-9]|have\s+(?:a|an)\s+[a-z]+\s+for\s+sale|i\s+am\s+(?:buying|a\s+buyer)|buy\s+instead|looking\s+to\s+purchase)\b/i.test(text);
+  const sellerNow = /\b(?:selling\s+my\s+car|sell\s+my\s+car|want\s+to\s+sell|i\s+am\s+selling)\b/i.test(text);
+  if (!wasBooked && (buyingNow && !sellerNow || state.buyerInquiry && !sellerNow)) {
+    state.buyerInquiry = true;
+    const buyerName = updates.name || c.name || findName(text, c, "name");
+    const buyerPhone = numberFromMessage(text) || String(c.phone || "");
+    if (buyerName && !c.name) updates.name = buyerName;
+    if (numberFromMessage(text)) updates.alternative_phone = numberFromMessage(text);
+    const mentionedCar = /\b(?:sonata|camry|spider|2017|hyundai|toyota)\b/i.test(text);
+    if (mentionedCar) state.buyerInterest = [state.buyerInterest, text].filter(Boolean).join(" | ").slice(0, 400);
+    note("BUYER ENQUIRY: Sales team follow-up requested" + (state.buyerInterest ? "; interest: " + state.buyerInterest : ""));
+    if (!buyerName && !uaeNumber(buyerPhone)) return end("Of course, I understand you're looking to buy a car. I'll forward your enquiry to our sales team. May I have your name and the best phone number to reach you?", "buyer_contact", "collecting", "lead");
+    if (!buyerName) return end("Of course, I'll forward your buying enquiry to our sales team. May I have your name, please?", "buyer_name", "collecting", "lead");
+    if (!uaeNumber(buyerPhone)) return end("Thank you, " + buyerName + ". What UAE mobile number should our sales team contact you on?", "buyer_phone", "collecting", "lead");
+    state.consent = "accepted";
+    return end("Thank you, " + buyerName + ". I've recorded your buying enquiry for our sales team. They can contact you on " + buyerPhone + ".", "", "team_accepted", "lead");
+  }
   // Intent-first gate: customer availability and consent override any questionnaire.
   // Do not infer an appointment or callback from a polite postponement.
   const pauseIntent = /\b(?:i(?:'m| am)\s+(?:busy|occupied|working|in a meeting)|busy\s+(?:now|at the moment|right now)|can(?:not|'t)\s+(?:talk|chat|reply)\s+(?:now|right now)|not\s+(?:a good|the right)\s+time|i(?:'ll| will)\s+(?:get back to you|message you|text you|reach out|contact you|call you)\s*(?:later|soon|when i(?:'m| am) free)?|(?:let me|i need to)\s+(?:get back to you|think about it)|talk\s+(?:later|another time))\b/i.test(text);
