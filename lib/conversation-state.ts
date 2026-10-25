@@ -174,7 +174,19 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const vehicle = supportedVehicle(text, facts, extracted, question);
   for (const k of ["make", "model", "year", "mileage"] as const) if (vehicle[k] && vehicle[k] !== facts[k]) updates[k] = vehicle[k];
   const price = expectedPrice(text); if (price !== null) note(`Customer expects: AED ${price.toLocaleString("en-US")}`);
-  const prefix: string[] = [];
+  // Recognise urgent selling context without restarting the appointment-first flow.
+  const departure = /(?:leav(?:e|ing)|depart(?:ing)?|mov(?:e|ing)|relocat(?:e|ing)|flying|going back|returning).{0,70}(?:country|uae|dubai|emirates|abroad|home)|(?:country|uae|dubai).{0,70}(?:leav(?:e|ing)|depart(?:ing)?|mov(?:e|ing)|relocat(?:e|ing))/i.test(text);
+  const jobLoss = /(?:lost my job|job loss|laid off|redundan|terminated|lost my work)/i.test(text);
+  const financial = /(?:financial (?:problem|difficult)|need (?:money|cash)|can't afford|cannot afford)/i.test(text);
+  const urgent = /(?:urgent|asap|quick|fast|immediately|right away|today|tomorrow|before (?:friday|weekend)|have to sell|must sell|need to sell)/i.test(text);
+  const situation = departure ? "I understand you're leaving the country and need to sell your car. We can help you arrange a quick sale." :
+    jobLoss ? "I'm sorry to hear about your job situation. We can help you explore a quick sale." :
+    financial ? "I understand. We can help you explore a quick sale, with payment possible the same day after inspection and agreeing a price." :
+    urgent ? "Understood. We can help you arrange a quick sale, subject to inspection and agreeing a price." : "";
+  const alreadyAcknowledged = (c.messages ?? []).slice(-8).some(m => m.role === "assistant" && /(?:leaving the country|job situation|explore a quick sale|arrange a quick sale)/i.test(m.content));
+  const contextualIntro = situation && !alreadyAcknowledged ? situation : "";
+
+  const prefix: string[] = contextualIntro ? [contextualIntro] : [];
   if (LOCATION_REQUEST.test(text)) prefix.push(LOCATION);
   if (/\b(free|fees?|charges?|commission|cost.*inspection)\b/i.test(text)) prefix.push("The inspection is free, takes 10–15 minutes, and there's no obligation to sell.");
   if (/\b(number|phone number|call you|call them)\b/i.test(text)) prefix.push(`Our customer service number is ${CONTACT_NUMBER}.`);
@@ -297,7 +309,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   };
   // The customer can give facts in any order. Never restart the questionnaire.
   if (!validName(name || c.name) && !asked.name) return askOnce("name", "Hi! I’m Kaya from Mister Wheelz. May I know your name, please?")!;
-  if (!vehicle.make && !asked.vehicle) return askOnce("vehicle", "What car are you selling?")!;
+  if (!vehicle.make && !asked.vehicle) return askOnce("vehicle", "Please let me know which car you’re selling (make, model and year).")!;
   if (vehicle.make && (!vehicle.model || !vehicle.year) && !asked.vehicle) return askOnce("vehicle", "What's the model and year?")!;
   if (!vehicle.mileage && !asked.mileage) return askOnce("mileage", "What's the mileage?")!;
   if (!vehicle.specs && !asked.specs) return askOnce("specs", "Is it GCC specs?")!;
