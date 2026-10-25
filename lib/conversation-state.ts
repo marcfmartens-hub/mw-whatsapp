@@ -190,9 +190,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // A stated departure and need to sell is already a selling timeline.
   // Customers often write "going back home next week ... sell this weel".
   const deadlinePattern = /(?:sell|sale|sold).{0,100}(?:this wee[k|l]|before .*leave|asap|urgent|today|tomorrow)|this wee[k|l].{0,100}(?:sell|sale|sold)|(?:leaving|going back home|moving back|flying home|relocating).{0,120}(?:need to sell|have to sell|must sell|sell my car)/i;
-  if (deadlinePattern.test(text)) updates.sell_timeline = text;
+  const urgentSalePattern = /\b(?:sell|selling|sale|sold)\b.{0,40}\b(?:quick(?:ly)?|fast|urgent(?:ly)?|asap|immediately|right away|today|tomorrow)\b|\b(?:quick(?:ly)?|fast|urgent(?:ly)?|asap|immediately)\b.{0,40}\b(?:sell|selling|sale|sold)\b/i;
+  if (deadlinePattern.test(text) || urgentSalePattern.test(text)) updates.sell_timeline = text;
   if (!updates.sell_timeline && !c.sell_timeline) {
-    const earlier = [...(c.messages ?? [])].reverse().find(m => m.role === "user" && deadlinePattern.test(m.content));
+    const earlier = [...(c.messages ?? [])].reverse().find(m => m.role === "user" && (deadlinePattern.test(m.content) || urgentSalePattern.test(m.content)));
     if (earlier) updates.sell_timeline = earlier.content;
   }
   // When the seller answers a vehicle question with their situation instead,
@@ -240,7 +241,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   else if (question === "specs" && /^(?:unknown|not sure|don't know|no idea)[.! ]*$/i.test(text)) { updates.specs = "Unknown"; vehicle.specs = "Unknown"; state.specsChecked = true; }
   if (c.non_gcc_handoff || vehicle.specs === "Non-GCC") return end(answer("Our team needs to review the non-GCC details before arranging an inspection. Would you like a personal call?"), "callback", "collecting", "lead");
   const loanYes = /\b(?:under finance|on (?:a )?mortgage|yes.*loan|loan is there|still have.*loan|financed)\b/i.test(text) || question === "loan" && /^yes\b/i.test(text);
-  if (loanYes) updates.loan = "Yes";
+  // Extract explicit finance status even when bundled with make/model/mileage/specs.
+  const explicitNoLoan = /\b(?:no\s+(?:outstanding\s+)?(?:loan|finance|mortgage)|loan\s*(?:is\s*)?(?:paid off|cleared|settled)|fully paid)\b/i.test(text);
+  if (explicitNoLoan) updates.loan = "No";
+  else if (loanYes) updates.loan = "Yes";
   else if (question === "loan" && /^no\b/i.test(text)) updates.loan = "No";
   if (question === "balance" || /\b(?:outstanding|balance|owe|loan|mortgage|finance)\b/i.test(text)) {
     const amount = text.match(/\b(\d[\d,]*(?:\.\d+)?)\s*(k|thousand)?\b/i);
@@ -357,7 +361,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (Number(vehicle.year) >= 2020 && !/^(yes|no)$/i.test(loan ?? "") && !asked.loan) return askOnce("loan", "Does the car have a loan?")!;
   if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount) && !asked.balance) return askOnce("balance", "How much is left on the loan?")!;
   const priorUrgency = (c.messages ?? []).some(m => m.role === "user" && /(?:leav(?:e|ing)|going back home|mov(?:e|ing) back|flying home|relocat(?:e|ing)|visa cancel).{0,140}(?:sell|car)|(?:sell|car).{0,140}(?:this wee[k|l]|urgent|asap|before (?:i|we) leave)/i.test(m.content));
-  if (!(updates.sell_timeline || c.sell_timeline || priorUrgency) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
+  if (!(updates.sell_timeline || c.sell_timeline || priorUrgency || (c.messages ?? []).some(m => m.role === "user" && urgentSalePattern.test(m.content))) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
   if (!state.proposedDate) return end(answer(arrival()), "time", "visit_proposed");
   return end(answer(`What time would you like to come on ${appointmentDay(state.proposedDate)}?`), "exact_time", "visit_proposed");
 }
