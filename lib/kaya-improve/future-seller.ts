@@ -42,4 +42,4 @@ export const METHOD_EXPLANATION = [
  "🚗 *Direct Cash Sale* — After a free inspection and agreeing on a price, we can buy your car and pay the same day.",
  "🤝 *Free Consignment* — We help market your car to buyers. This may achieve a better price, but it can take longer.",
  "The price depends on the car's condition and the selling method. We can't confirm a final purchase price without inspection."
-].join("\\n\\n");
+].join("\n\n");
