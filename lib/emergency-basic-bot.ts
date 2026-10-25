@@ -6,7 +6,7 @@ import { slotValid, LOCATION } from "./conversation-state";
 
 type Basic = { basicMode: "Emergency Basic Bot V1"; basicStep: "name"|"vehicle"|"timeline"|"choice"|"daytime"|"confirm"|"callback"|"done"; proposedDate?:string; proposedTime?:string; offscript?:boolean };
 const HOURS = "Inspections: Monday–Saturday, 10:00 AM–6:30 PM (Friday from 12:00 PM). Closed Sundays.";
-function validInspection(date:string,time:string):boolean { if(!validInspection(date,time))return false; const day=new Date(date+"T12:00:00Z").getUTCDay(); const [h,m]=time.split(":").map(Number);const minutes=h*60+m;return day!==0 && minutes >= (day===5?720:600) && minutes<=1110; }
+function validInspection(date:string,time:string):boolean { if(!slotValid(date,time))return false; const day=new Date(date+"T12:00:00Z").getUTCDay(); const [h,m]=time.split(":").map(Number);const minutes=h*60+m;return day!==0 && minutes >= (day===5?720:600) && minutes<=1110; }
 const GREETING = "Hi! 👋 Welcome to Mister Wheelz. I'm Kaya, your virtual car-selling assistant. I'll help you take the next step towards selling your car. May I have your name, please?";
 const CHOICE = "I'm a virtual assistant 😊 I can book a free inspection or arrange a callback from our team. Which would you prefer?";
 const CALLBACK = "No problem, I understand. I'll forward this to our team so they can help you personally.";
@@ -39,10 +39,14 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
  const booking=WANT_BOOK.test(msg);
  const affirmative=/^(yes|yeah|yep|correct|sure|ok|okay|fine|that is right)$/i.test(msg);
  const no=REFUSE.test(msg);
+ const requestedDate=toIsoDate(msg);
+ const sunday=requestedDate && new Date(requestedDate+"T12:00:00Z").getUTCDay()===0;
+ const closedReply="We are closed on Sundays 😊 You can book a free inspection from Monday, or I can arrange a callback from our team. Which would you prefer?";
  const extracted= /\b(19\d{2}|20\d{2})\b|\b(car|toyota|nissan|bmw|mercedes|audi|lexus|porsche|range rover|volkswagen|honda|ford)\b/i.test(msg)
    ? await extractVehicleInfo(msg,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({})) : {};
  for(const k of ["make","model","year","mileage","specs"] as const) if((extracted as any)[k]) updates[k]=(extracted as any)[k];
- if(FORBIDDEN.test(msg)) { reply="I can only help with selling your car. I can book a free inspection or arrange a callback from our team. Which would you prefer?"; b.basicStep="choice"; }
+ if(sunday && (b.basicStep==="choice"||b.basicStep==="daytime"||b.basicStep==="confirm")) {b.basicStep="choice"; b.proposedDate=undefined;b.proposedTime=undefined;reply=closedReply;}
+ else if(FORBIDDEN.test(msg)) { reply="I can only help with selling your car. I can book a free inspection or arrange a callback from our team. Which would you prefer?"; b.basicStep="choice"; }
  else if(!state.basicMode && !(c.messages||[]).some(m=>m.role==="assistant")) { b.basicStep="name"; reply=GREETING; }
  else if(b.basicStep==="callback") {
    // A callback is terminal: an acknowledgement can NEVER restart inspection booking.
@@ -76,8 +80,9 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
      if(date) b.proposedDate=date;
      if(time) b.proposedTime=time;
      if(!date)reply="Which day would suit you for the free inspection?";
+     else if(new Date(date+"T12:00:00Z").getUTCDay()===0){b.proposedDate=undefined;reply=closedReply;b.basicStep="choice";}
      else if(!time)reply="What time would suit you on "+date+"?";
-     else if(!slotValid(date,time))reply="Sorry, that time isn't available within our opening hours. Could you choose another day or time? We're closed on Sundays.";
+     else if(!validInspection(date,time))reply="Sorry, that time isn't available within our opening hours. Could you choose another day or time? We're closed on Sundays.";
      else if(!(updates.name||c.name)) { b.basicStep="confirm"; reply="I have "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+" for "+date+" at "+time+". Before confirming, may I have your name for the booking?"; }
      else {b.basicStep="confirm";reply="Please confirm: "+(updates.name||c.name||"Customer")+", "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+", inspection on "+date+" at "+time+". Your contact number is +"+c.phone.replace(/^\+/,"")+". Reply YES to confirm, or tell me what to change.";}
    }
