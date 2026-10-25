@@ -20,6 +20,9 @@ export type FlowState = {
   externalMediaPending?: boolean; externalMediaReminderCount?: number;
   buyerInquiry?: boolean; buyerInterest?: string;
   consultExplained?: boolean; consultAction?: "booking" | "callback"; salesConsultation?: boolean; salesMethod?: "Cash Deal" | "Consignment"; visitDeclinedForPrice?: boolean; awaitingUaeCallbackNumber?: boolean;
+  // Loop protection: consecutive turns where Kaya would only repeat herself, whether the
+  // inspection pitch was already given, and whether a buyer was already asked for a name.
+  stalls?: number; inspectionExplained?: boolean; buyerNameAsked?: boolean; buyerPhoneAsked?: boolean;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
 export type Turn = { updates: Record<string, any>; state: FlowState; reply: string; confirm?: boolean; crm?: "lead" | "booking" | "change"; defaultDate?: string };
@@ -148,11 +151,17 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const updates: Record<string, any> = {};
   const previousAssistantReplies = (c.messages ?? []).filter(m => m.role === "assistant").map(m => m.content.trim()).filter(Boolean);
   const repeatedRequest = /\b(?:repeat|again|remind me|explain again|say that again)\b/i.test(text);
+  // Mileage and specs are asked once. A price-focused customer is never chased for them again.
+  const askedBefore = (re: RegExp) => (c.messages ?? []).some(m => m.role === "assistant" && re.test(m.content));
+  const missingDetails = (car: Parameters<typeof missingCarDetails>[0]) => missingCarDetails(car).filter(m => !(m === "mileage" && askedBefore(/mileage/i)) && !(/specifications/.test(m) && askedBefore(/gcc/i)));
   const normalizeReply = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const beforeDate = state.proposedDate, beforeTime = state.proposedTime;
+  let forcedCrm: Turn["crm"] | undefined;
   const deduplicateReply = (draft: string): string => {
     // Intent-handled replies must never be replaced by questionnaire fallbacks.
     if (state.question === "consult_choice" || state.question === "consult_inspection" || state.question === "buyer_contact" || state.question === "buyer_name" || state.question === "buyer_phone" || state.status === "customer_will_contact") return draft;
-    if (repeatedRequest || !previousAssistantReplies.length || state.externalMediaPending && /external links|photos and attachments|listing you shared/i.test(draft)) return draft;
+    // A customer who explicitly asks again (or asks for the location again) gets the answer again.
+    if (repeatedRequest || LOCATION_REQUEST.test(text) || !previousAssistantReplies.length || state.externalMediaPending && /external links|photos and attachments|listing you shared/i.test(draft)) return draft;
     let output = draft;
     const prior = previousAssistantReplies.map(normalizeReply);
     const blocks = output.split(String.fromCharCode(10,10));
@@ -163,23 +172,41 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     });
     output = filtered.join(String.fromCharCode(10,10)).trim();
     if (output && !prior.includes(normalizeReply(output))) return output;
-    const last = previousAssistantReplies[previousAssistantReplies.length-1] || "";
-    if (/\b(?:name)\b/i.test(last) && !(updates.name || c.name)) return "May I have your name, please?";
-    if (!(updates.make || c.make) || !(updates.model || c.model) || !(updates.year || c.year)) return "Could you share your car make, model and year?";
-    if (!(updates.mileage || c.mileage)) return "What is your car mileage?";
-    if (!(updates.specs || c.specs)) return "Is your car GCC specifications?";
-    if (state.salesConsultation && !state.consultAction) return "Would you prefer a free inspection appointment or a call from our purchasing team?";
-    return "Would you like to continue with a free inspection appointment or speak with our team?";
+    // Everything in this reply was already said. Never fall back to an unrelated
+    // questionnaire question: vary the wording once, then offer the team, then hand the lead over.
+    state.stalls = (state.stalls ?? 0) + 1;
+    const said = (value: string) => prior.includes(normalizeReply(value));
+    if (wasBooked) return said("Noted.") ? "See you then." : "Noted.";
+    if (state.status === "team_accepted" || state.status === "closed") return said("You're welcome. Our team will be in touch.") ? "Noted." : "You're welcome. Our team will be in touch.";
+    const pending = state.question ?? "";
+    const bookingContext = ["time", "exact_time", "confirm", "day", "choice"].includes(pending) || state.status === "visit_proposed" || state.status === "awaiting_confirmation";
+    const rephrase: Record<string, string> = {
+      name: "What name should I note down?", vehicle: "Which car is it? For example: Toyota Camry 2018.", mileage: "Roughly how many km has it done?",
+      specs: "Is it GCC or imported?", loan: "Is there a bank loan on it?", balance: "About how much is left on the loan?", sell: "How soon are you looking to sell?",
+    };
+    const variation = bookingContext ? "Which day and time suits you for the free inspection? We're open Mon–Sat, 10 AM–7 PM." : rephrase[pending];
+    const callbackOffer = "No worries. Shall I have our team call you on this number to help?";
+    if (variation && state.stalls === 1 && !said(variation)) return variation;
+    if (state.stalls <= 2 && !said(callbackOffer)) { state.question = "callback"; if (state.status === "visit_proposed") state.status = "collecting"; forcedCrm = "lead"; return callbackOffer; }
+    state.consent = "accepted"; state.status = "team_accepted"; state.question = "";
+    note("CALL BACK: Customer did not progress after repeated questions; handed to the team");
+    forcedCrm = "lead";
+    return "I'll pass your details to our team. They'll contact you on this number.";
   };
   const end = (reply: string, q?: string, status?: Status, crm?: Turn["crm"]): Turn => {
     if (q !== undefined) state.question = q;
     if (status) state.status = status;
+    const advanced = ["make", "model", "year", "mileage", "specs", "name", "loan", "mortgage_amount", "sell_timeline"].some(k => updates[k] != null && updates[k] !== (c as any)[k]) || state.proposedDate !== beforeDate || state.proposedTime !== beforeTime;
+    if (advanced) state.stalls = 0;
+    const asked = state.question;
+    const finalReply = deduplicateReply(reply);
+    const effective = state.question === asked ? q : state.question;
     const booked = state.status === "booked";
     updates.flow_state = state;
-    updates.step = booked || ["default_pending", "team_accepted", "customer_will_contact", "closed"].includes(state.status) ? 8 : ["visit_proposed", "awaiting_confirmation", "reconfirmation"].includes(state.status) ? 7 : q === "name" ? 1 : q === "vehicle" ? 2 : q === "mileage" || q === "specs" ? 4 : q === "loan" || q === "balance" ? 5 : 6;
+    updates.step = booked || ["default_pending", "team_accepted", "customer_will_contact", "closed"].includes(state.status) ? 8 : ["visit_proposed", "awaiting_confirmation", "reconfirmation"].includes(state.status) ? 7 : effective === "name" ? 1 : effective === "vehicle" ? 2 : effective === "mileage" || effective === "specs" ? 4 : effective === "loan" || effective === "balance" ? 5 : 6;
     updates.appointment_date = booked ? state.proposedDate : null;
     updates.appointment_time = booked ? state.proposedTime : null;
-    return { updates, state, reply: deduplicateReply(reply), crm: crm ?? (wasBooked && !booked ? "change" : undefined) };
+    return { updates, state, reply: finalReply, crm: forcedCrm ?? crm ?? (wasBooked && !booked ? "change" : undefined) };
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
@@ -188,11 +215,20 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const customerFrustrated = /\b(?:are you stupid|you(?:'re| are) stupid|idiot|not listening|not understanding|stop repeating|asked you already|what is wrong with you|useless bot|stupid bot)\b/i.test(text);
   const priceDemand = /^(?:price|price\??|how much\??|how much (?:you|can you|will you|would you) (?:give|offer|pay).*|i want to know (?:the )?price|tell me (?:the )?price|what(?:'s| is) (?:the )?(?:price|offer)).*$/i.test(text);
   const priorPriceRequest = (c.messages ?? []).some(m => m.role === "user" && /\b(?:price|how much|worth|offer)\b/i.test(m.content));
-  if (!wasBooked && (priceDemand || customerFrustrated && (priorPriceRequest || state.salesConsultation))) {
+  // The customer was already offered "inspection or team call" and keeps pushing for a price
+  // instead of choosing: stop explaining and hand the lead to the purchasing team.
+  const chooseWords = /\b(?:inspection|book|appointment|come in|visit|call|callback|phone|team|contact|purchas\w*)\b/i;
+  if (!wasBooked && state.question === "consult_choice" && !chooseWords.test(text) && (priceDemand || PRICE.test(text) || customerFrustrated)) {
+    state.consent = "accepted"; state.consultAction = undefined; state.visitDeclinedForPrice = true;
+    note("CALL BACK: Customer insists on a price before the inspection");
+    return end("Understood. I'll have our purchasing team call you on this number to discuss the price.", "", "team_accepted", "lead");
+  }
+  const handedOver = ["team_accepted", "closed", "customer_will_contact"].includes(state.status);
+  if (!wasBooked && !handedOver && (priceDemand || customerFrustrated && (priorPriceRequest || state.salesConsultation))) {
     state.salesConsultation = true;
     state.consultExplained = true;
     const details = {make:updates.make||c.make,model:updates.model||c.model,year:updates.year||c.year,mileage:updates.mileage||c.mileage,specs:updates.specs||c.specs};
-    const missing = missingCarDetails(details);
+    const missing = missingDetails(details);
     if (missing.length && !customerFrustrated) return end("I understand you want to know how much we can get for your car. To help our purchasing team assess it, please share " + missing.join(", ") + ".", "consult_details", "collecting", "lead");
     state.visitDeclinedForPrice = true;
     return end((customerFrustrated ? "I'm sorry. You're right — I should have answered your question instead of repeating myself.\n\n" : "I understand you'd like to know the price first.\n\n") + "We offer direct cash purchase or free consignment. Both require a free inspection before we can confirm a final offer. Would you prefer to book an inspection or have our purchasing team call you?", "consult_choice", "collecting", "lead");
@@ -210,11 +246,14 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const mentionedCar = /\b(?:sonata|camry|spider|2017|hyundai|toyota)\b/i.test(text);
     if (mentionedCar) state.buyerInterest = [state.buyerInterest, text].filter(Boolean).join(" | ").slice(0, 400);
     note("BUYER ENQUIRY: Sales team follow-up requested" + (state.buyerInterest ? "; interest: " + state.buyerInterest : ""));
-    if (!buyerName && !uaeNumber(buyerPhone)) return end("Of course, I understand you're looking to buy a car. I'll forward your enquiry to our sales team. May I have your name and the best phone number to reach you?", "buyer_contact", "collecting", "lead");
-    if (!buyerName) return end("Of course, I'll forward your buying enquiry to our sales team. May I have your name, please?", "buyer_name", "collecting", "lead");
-    if (!uaeNumber(buyerPhone)) return end("Thank you, " + buyerName + ". What UAE mobile number should our sales team contact you on?", "buyer_phone", "collecting", "lead");
+    const shownPhone = /^971/.test(buyerPhone) ? "+" + buyerPhone : buyerPhone || "this WhatsApp number";
+    // Each detail is asked once. If the customer does not give it, record the enquiry anyway.
+    if (!buyerName && state.buyerNameAsked || buyerName && !uaeNumber(buyerPhone) && state.buyerPhoneAsked) { state.consent = "accepted"; return end("Thanks, I've noted your enquiry. Our sales team will contact you on " + shownPhone + ".", "", "team_accepted", "lead"); }
+    if (!buyerName && !uaeNumber(buyerPhone)) { state.buyerNameAsked = true; return end("Of course, I understand you're looking to buy a car. I'll forward your enquiry to our sales team. May I have your name and the best phone number to reach you?", "buyer_contact", "collecting", "lead"); }
+    if (!buyerName) { state.buyerNameAsked = true; return end("Of course, I'll forward your buying enquiry to our sales team. May I have your name, please?", "buyer_name", "collecting", "lead"); }
+    if (!uaeNumber(buyerPhone)) { state.buyerPhoneAsked = true; return end("Thank you, " + buyerName + ". What UAE mobile number should our sales team contact you on?", "buyer_phone", "collecting", "lead"); }
     state.consent = "accepted";
-    return end("Thank you, " + buyerName + ". I've recorded your buying enquiry for our sales team. They can contact you on " + buyerPhone + ".", "", "team_accepted", "lead");
+    return end("Thank you, " + buyerName + ". I've recorded your buying enquiry for our sales team. They can contact you on " + shownPhone + ".", "", "team_accepted", "lead");
   }
   // Intent-first gate: customer availability and consent override any questionnaire.
   // Do not infer an appointment or callback from a polite postponement.
@@ -241,8 +280,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       !c.mileage ? "mileage" : "",
       !c.specs ? "GCC or non-GCC specs" : "",
     ].filter(Boolean);
+    const reminders = state.externalMediaReminderCount;
+    // First time: explain. Second: short reminder. After that: stop repeating and offer the team.
+    if (reminders >= 4 && state.question === "callback") { state.consent = "accepted"; note("CALL BACK: Customer keeps sending links/photos instead of car details"); return end("I can't open external links or photos here, so I'll pass this to our team. They'll contact you on this number to take the car details.", "", "team_accepted", "lead"); }
+    if (reminders >= 3) return end("I can't open external links or photos here. Shall our team call you on this number to take the car details instead?", "callback", "collecting", "lead");
     const reply = repeated
-      ? "I understand the details are in the link, but I still can't open external links or read the advertisement here. Please type the car details in this chat so I can help you."
+      ? "I can't open external links or read the ad here. Please type the make, model and year, or I can have our team call you."
       : "Thanks for sharing. I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" + (missing.length ? " (" + missing.join(", ") + ")" : "") + "?";
     return end(reply, !c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : !c.specs ? "specs" : (state.question || "sell"), "collecting");
   }
@@ -297,8 +340,8 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   for (const k of ["make", "model", "year", "mileage"] as const) if (vehicle[k] && vehicle[k] !== facts[k]) updates[k] = vehicle[k];
   const price = expectedPrice(text); if (price !== null) note(`Customer expects: AED ${price.toLocaleString("en-US")}`);
   // Recognise urgent selling context without restarting the appointment-first flow.
-  const departure = /(?:leav(?:e|ing)|depart(?:ing)?|mov(?:e|ing)|relocat(?:e|ing)|flying|going back|returning).{0,70}(?:country|uae|dubai|emirates|abroad|home)|(?:country|uae|dubai).{0,70}(?:leav(?:e|ing)|depart(?:ing)?|mov(?:e|ing)|relocat(?:e|ing))/i.test(text);
-  const jobLoss = /(?:lost my job|job loss|laid off|redundan|terminated|lost my work)/i.test(text);
+  const departure = /(?:leav(?:e|ing)|depart(?:ing)?|mov(?:e|ing)|relocat(?:e|ing)|flying|going(?: back)?|returning).{0,70}(?:country|uae|dubai|emirates|abroad|home|india|pakistan|philippines|nepal|sri lanka|bangladesh|egypt|kenya)|(?:country|uae|dubai).{0,70}(?:leav(?:e|ing)|depart(?:ing)?|mov(?:e|ing)|relocat(?:e|ing))/i.test(text);
+  const jobLoss = /(?:lost (?:my |the )?(?:job|work)|job loss|laid off|redundan|terminated)/i.test(text);
   const financial = /(?:financial (?:problem|difficult)|need (?:money|cash)|can't afford|cannot afford)/i.test(text);
   const urgent = /(?:urgent|asap|quick|fast|immediately|right away|today|tomorrow|before (?:friday|weekend)|have to sell|must sell|need to sell)/i.test(text);
   const situation = departure ? "I understand you're leaving the country and need to sell your car. We can help you arrange a quick sale." :
@@ -329,7 +372,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
 
   // Location requests are answered on their own, without repeating the inspection pitch.
   // Keep the pending appointment question so the next customer reply can supply a time.
-  if (LOCATION_REQUEST.test(text)) {
+  const locationWithSlot = LOCATION_REQUEST.test(text) && (!!dateFromText(text, now) || !!timeFromText(text, ["time", "exact_time", "confirm"].includes(question)));
+  if (locationWithSlot) prefix.push(LOCATION); // answered together with the booking details below
+  if (LOCATION_REQUEST.test(text) && !locationWithSlot) {
     // Answer the interruption, then resume exactly the pending question.
     // Never repeat the sales explanation or restart the conversation.
     const pendingQuestion = state.question || question;
@@ -368,7 +413,11 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const explicitTeam = /\b(call me|contact me|purchasing team sounds good|team.*(?:call|contact)|(?:speak|talk).*human|real person|not a bot)\b/i.test(text);
   if (explicitTeam || question === "callback" && YES.test(text) || question === "choice" && /\b(team|call|contact|purchas)\w*\b/i.test(text)) { state.consent = "accepted"; note("NOT READY YET: Accepted personal call"); return end(answer("Thanks. Our purchasing team can contact you on this WhatsApp number to discuss the car."), "", "team_accepted", "lead"); }
   if (question === "choice" && YES.test(text)) return end(answer("Do you mean you would like to book an inspection, or receive a personal call?"), "choice");
-  if (["team_accepted", "customer_will_contact", "closed"].includes(state.status) && !dateFromText(text, now) && !timeFromText(text, true) && !/\b(book|arrange.*inspection|can come|will come|want to sell)\b/i.test(text)) return end(answer(state.status === "team_accepted" ? "Thanks. I've recorded the details for our team to discuss with you." : "You're welcome to contact us whenever you're ready."), "");
+  if (["team_accepted", "customer_will_contact", "closed"].includes(state.status) && !dateFromText(text, now) && !timeFromText(text, true) && !/\b(book|arrange.*inspection|can come|will come|want to sell)\b/i.test(text)) {
+    const addsInfo = text.replace(/[^a-z0-9 ]/gi, "").trim().split(/\s+/).length >= 4;
+    if (state.status === "team_accepted" && addsInfo) note("Added after hand-off: " + text.slice(0, 300));
+    return end(answer(state.status === "team_accepted" ? (PRICE.test(text) ? "Our team will go through the price with you when they call." : addsInfo ? "Thanks, I've added that for our team." : "You're welcome. Our team will be in touch.") : "You're welcome to contact us whenever you're ready."), "");
+  }
   if (wasBooked && HESITATION.test(text) && !(dateFromText(text, now) && timeFromText(text, true) && !/\b(maybe|perhaps|if|try)\b/i.test(text))) { state.previousDate = state.proposedDate; state.previousTime = state.proposedTime; state.customerAgreedSlot = false; return end(answer("Understood. I'll mark the visit as needing reconfirmation. Let us know which day and time you can definitely attend."), "time", "reconfirmation", "change"); }
   if (/\b(hiyaza|hayaza|ownership certificate|without plates|no plates|truck|export certificate)\b/i.test(text)) { note(`Special handling required: ${text}`); return end(answer("This needs an arrangement with our team before bringing the vehicle. Would you like them to contact you on this number?"), "callback", wasBooked ? "reconfirmation" : "collecting", "lead"); }
   const spec = specsStatement(text, question === "specs" || /gcc.*\?/i.test(previous));
@@ -402,7 +451,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (!wasBooked && (state.salesConsultation || hasFutureValuation)) {
     state.salesConsultation = true;
     const carDetails = {make:updates.make||vehicle.make,model:updates.model||vehicle.model,year:updates.year||vehicle.year,mileage:updates.mileage||vehicle.mileage,specs:updates.specs||vehicle.specs};
-    const missing = missingCarDetails(carDetails);
+    const missing = missingDetails(carDetails);
     const carSummary = [carDetails.make,carDetails.model,carDetails.year,carDetails.mileage ? carDetails.mileage+" km":"",carDetails.specs].filter(Boolean).join(", ");
     const priceQuestion = PRICE_CONCERN.test(text);
     const wantsBooking = explicitVisitRequest(text) || /^(?:book|booking|inspection|appointment|yes|sure|okay|ok|i can come|i will come)[.! ]*$/i.test(text) && state.question === "consult_inspection" || /^(?:book|booking|inspection|appointment|book inspection)[.! ]*$/i.test(text);
@@ -484,7 +533,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const n=d.getUTCDate(), suffix=n%100>=11&&n%100<=13?"th":n%10===1?"st":n%10===2?"nd":n%10===3?"rd":"th";
     return "next week "+label+" "+n+suffix+" of "+d.toLocaleString("en-GB",{month:"long",timeZone:"UTC"});
   };
-  const inspectionExplanation = "Before buying your car, we need a quick free inspection to verify its condition. If everything is in order and we agree on a price, we can buy it and pay cash the same day.";
+  const inspectionPitch = "We give the final price right after a free 10–15 min inspection. If we agree, we pay cash the same day.";
+  // The pitch is said once per chat; later questions just ask for the time.
+  const inspectionExplanation = () => { if (state.inspectionExplained) return ""; state.inspectionExplained = true; return inspectionPitch + " "; };
   const requestedSellingDay = () => {
     const statements = [updates.sell_timeline, c.sell_timeline, ...(c.messages ?? []).filter(m => m.role === "user").map(m => m.content)].filter(Boolean) as string[];
     const weekdayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
@@ -497,22 +548,22 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     }
     return null;
   };
-  const arrival = () => {
+  const arrival = (withExplanation = true) => {
     const requested = requestedSellingDay();
     if (requested && requested.wanted !== 0) {
       state.proposedDate = requested.date;
-      return inspectionExplanation + " What time would you like to come on " + appointmentDay(requested.date) + "?";
+      return inspectionExplanation() + "What time would you like to come on " + appointmentDay(requested.date) + "?";
     }
     const target = iso(new Date(+dubaiLocalTime + daysAhead * 86400e3));
     const sundayNotice = day === 0 || (day === 6 && daysAhead > 0) ? "We're closed on Sundays. " : "";
     const closedNotice = !open && !sundayNotice ? "We're currently closed. " : "";
-    return sundayNotice + closedNotice + inspectionExplanation + " What time can you bring your car " + (daysAhead ? "on " + appointmentDay(target) : "today") + "?";
+    return (withExplanation ? sundayNotice + closedNotice + inspectionExplanation() : "") + "What time can you bring your car " + (daysAhead ? "on " + appointmentDay(target) : "today") + "?";
   };
   const followUp = () => (updates.sell_timeline || c.sell_timeline || state.askedFields?.sell) ? arrival() : "When are you planning to sell your car?";
   if (/tomorrow is sunday|tomorrow's sunday|sunday is closed|closed on sunday/i.test(text)) {
     state.proposedDate=undefined;state.proposedTime=undefined;state.customerAgreedSlot=false;
     const monday=iso(new Date(+dubaiLocalTime+(((8-day)%7)||7)*86400e3));
-    return end("You're right, sorry about that. We're closed on Sunday. "+inspectionExplanation+" What time can you bring your car on "+appointmentDay(monday)+"?","time","visit_proposed");
+    return end("You're right, sorry about that. We're closed on Sunday. "+inspectionExplanation()+"What time can you bring your car on "+appointmentDay(monday)+"?","time","visit_proposed");
   }
   if (/\b(?:not sure|don't know|cannot say|can't say) when i can (?:come|bring)/i.test(text)) return end(answer("No problem! Would you prefer that our team gives you a call tomorrow to arrange a convenient time?"), "callback", "collecting", "lead");
   if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("All our inspections take place at our branch in Al Quoz. It takes about 10–15 minutes, and if we agree on the price, we can buy your car and pay cash straight away. " + followUp()), "time", wasBooked ? "reconfirmation" : "collecting");
@@ -521,7 +572,15 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     return end(answer("Of course. Our purchasing team can call you on this WhatsApp number."), "", "team_accepted", "lead");
   }
   if (/\b(?:not in (?:a )?hurry|next month|in 30 days|(?:will|i'?ll) (?:check|update|inform)|let me (?:think|check)|i'?ll let you know|once i'?m free|when i'?m ready)\b/i.test(text)) return end(answer("No problem. When would you like to come for a free inspection?"), "time", "collecting");
-  if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) { state.priceRequests = (state.priceRequests ?? 0) + 1; return end(answer(`I understand that the price matters before you make the trip. The final offer follows the free 10–15 minute inspection, with no obligation to sell.${price ? " I've recorded your asking price for the team." : ""} ${state.priceRequests >= 2 ? CHOICE : followUp()}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting"); }
+  if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) {
+    state.priceRequests = (state.priceRequests ?? 0) + 1;
+    const asking = price ? " I've noted your asking price for the team." : "";
+    // Third push for a price before inspection: stop pitching and hand the customer to the team.
+    if (state.priceRequests >= 3 && !wasBooked) { state.consent = "accepted"; note("CALL BACK: Customer insists on a price before the inspection"); return end(answer("Understood. I'll have our purchasing team call you on this number to discuss it." + asking), "", "team_accepted", "lead"); }
+    if (state.priceRequests === 2 && !wasBooked) return end(answer("Understood, we can only confirm a price after seeing the car. Would you like to book the free inspection, or shall our purchasing team call you?" + asking), "choice", "collecting");
+    return end(answer(`I understand. The final price comes right after a free 10–15 min inspection, with no obligation to sell.${asking} ${state.priceRequests >= 2 ? CHOICE : arrival(false)}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting");
+  }
+  if (question === "callback" && situation && !wasBooked && !NO.test(text)) { state.consent = "accepted"; note("URGENT SELLER: " + text.slice(0, 300)); return end(answer("Our team will call you on this number to arrange it."), "", "team_accepted", "lead"); }
   if (question === "callback" && !YES.test(text) && !dateFromText(text, now) && !timeFromText(text, true)) return end(answer("No problem. Contact us when you're ready, or let me know if you would like a personal call."), "callback");
   // Explicit travel-time statements are not arrival commitments.
   if ((/\b(leav(?:e|ing)|depart|before|after|between|onwards)\b/i.test(text) || /\d\s*(?:am|pm)?\s+(?:to|and)\s+\d/i.test(text)) && /\d/.test(text)) { state.proposedTime = undefined; const range = text.match(/(?:between\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:to|and|[-–])\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/i); if (range) { const a = timeFromText(`${range[1]}:${range[2] ?? "00"}${range[3] || range[6] || ""}`, true), b = timeFromText(`${range[4]}:${range[5] ?? "00"}${range[6] || range[3] || ""}`, true); if (a && b) { state.timeMin = mins(a); state.timeMax = mins(b); } } const day = dateFromText(text, now); if (day) state.proposedDate = day; return end(answer(/leav|depart/i.test(text) ? "What time would you arrive at our branch? Our last inspection starts at 6:30 PM." : "What time do you prefer for your inspection?"), "exact_time", "visit_proposed"); }
@@ -532,7 +591,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (date && new Date(date + "T12:00:00Z").getUTCDay() === 0) {
     state.proposedDate = undefined; state.proposedTime = undefined; state.customerAgreedSlot = false;
     const monday = iso(new Date(Date.parse(date + "T12:00:00Z") + 86400e3));
-    return end(answer("We're closed on Sundays. " + inspectionExplanation + " What time can you bring your car on " + appointmentDay(monday) + "?"), "time", "visit_proposed");
+    return end(answer("We're closed on Sundays. " + inspectionExplanation() + "What time can you bring your car on " + appointmentDay(monday) + "?"), "time", "visit_proposed");
   }
   if (date) state.proposedDate = date;
   if (question === "confirm" && YES.test(text)) { date = state.proposedDate; time = state.proposedTime; }
@@ -559,7 +618,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const bookedSuffix = bookedNumber % 100 >= 11 && bookedNumber % 100 <= 13 ? "th" : bookedNumber % 10 === 1 ? "st" : bookedNumber % 10 === 2 ? "nd" : bookedNumber % 10 === 3 ? "rd" : "th";
     const [bookedHour, bookedMinute] = state.proposedTime.split(":").map(Number);
     const bookedTime = String(bookedHour % 12 || 12) + (bookedMinute ? ":" + String(bookedMinute).padStart(2, "0") : "") + " " + (bookedHour >= 12 ? "pm" : "am");
-    const reply = answer(`You're booked for ${bookedDay} ${bookedNumber}${bookedSuffix} of ${bookedMonth} at ${bookedTime}. Our team will be in touch to confirm the details. Please bring your Emirates ID and Mulkiya.\\n\\n${LOCATION}`);
+    const reply = answer(`You're booked for ${bookedDay} ${bookedNumber}${bookedSuffix} of ${bookedMonth} at ${bookedTime}. Our team will be in touch to confirm the details. Please bring your Emirates ID and Mulkiya.${prefix.includes(LOCATION) ? "" : "\n\n" + LOCATION}`);
     const result = end(reply, "", "booked", wasBooked ? "change" : "booking"); result.confirm = true; result.updates.appointment_date = state.proposedDate; result.updates.appointment_time = state.proposedTime; return result;
   }
   if (essential && financeReady && state.proposedDate && !state.proposedTime) {
@@ -595,8 +654,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (!validName(name || c.name) && !asked.name) return askOnce("name", "Hi! I’m Kaya from Mister Wheelz. May I know your name, please?")!;
   if (!vehicle.make && !asked.vehicle) return askOnce("vehicle", "Please let me know which car you’re selling (make, model and year).")!;
   if (vehicle.make && (!vehicle.model || !vehicle.year) && !asked.vehicle) return askOnce("vehicle", "What's the model and year?")!;
-  if (!vehicle.mileage && !asked.mileage) return askOnce("mileage", "What's the mileage?")!;
-  if (!vehicle.specs && !asked.specs) return askOnce("specs", "Is it GCC specs?")!;
+  const needMileage = !vehicle.mileage && !asked.mileage, needSpecs = !vehicle.specs && !asked.specs;
+  if (needMileage && needSpecs) { asked.specs = true; return askOnce("mileage", "What's the mileage, and is it GCC specs?")!; }
+  if (needMileage) return askOnce("mileage", "What's the mileage?")!;
+  if (needSpecs) return askOnce("specs", "Is it GCC specs?")!;
   const loan = updates.loan || c.loan;
   if (Number(vehicle.year) >= 2020 && !/^(yes|no)$/i.test(loan ?? "") && !asked.loan) return askOnce("loan", "Does the car have a loan?")!;
   if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount) && !asked.balance) return askOnce("balance", "How much is left on the loan?")!;

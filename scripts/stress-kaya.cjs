@@ -48,10 +48,12 @@ const check=turn(linked,"Check this link for all info");
 assert(/can't open external links/i.test(check.reply),"Link follow-up not handled");
 assert(check.state.question==="vehicle","Link follow-up advanced questionnaire");
 const again=turn(linked,"Check this");
-assert(again.state.question==="vehicle","Check this advanced questionnaire");
+// Third reminder: stop repeating, offer the team (never advance to mileage/specs/selling timeline).
+assert(again.state.question==="callback" && /can't open external links/i.test(again.reply) && /call you/i.test(again.reply),"Repeated link did not offer the team");
+assert(again.reply!==check.reply,"Link reminder repeated word for word");
 const picture=turn(linked,"[photo]");
 assert(/can't open external links/i.test(picture.reply),"Photo placeholder not handled");
-assert(picture.state.question==="vehicle","Photo advanced questionnaire");
+assert(picture.state.status==="team_accepted","Repeated media was not handed to the team");
 const frustrated=turn(linked,"Crazy bot");
 assert(/understand your frustration/i.test(frustrated.reply),"Frustration ignored");
 assert(frustrated.state.question==="callback","Frustration did not offer human help");
@@ -112,4 +114,42 @@ const buying=turn(buyer,"Do you have Sonata 2017?");
 assert(/sales team/i.test(buying.reply),"Buyer intent not recognized");
 const buyerFollow=turn(buyer,"I am looking to buy instead sir");
 assert(!/mileage|gcc specs|planning to sell/i.test(buyerFollow.reply),"Buyer redirected into seller flow");
+// Chats reported on 25 Oct 2026: Kaya must read each answer, never loop, and end in a booking or a team call.
+const same=(chat)=>{const a=(chat.messages??[]).filter(m=>m.role==="assistant").map(m=>m.content.trim());return a.some((x,i)=>i&&x===a[i-1]);};
+// BMW chat: pitch once, price push gets a short answer, third push goes to the team.
+const bmw={messages:[{role:"assistant",content:"Good morning! I'm Kaya from Mister Wheelz 😊 Before we start may I know your name please?"}]};
+turn(bmw,"I want sell my car");turn(bmw,"Bmw x4 2016");
+const bmwSpecs=turn(bmw,"Gcc");
+assert(/free 10.15 min inspection/i.test(bmwSpecs.reply)&&/what time/i.test(bmwSpecs.reply),"BMW chat did not move to booking");
+const bmwPrice=turn(bmw,"I want price dorst");
+assert(!/Before buying your car/i.test(bmwPrice.reply)&&(bmwPrice.reply.match(/free 10.15 min inspection/gi)||[]).length===1,"Price reply repeated the inspection pitch");
+assert(bmwPrice.reply.length<200,"Price reply too long for WhatsApp");
+turn(bmw,"price please");
+const bmwThird=turn(bmw,"just tell me the price");
+assert(bmwThird.state.status==="team_accepted"&&bmwThird.crm==="lead","Price insistence did not reach the team");
+assert(!same(bmw),"BMW chat repeated a reply word for word");
+// Kia chat: unrelated answers to the time question never loop back to the questionnaire.
+const kia={name:"Sam",make:"Kia",model:"Optima",year:"2016",mileage:"90000",specs:"GCC",loan:"No",sell_timeline:"Soon",messages:[]};
+let handed=false;
+for(let n=0;n<6&&!handed;n++){const r=turn(kia,"Condition like new");assert(!/make, model and year|mileage|GCC specifications|name/i.test(r.reply),"Stalled chat fell back to questionnaire: "+r.reply);handed=r.state.status==="team_accepted"||r.state.question==="callback";}
+assert(handed,"Stalled chat never offered the team");
+assert(!same(kia),"Kia chat repeated a reply word for word");
+// Lijo chat: "65000k" then "65k" keeps the normal flow and reaches the selling timeline.
+const lijo={messages:[{role:"assistant",content:"Hello. Please let us know how we can help you, or if you need a call back from our team."}]};
+turn(lijo,"Lijo");turn(lijo,"Kia seltos 2023");
+const lijoKm=turn(lijo,"65000k");
+assert(lijo.mileage==="65000"&&!/still need that detail|purchasing team/i.test(lijoKm.reply),"Mileage answer not read");
+turn(lijo,"65k");
+assert(/planning to sell/i.test(lijo.messages.at(-1).content),"Flow did not continue to the selling timeline");
+// Buyer chat: the name is asked once, then the enquiry is recorded.
+const buyer2={messages:[{role:"assistant",content:"Hello. Please let us know how we can help you, or if you need a call back from our team."}]};
+turn(buyer2,"Do you have sonata 2017");
+const buyerName=turn(buyer2,"Or camry spider");
+assert(buyerName.state.status==="team_accepted"&&!/your name/i.test(buyerName.reply),"Buyer name question repeated");
+// Booking confirmation: real line breaks, location once.
+const bookNow=planTurn({name:"Sam",make:"BMW",model:"X4",year:"2016",mileage:"90000",specs:"GCC",messages:[],flow_state:{version:1,status:"visit_proposed",question:"time",proposedDate:"2026-10-26"}},"3pm",{},now);
+assert(!bookNow.reply.includes("\\n")&&(bookNow.reply.match(/maps\.app/g)||[]).length===1,"Booking confirmation has literal \\n or duplicated location");
+// Link chat: reminders differ and end with an offer of the team.
+const link2={messages:[]};turn(link2,"Hi");turn(link2,"https://carswitch.com/car/895725/ad");turn(link2,"Check this link for all info");turn(link2,"Check this");
+assert(!same(link2),"Link reminders repeated word for word");
 console.log("Kaya conversation stress checks passed:",assertions);
