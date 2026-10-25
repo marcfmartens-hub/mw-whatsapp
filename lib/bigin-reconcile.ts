@@ -7,7 +7,9 @@ export function dueBiginOutcome(c:any,now=Date.now()):"booked"|"callback"|null{
  if(!(c.messages||[]).some((m:any)=>m.role==="user"))return null;
  const state=c.flow_state||{},sync=state.biginSync;
  const last=Date.parse(c.last_message_at||c.created_at||"");
- const booked=inspectionBooked(c);
+ const confirmedText=(c.messages||[]).some((m:any)=>m.role==="assistant"&&/your (?:free )?(?:inspection|appointment) (?:is |has been )?confirmed|you['’]?re booked|you are booked|i['’]ve booked/i.test(m.content));
+ const booked=inspectionBooked(c)||!!(c.appointment_date&&c.appointment_time&&confirmedText);
+ if(sync?.pending&&Date.parse(sync.runningUntil||"")>now)return null;
  const explicit=state.status==="team_accepted"||state.basicStep==="callback";
  const outcome=booked?"booked":explicit?"callback":null;
  if(!outcome&&(!Number.isFinite(last)||now-last<CALLBACK_AFTER_MINUTES*60000))return null;
@@ -28,6 +30,10 @@ export async function reconcileBigin(){
   try{
    const state:any=c.flow_state||{};
    const automatic=outcome==="callback"&&state.status!=="team_accepted"&&state.basicStep!=="callback";
+   if(outcome==="booked"&&state.status!=="booked"){
+    c.flow_state={...state,version:1,status:"booked"};
+    await updateConversation(c.phone,{flow_state:c.flow_state} as any);
+   }
    if(automatic){
     c.flow_state={...state,version:1,status:"team_accepted",...(state.basicMode?{basicStep:"done"}:{}),autoCallback:true};
     await updateConversation(c.phone,{flow_state:c.flow_state} as any);

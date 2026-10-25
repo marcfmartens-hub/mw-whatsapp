@@ -4,7 +4,7 @@ const original=Module._load;let record,accepted=false,writes=[];
 Module._load=function(id,parent,...rest){
  if(parent?.filename.endsWith('bigin-outcome.ts')){
   if(id==='./supabase')return {getConversation:async()=>record,updateConversation:async(_,patch)=>{writes.push(patch);record={...record,...patch};return record;}};
-  if(id==='./bigin')return {createBiginContact:async p=>{if(accepted)p.bigin_sync_result={contactId:'c1',pipelineId:'p1',stage:'Call Back'};return accepted;}};
+  if(id==='./bigin')return {toIsoDate:v=>v,toTime24:v=>v,createBiginContact:async p=>{if(accepted)p.bigin_sync_result={contactId:'c1',pipelineId:'p1',stage:'Call Back'};return accepted;}};
  }
  if(parent?.filename.endsWith('bigin-reconcile.ts')){
   if(id==='./supabase')return {};
@@ -22,6 +22,8 @@ assert.equal(dueBiginOutcome({...lead,last_message_at:new Date(now).toISOString(
 assert.equal(dueBiginOutcome({...lead,flow_state:{status:'booked'}},now),'booked');
 assert.equal(dueBiginOutcome({...lead,flow_state:{status:'collecting',consent:'declined'}},now),null);
 assert.equal(dueBiginOutcome({...lead,flow_state:{status:'team_accepted',biginSync:{outcome:'callback',pending:false,syncedAt:new Date(now).toISOString()}}},now),null);
+assert.equal(dueBiginOutcome({...lead,appointment_date:'2026-10-26',appointment_time:'13:00',flow_state:{status:'team_accepted',autoCallback:true},messages:[{role:'user',content:'yes'},{role:'assistant',content:'Your free inspection is confirmed for Monday.'}]},now),'booked');
+assert.equal(dueBiginOutcome({...lead,flow_state:{status:'team_accepted',biginSync:{pending:true,runningUntil:new Date(now+60000).toISOString()}}},now),null);
 let saved=null,posts=0,puts=0,failWrite=false,badRead=false;
 const response=(body,status=200)=>({ok:status>=200&&status<300,status,json:async()=>body});
 global.fetch=async(url,opts={})=>{
