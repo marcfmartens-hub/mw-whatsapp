@@ -364,6 +364,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       if (phone && uaeNumber(phone)) {
         updates.alternative_phone = phone;
         state.awaitingUaeCallbackNumber = false;
+        state.consultAction = undefined;
         state.consent = "accepted";
         note("NOT READY YET: Accepted personal call; future seller; preferred method: "+(state.salesMethod||"Undecided")+"; UAE callback: "+phone);
         return end("Thank you. I've recorded "+phone+" for our purchasing team to discuss your "+(carSummary||"car")+" and the selling options. No inspection has been booked.", "", "team_accepted", "lead");
@@ -376,6 +377,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
         state.awaitingUaeCallbackNumber = true;
         return end("Of course. Our team can discuss your car and the two selling options. Which UAE mobile number (+971 5...) can they call?", "uae_callback", "collecting");
       }
+      state.consultAction = undefined;
       state.consent = "accepted";
       note("NOT READY YET: Accepted personal call; future seller; preferred method: "+(state.salesMethod||"Undecided"));
       return end("Of course. Our purchasing team can contact you on this WhatsApp number to discuss your "+(carSummary||"car")+" and the selling options. No inspection has been booked.", "", "team_accepted", "lead");
