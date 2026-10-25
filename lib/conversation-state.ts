@@ -159,7 +159,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // specs, availability or inspection times must not enter this branch.
   const answeringSellingTimeline = question === "sell" || /when are you planning to sell|when (?:do you|would you) (?:plan|want|intend) to sell/i.test(previous);
   const uncertainSellingTimeline = /^(?:(?:i(?:'m| am)?\s+)?(?:still\s+)?(?:thinking\s+(?:about\s+it|it\s+over|of\s+selling)|considering\s+(?:it|my\s+options|selling)|undecided|not\s+(?:sure|certain|ready|decided)|unsure|no\s+idea|don'?t\s+know|do\s+not\s+know|haven'?t\s+decided(?:\s+yet)?|have\s+not\s+decided(?:\s+yet)?|need\s+(?:more\s+)?time\s+to\s+(?:think|decide)|not\s+in\s+a\s+hurry|just\s+exploring|just\s+checking|just\s+looking|maybe\s+later|perhaps\s+later|not\s+yet|later|depends(?:\s+on\s+(?:the\s+)?(?:price|offer))?|waiting\s+for\s+(?:a\s+)?(?:good\s+)?(?:price|offer))|(?:i\s+)?(?:haven'?t|have\s+not)\s+made\s+up\s+my\s+mind|(?:i\s+)?(?:need|want)\s+to\s+(?:think\s+about\s+it|discuss\s+it\s+first))[.! ]*$/i.test(text);
-  if (answeringSellingTimeline && uncertainSellingTimeline) {
+  // Treat "yet" as a natural suffix to undecided answers (e.g. "I don't know yet").
+  const uncertainWithYet = /^(?:i\s+)?(?:don'?t\s+know|do\s+not\s+know|not\s+sure|unsure|no\s+idea|haven'?t\s+decided|have\s+not\s+decided|not\s+decided|not\s+ready)(?:\s+(?:yet|right\s+now|at\s+the\s+moment))?[.! ]*$/i.test(text);
+  if (answeringSellingTimeline && (uncertainSellingTimeline || uncertainWithYet)) {
     updates.sell_timeline = "Undecided / not ready";
     return end("No problem! We can buy your car whenever you're ready. Our process is easy, quick and straightforward. After a free inspection and agreeing on a price, we can pay you cash the same day.\n\nIf you're not in a hurry, we also offer a free consignment service and can sell the car for you.\n\nLet me know how we can help you best, and I'll arrange for someone from our team to contact you to discuss your car and the options.", "callback", "collecting", "lead");
   }
