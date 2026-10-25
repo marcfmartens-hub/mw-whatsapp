@@ -1,108 +1,120 @@
 import { type Conversation, updateConversation, getConversation } from "./supabase";
 import { sendWhatsAppMessage } from "./meta";
 import { extractVehicleInfo } from "./claude";
-import { createBiginContact, moveLeadToCallBack, toIsoDate, toTime24 } from "./bigin";
-import { slotValid, LOCATION } from "./conversation-state";
+import { createBiginContact, moveLeadToCallBack } from "./bigin";
+import { slotValid, LOCATION, dateFromText, timeFromText } from "./conversation-state";
 
-type Basic = { basicMode: "Emergency Basic Bot V1"; basicStep: "name"|"vehicle"|"timeline"|"choice"|"daytime"|"confirm"|"callback"|"done"; proposedDate?:string; proposedTime?:string; offscript?:boolean };
-const HOURS = "Inspections: Monday–Saturday, 10:00 AM–6:30 PM (Friday from 12:00 PM). Closed Sundays.";
-function validInspection(date:string,time:string):boolean { if(!slotValid(date,time))return false; const day=new Date(date+"T12:00:00Z").getUTCDay(); const [h,m]=time.split(":").map(Number);const minutes=h*60+m;return day!==0 && minutes >= (day===5?720:600) && minutes<=1110; }
-const GREETING = "Hi! 👋 Welcome to Mister Wheelz. I'm Kaya, your virtual car-selling assistant. I'll help you take the next step towards selling your car. May I have your name, please?";
-const CHOICE = "I'm a virtual assistant 😊 I can book a free inspection or arrange a callback from our team. Which would you prefer?";
-const CALLBACK = "No problem, I understand. I'll forward this to our team so they can help you personally.";
-const FORBIDDEN = /\b(politics|political|president|election|government|religion|religious|islam|christian|christianity|muslim|hindu|staff|employee|salary|colleague|manager name|owner name|personal number|private details|internal information)\b/i;
-const SELL_INTENT = /\b(sell|selling|car|vehicle|buyer|buy my|trade)\b/i;
-const VEHICLE_INTENT = /\b(19\d{2}|20\d{2}|toyota|nissan|bmw|mercedes|audi|lexus|porsche|rover|volkswagen|honda|ford|kia|hyundai|mazda|mitsubishi)\b/i;
-const OBJECT = /\b(price|how much|offer|valuation|home visit|come to me|pickup|pick up|can't come|cannot come|not interested|not ready|don't want|do not want|why|how does|explain|loan|mortgage|consignment|cash|human|person|manager|call me|callback|call back)\b/i;
-const WANT_CALL = /\b(call\s*(me|back)|callback|call back|phone me|team|human|person|speak to|contact me)\b/i;
-const WANT_BOOK = /\b(book|inspection|appointment|visit|bring|come)\b/i;
-const REFUSE = /\b(no|not now|later|don't|do not|refuse|stop|never)\b/i;
-const normalName = (s:string) => s.trim().replace(/^(my name is|i am|i'm|this is)\s+/i,"").replace(/[.!]+$/,"");
-function nameFrom(s:string):string|null { const n=normalName(s); return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/^(hi|hello|hey|call|yes|no|okay|ok|price|cash|consignment|today|tomorrow|book|inspection)$/i.test(n) && !OBJECT.test(n) ? n : null; }
-async function crm(c:Conversation, status:string, booked=false) {
- try {
-   const note="Emergency Basic Bot V1 — "+status+"\nSelling timeline: "+(c.sell_timeline||"unknown")+"\nRecent chat: "+(c.messages||[]).slice(-12).map(m=>m.role+": "+m.content).join("\n");
-   const ok=await createBiginContact({...c,phone_number:c.phone_number||c.phone,inspection_booked:booked,inquiry_summary:note,sales_inquiry:booked?"Not Sure - Need Advise":"Other"} as any);
-   if(ok) { if(status==="Callback requested") await moveLeadToCallBack(c.phone); await updateConversation(c.phone,{bigin_pushed_at:new Date().toISOString(),inquiry_summary:note}); }
-   else console.error("[emergency-basic] Bigin did not confirm write",c.phone);
- } catch(e){console.error("[emergency-basic] Bigin write failed",e);}
+export const EMERGENCY_MODE = "Emergency Chat Bot V1";
+const HOURS = "Monday–Saturday, 10:00 AM–6:30 PM for inspections (Friday from 12:00 PM). Closed Sundays. All times are Dubai time.";
+const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
+type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string };
+const nameFrom = (text:string) => {
+ const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
+ return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
+};
+export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>={}, now=new Date()) {
+ const old=c.flow_state||{};
+ const b:State = /Emergency (Basic|Chat) Bot V1/.test(old.basicMode||"") ? {...old,basicMode:EMERGENCY_MODE} : {basicMode:EMERGENCY_MODE,basicStep:c.name?"vehicle":"name"};
+ const u:Record<string,any>={};
+ for(const k of ["make","model","year","mileage","specs"]) if(fields[k])u[k]=fields[k];
+ const value=(k:string)=>u[k]||c[k];
+ const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
+ const msg=text.trim();
+ const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
+ const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
+ const refuse=/\b(no|not now|not interested|not ready|can't|cannot|don't|do not|refuse|stop|never)\b/i.test(msg);
+ const objection=/\?|\b(price|how much|offer|valuation|home visit|pickup|pick up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i.test(msg);
+ const yes=/^(yes|yes please|yeah|yep|confirm|confirmed|correct|sure|ok|okay|fine)[.!]?$/i.test(msg);
+ const date=dateFromText(msg,now), time=timeFromText(msg,true);
+ let reply="", action="collecting";
+ const missingVehicle=()=>["make","model","year","mileage","specs"].filter(k=>!value(k));
+ const labels:Record<string,string>={make:"make",model:"model",year:"year",mileage:"mileage",specs:"GCC specifications or whether you're unsure"};
+ const askVehicle=()=>"Please share your car's "+missingVehicle().map(k=>labels[k]).join(", ")+".";
+ const callback=()=>{
+   b.basicStep="callback";
+   const missing=[!value("name")?"name":null,!phone()?"phone number":null].filter(Boolean);
+   if(missing.length) reply="No problem. I'll forward your request to the team so they can help you as best as possible. Please provide your "+missing.join(" and ")+".";
+   else {b.basicStep="done";action="callback";reply="Thank you, "+value("name")+". I've recorded your callback request for the team.";}
+ };
+ const summary=()=>"Please confirm: "+value("name")+", "+phone()+", "+[value("make"),value("model"),value("year"),value("mileage")?value("mileage")+" km":null,value("specs")].filter(Boolean).join(", ")+", inspection on "+b.proposedDate+" at "+b.proposedTime+" (Dubai time). Is that correct?";
+ const contact=()=>{
+   if(!value("name"))reply="May I have your name for the booking?";
+   else if(!phone())reply="What phone number should we use for your booking?";
+   else if(missingVehicle().length)reply=askVehicle();
+   else {b.basicStep="confirm";reply=summary();}
+ };
+ // Terminal acknowledgements must never restart booking or create another callback.
+ if(b.basicStep==="done") {reply="Thank you.";}
+ else if(b.basicStep==="callback") {
+   if(!value("name")){const n=nameFrom(msg.replace(/\+?\d[\d ()-]{7,18}\d/g, "").trim());if(n)u.name=n;}
+   const number=msg.match(/\+?\d[\d ()-]{7,18}\d/);if(number)u.phone_number=number[0].replace(/[^\d+]/g,"");
+   callback();
+ }
+ else if(call || refuse)callback();
+ else if(!(c.messages||[]).some((m:any)=>m.role==="assistant") && !old.basicMode){reply="Hi, I'm Kaya, Mister Wheelz's virtual assistant. What’s your name?";b.basicStep="name";}
+ else if(objection && !date && !time && !book){if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}}
+ else if(b.basicStep==="name"){
+   const n=nameFrom(msg);
+   if(n){u.name=n;b.basicStep="vehicle";reply=missingVehicle().length?askVehicle():"When are you planning to sell your car?";if(!missingVehicle().length)b.basicStep="timeline";}
+   else {b.offscript=true;b.basicStep="choice";reply=CHOICE;}
+ }
+ else if(b.basicStep==="vehicle"){
+   if(!missingVehicle().length){b.basicStep="timeline";reply="When are you planning to sell your car?";}
+   else if(Object.keys(u).length)reply=askVehicle();
+   else if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}
+ }
+ else if(b.basicStep==="timeline"){
+   if(/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|ready|day|sell|selling)\b/i.test(msg)){u.sell_timeline=msg.slice(0,200);b.basicStep="choice";reply="Would you prefer to book a free inspection or have our team call you?";}
+   else if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}
+ }
+ else if(b.basicStep==="choice"){
+   if(book||yes||date||time){
+     b.basicStep="daytime";if(date)b.proposedDate=date;if(time)b.proposedTime=time;
+     if(b.proposedDate&&b.proposedTime&&slotValid(b.proposedDate,b.proposedTime,now)){b.basicStep="contact";contact();}
+     else reply="Which day and time would suit you? "+HOURS;
+   }
+   else if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}
+ }
+ else if(b.basicStep==="daytime"){
+   if(date)b.proposedDate=date;if(time)b.proposedTime=time;
+   if(!date&&!time){if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}}
+   else if(!b.proposedDate)reply="Which day would suit you?";
+   else if(!b.proposedTime)reply="What time would suit you on "+b.proposedDate+"? "+HOURS;
+   else if(!slotValid(b.proposedDate,b.proposedTime,now)){b.proposedDate=undefined;b.proposedTime=undefined;reply="That slot is outside our available inspection times. "+HOURS+" Which day and time would suit you?";}
+   else {b.basicStep="contact";contact();}
+ }
+ else if(b.basicStep==="contact"){
+   if(!value("name")){const n=nameFrom(msg.replace(/\+?\d[\d ()-]{7,18}\d/g, "").trim());if(n)u.name=n;}
+   else if(!phone()){const n=msg.replace(/[^\d+]/g,"");if(/^\+?\d{9,15}$/.test(n))u.phone_number=n;}
+   contact();
+ }
+ else if(b.basicStep==="confirm"){
+   if(date||time||Object.keys(u).length){if(date)b.proposedDate=date;if(time)b.proposedTime=time;reply=summary();}
+   else if(yes){
+     if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime,now)){b.basicStep="daytime";reply="Please choose another inspection day and time. "+HOURS;}
+     else if(!value("name")||!phone()||missingVehicle().length){b.basicStep="contact";contact();}
+     else {u.appointment_date=b.proposedDate;u.appointment_time=b.proposedTime;u.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";action="booked";reply="Your free inspection is confirmed for "+b.proposedDate+" at "+b.proposedTime+" (Dubai time).\n\n"+LOCATION;}
+   }else if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}
+ }
+ else {b.basicStep="choice";reply=CHOICE;}
+ b.status=b.basicStep==="done" && action==="collecting" ? (old.status||"collecting") : action==="booked"?"booked":action==="callback"?"team_accepted":"collecting";
+ u.flow_state={...old,...b,version:1};
+ return {reply,updates:u,action,state:b};
 }
 export async function emergencyBasicTurn(c:Conversation,text:string) {
- const state=(c.flow_state||{}) as any;
- const b:Basic=state.basicMode==="Emergency Basic Bot V1" ? state as Basic : {basicMode:"Emergency Basic Bot V1",basicStep:c.name?"vehicle":"name"};
- const msg=text.trim();
- const updates:Record<string,any>={phone_number:c.phone_number||c.phone};
- let reply="";
- let status="Lead collecting";
- const objection=OBJECT.test(msg);
- const call=WANT_CALL.test(msg);
- const booking=WANT_BOOK.test(msg);
- const affirmative=/^(yes|yeah|yep|correct|sure|ok|okay|fine|that is right)$/i.test(msg);
- const no=REFUSE.test(msg);
- const requestedDate=toIsoDate(msg);
- const sunday=requestedDate && new Date(requestedDate+"T12:00:00Z").getUTCDay()===0;
- const closedReply="We are closed on Sundays 😊 You can book a free inspection from Monday, or I can arrange a callback from our team. Which would you prefer?";
- const extracted= /\b(19\d{2}|20\d{2})\b|\b(car|toyota|nissan|bmw|mercedes|audi|lexus|porsche|range rover|volkswagen|honda|ford)\b/i.test(msg)
-   ? await extractVehicleInfo(msg,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({})) : {};
- for(const k of ["make","model","year","mileage","specs"] as const) if((extracted as any)[k]) updates[k]=(extracted as any)[k];
- if(sunday && (b.basicStep==="choice"||b.basicStep==="daytime"||b.basicStep==="confirm")) {b.basicStep="choice"; b.proposedDate=undefined;b.proposedTime=undefined;reply=closedReply;}
- else if(FORBIDDEN.test(msg)) { reply="I can only help with selling your car. I can book a free inspection or arrange a callback from our team. Which would you prefer?"; b.basicStep="choice"; }
- else if(!state.basicMode && !(c.messages||[]).some(m=>m.role==="assistant")) { b.basicStep="name"; reply=GREETING; }
- else if(b.basicStep==="callback") {
-   // A callback is terminal: an acknowledgement can NEVER restart inspection booking.
-   b.basicStep="done"; status="Callback requested";
-   reply=CALLBACK+" Our team will contact you on this WhatsApp number.";
- } else if(call || (objection && b.basicStep!=="name" && b.basicStep!=="vehicle" && b.basicStep!=="timeline" && !booking)) {
-   b.basicStep="callback"; reply=CALLBACK+" To help our team, please share the car make, model and year if you haven\'t already."; status="Callback requested";
- } else if(b.basicStep==="name") {
-   const n=nameFrom(msg);
-   if(n){updates.name=n; b.basicStep="vehicle"; reply="Nice to meet you! Which car are you selling? Please share the make, model and year.";}
-   else if(SELL_INTENT.test(msg)) { b.basicStep="vehicle"; reply="Of course, I can help you sell your car 😊 Which make, model and year is it?"; }
-   else if(objection) { b.basicStep="choice"; reply=CHOICE; }
-   else { b.basicStep="vehicle"; reply="I can help you with that. Which car would you like to sell? Please share the make, model and year."; }
- } else if(b.basicStep==="vehicle") {
-   const make=updates.make||c.make,model=updates.model||c.model,year=updates.year||c.year;
-   if(make && model && year){ b.basicStep="timeline"; reply="Thank you! When are you planning to sell your car?"; }
-   else if(objection){b.basicStep="choice";reply=CHOICE;}
-   else reply="Thanks! Please share the car's make, model and year.";
- } else if(b.basicStep==="timeline") {
-   if(objection && !/\b(today|tomorrow|this week|next week|month|asap|urgent|soon)\b/i.test(msg)){b.basicStep="choice";reply=CHOICE;}
-   else {updates.sell_timeline=msg.slice(0,200); b.basicStep="choice"; reply="Thanks! We can arrange a free, no-obligation inspection at our location. Would you like to book an inspection, or prefer a callback from our team?";}
- } else if(b.basicStep==="choice") {
-   if((booking||affirmative) && !no){b.basicStep="daytime";reply="Of course! Which day and time would you prefer to bring the car for inspection? "+HOURS;}
-   else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" To help our team, please share the car make, model and year if you haven\'t already.";status="Callback requested";}
-   else reply=CHOICE;
- } else if(b.basicStep==="daytime") {
-   if(no||call||objection && !/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(msg)){b.basicStep="callback";reply=CALLBACK+" To help our team, please share your car make, model and year if not already provided.";status="Callback requested";}
-   else {
-     const date=toIsoDate(msg)||b.proposedDate;
-     const time=toTime24(msg)||b.proposedTime;
-     if(date) b.proposedDate=date;
-     if(time) b.proposedTime=time;
-     if(!date)reply="Which day would suit you for the free inspection?";
-     else if(new Date(date+"T12:00:00Z").getUTCDay()===0){b.proposedDate=undefined;reply=closedReply;b.basicStep="choice";}
-     else if(!time)reply="What time would suit you on "+date+"?";
-     else if(!validInspection(date,time))reply="Sorry, that time isn't available within our opening hours. Could you choose another day or time? We're closed on Sundays.";
-     else if(!(updates.name||c.name)) { b.basicStep="confirm"; reply="I have "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+" for "+date+" at "+time+". Before confirming, may I have your name for the booking?"; }
-     else {b.basicStep="confirm";reply="Please confirm: "+(updates.name||c.name||"Customer")+", "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+", inspection on "+date+" at "+time+". Your contact number is +"+c.phone.replace(/^\+/,"")+". Reply YES to confirm, or tell me what to change.";}
-   }
- } else if(b.basicStep==="confirm") {
-   if(!(updates.name||c.name) && nameFrom(msg)) {updates.name=nameFrom(msg);reply="Thank you! Please confirm your inspection for "+[updates.make||c.make,updates.model||c.model,updates.year||c.year].filter(Boolean).join(" ")+" on "+b.proposedDate+" at "+b.proposedTime+". Reply YES to confirm.";}
-   else if(/^(yes|yes please|confirm|confirmed|correct|ok|okay|sure)$/i.test(msg)){
-     if(!(updates.name||c.name)) {reply="Before I confirm, may I have your name for the booking?";}
-     else if(!b.proposedDate||!b.proposedTime||!validInspection(b.proposedDate,b.proposedTime)){b.basicStep="daytime";reply="Please choose a valid inspection day and time.";}
-     else {updates.appointment_date=b.proposedDate;updates.appointment_time=b.proposedTime;updates.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";status="Inspection booked";reply="Your free inspection is confirmed for "+b.proposedDate+" at "+b.proposedTime+".\n\n"+LOCATION+"\n\nPlease bring your Emirates ID and vehicle registration. See you soon!";}
-   } else if(call||no||objection){b.basicStep="callback";reply=CALLBACK+" Is this WhatsApp number the best one for our team to call?";status="Callback requested";}
-   else {b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;reply="No problem. Which day and time would you prefer instead? "+HOURS;}
- } else {reply="Thank you. Our team will follow up if you requested a callback."; }
- const fresh=await getConversation(c.phone).catch(()=>null);
- const messages=[...((fresh?.messages||c.messages||[]) as any[]),{role:"assistant",content:reply}].slice(-40);
- updates.flow_state={...state,...b,version:1,status:status==="Inspection booked"?"booked":status==="Callback requested"?"team_accepted":"collecting"};
- updates.step=status==="Inspection booked"?8:Math.max(c.step||0,1);
- updates.messages=messages;
- await updateConversation(c.phone,updates);
- await sendWhatsAppMessage(c.phone,reply);
+ const fields=await extractVehicleInfo(text,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({}));
+ const turn=planEmergencyTurn(c,text,fields);
+ const fresh=await getConversation(c.phone);
+ const messages=[...(fresh?.messages||c.messages||[]),{role:"assistant" as const,content:turn.reply}].slice(-40);
+ // Record the request before telling the customer it is confirmed.
+ await updateConversation(c.phone,{...turn.updates,messages,step:turn.action==="booked"?8:Math.max(c.step||0,1)});
+ await sendWhatsAppMessage(c.phone,turn.reply);
  const saved=await getConversation(c.phone);
- if(saved) await crm(saved,status,status==="Inspection booked");
- return status;
+ if(saved && turn.action!=="collecting") {
+   const note=EMERGENCY_MODE+" — "+turn.action+"\nSelling timeline: "+(saved.sell_timeline||"unknown");
+   const ok=await createBiginContact({...saved,phone_number:saved.phone_number||saved.phone,inspection_booked:turn.action==="booked",inquiry_summary:note,sales_inquiry:turn.action==="booked"?"Not Sure - Need Advise":"Other"} as any);
+   if(ok){if(turn.action==="callback")await moveLeadToCallBack(c.phone);await updateConversation(c.phone,{bigin_pushed_at:new Date().toISOString(),inquiry_summary:note});}
+   else console.error("[emergency] Bigin write not confirmed",c.phone);
+ }
+ return turn.action;
 }
