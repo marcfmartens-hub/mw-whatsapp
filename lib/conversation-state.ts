@@ -159,7 +159,8 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (/^(?:hi|hello|hey|hiya|good morning|good afternoon|good evening)[!. ]*$/i.test(text)) {
     const hour = local.getUTCHours();
     const greeting = hour < 12 ? "Good morning!" : hour < 17 ? "Good afternoon!" : "Good evening!";
-    return end(greeting + " Which car are you selling (make, model and year)?", "vehicle", "collecting");
+    const next = !c.make || !c.model || !c.year ? ["Which car are you selling (make, model and year)?", "vehicle"] : !c.mileage ? ["What's the mileage?", "mileage"] : !c.specs ? ["Is it GCC specs?", "specs"] : ["When would you like to bring your car for a free inspection?", "time"];
+    return end(greeting + " " + next[0], next[1], "collecting");
   }
   if (/\b(?:you(?:'re| are)|ur|u r)\s+(?:a\s+)?(?:robot|bot|ai)\b|\bare you (?:a )?(?:robot|bot|ai)\b/i.test(text)) {
     return end("I'm Kaya, Mister Wheelz's virtual assistant 😊 I can help you sell your car quickly and arrange a free car inspection. Which car are you selling (make, model and year)?", "vehicle", "collecting");
