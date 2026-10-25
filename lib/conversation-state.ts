@@ -351,70 +351,74 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   }
   if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
 
-  // Consultation: collect facts once, then route to booking or purchasing-team callback.
+  // Valuation enquiries: gather facts, recommend inspection once, explain options only on objection.
   const pastCustomerMessages = (c.messages ?? []).filter(m => m.role === "user").map(m => m.content);
   const hasFutureValuation = futureSellerPriceInquiry(text, pastCustomerMessages, !!state.salesConsultation);
-  const explicitBookingNow = explicitVisitRequest(text);
   if (!wasBooked && (state.salesConsultation || hasFutureValuation)) {
     state.salesConsultation = true;
     const carDetails = {make:updates.make||vehicle.make,model:updates.model||vehicle.model,year:updates.year||vehicle.year,mileage:updates.mileage||vehicle.mileage,specs:updates.specs||vehicle.specs};
     const missing = missingCarDetails(carDetails);
     const carSummary = [carDetails.make,carDetails.model,carDetails.year,carDetails.mileage ? carDetails.mileage+" km":"",carDetails.specs].filter(Boolean).join(", ");
-    const firstConsultation = !c.flow_state?.salesConsultation && !state.consultExplained;
-    const apology = /^(?:sorry|apologies|my apologies|sorry i was busy|sorry was busy|i was busy)[!. ]*$/i.test(text);
-    const wantsBooking = explicitBookingNow || /^(?:book|booking|inspection|appointment|free inspection|book appointment|book inspection|i want to book|i prefer inspection)[.! ]*$/i.test(text);
-    const wantsCallback = /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|want.*call|phone me)\b/i.test(text) || /^(?:call|phone call|team call|have them call|i prefer a call)[.! ]*$/i.test(text);
-    const agreesToInspection = state.question === "consult_inspection" && /^(?:yes|yeah|yep|sure|ok|okay|please|sounds good|lets do it|let us do it)[!. ]*$/i.test(text);
-    const objectsToInspection = refusesVisitForPrice(text) || (state.question === "consult_inspection" && /\b(?:no|not yet|not now|not ready|dont want|do not want|cannot|cant|prefer.*call|first.*price|before.*price)\b/i.test(text));
-    if (wantsBooking || agreesToInspection) state.consultAction = "booking";
-    else if (wantsCallback || objectsToInspection) state.consultAction = "callback";
+    const priceQuestion = PRICE_CONCERN.test(text);
+    const wantsBooking = explicitVisitRequest(text) || /^(?:book|booking|inspection|appointment|yes|sure|okay|ok|i can come|i will come)[.! ]*$/i.test(text) && state.question === "consult_inspection" || /^(?:book|booking|inspection|appointment|book inspection)[.! ]*$/i.test(text);
+    const wantsCallback = /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|phone me)\b/i.test(text);
+    const objects = refusesVisitForPrice(text) || /\b(?:not coming|won't come|cannot come|don't want inspection|no inspection)\b/i.test(text);
     const method = saleMethod(text);
     if (method) {state.salesMethod = method; updates.sales_inquiry = method;}
-    if (refusesVisitForPrice(text)) {state.visitDeclinedForPrice = true; note("PRICE FIRST: Customer declined inspection");}
     if (hasFutureValuation && !c.sell_timeline) updates.sell_timeline = text;
-    if (firstConsultation) state.consultExplained = true;
-    if (apology) return end("No problem at all! 😊 Take your time. Please share the car details whenever you are ready.", "consult_details", "collecting");
-    const priceFollowup = /how much|what.*offer|offer.*price|price first|give.*price/i.test(text);
-    if (missing.length && priceFollowup && !firstConsultation) {
-      note("VALUATION QUESTION: Purchasing team callback requested");
-      state.consultAction = "callback";
-      return end("I understand you want to know how much we can offer. I will forward your question to our purchasing team. Please share your car details so they have the full picture: " + missing.join(", ") + ".", "consult_details", "collecting", "lead");
-    }
+    if (wantsBooking) state.consultAction = "booking";
+    else if (wantsCallback) state.consultAction = "callback";
+    if (objects) state.visitDeclinedForPrice = true;
+    const apology = /^(?:sorry|apologies|sorry i was busy|sorry was busy|i was busy)[!. ]*$/i.test(text);
+    if (apology) return end("No problem at all! 😊 Take your time. Please share your car details when you are ready.", "consult_details", "collecting");
     if (missing.length) {
-      const intro = firstConsultation ? ["I understand you would like to explore the price before visiting.", METHOD_EXPLANATION, "The best way to receive an accurate final offer is to book a free inspection. Once we have inspected your car, our purchasing team can confirm the offer. When could you bring your car in?"] : [];
-      return end([...intro,"To complete your car details, could you please share "+missing.join(", ")+"?"].join(String.fromCharCode(10,10)), "consult_details", "collecting", "lead");
+      const intro = !state.consultExplained ? "I understand you would like to know what your car is worth before deciding what to do.\n\nTo understand your situation better, please share your car details: " : priceQuestion ? "I understand you want to know how much we can offer. I'll make sure our purchasing team receives your question.\n\nTo give them the full picture, please share " : "Thank you. Could you also share ";
+      state.consultExplained = true;
+      return end(intro + missing.join(", ") + "?", "consult_details", "collecting", "lead");
     }
     const customerName = updates.name || c.name;
-    if (!customerName) return end("Thank you, I have your car details: "+carSummary+".\n\nMay I have your name so our team can assist you personally?", "consult_name", "collecting", "lead");
+    if (!customerName) return end("Thank you, I have your car details. May I have your name, please?", "consult_name", "collecting", "lead");
     if (state.awaitingUaeCallbackNumber) {
       const number = numberFromMessage(text);
-      if (!number || !uaeNumber(number)) return end("Please share a UAE mobile number starting with +971 5 or 05 for our team to call.", "uae_callback", "collecting");
+      if (!number || !uaeNumber(number)) return end("What UAE mobile number should our purchasing team call?", "uae_callback", "collecting");
       updates.alternative_phone = number;
       state.awaitingUaeCallbackNumber = false;
-      state.consultAction = undefined;
-      state.consent = "accepted";
-      note("CALL BACK: Future seller; phone "+number+"; vehicle "+carSummary);
-      return end("Thank you, "+customerName+". I have recorded "+number+" for our purchasing team to call you about your "+carSummary+". No inspection has been booked.", "", "team_accepted", "lead");
+      state.consultAction = "callback";
     }
-    if (!state.consultAction) return end(["Thank you, "+customerName+". I have your car details: "+carSummary+".","The best way to receive an accurate final offer is through a free inspection. When could you bring your car in?"].join(String.fromCharCode(10,10)), "consult_inspection", "collecting", "lead");
+    const contact = String(updates.alternative_phone || c.phone || "");
+    if (state.consultAction === "callback" && !uaeNumber(contact)) {
+      state.awaitingUaeCallbackNumber = true;
+      return end("Of course. What UAE mobile number should our purchasing team call?", "uae_callback", "collecting", "lead");
+    }
     if (state.consultAction === "callback") {
-      note("INSPECTION DECLINED: Customer prefers discussion first; purchasing team callback requested");
-      const contact = String(c.phone||"");
-      if (!uaeNumber(contact)) {
-        state.awaitingUaeCallbackNumber = true;
-        return end("Of course, "+customerName+". What UAE mobile number (+971 5...) should our purchasing team call?", "uae_callback", "collecting", "lead");
-      }
-      state.consultAction = undefined;
       state.consent = "accepted";
-      note("CALL BACK: Future seller; vehicle "+carSummary+"; phone "+contact);
-      return end("Thank you, "+customerName+". Our purchasing team will contact you on your WhatsApp number to discuss your "+carSummary+". No inspection has been booked.", "", "team_accepted", "lead");
+      note("CALL BACK: Valuation requested; vehicle " + carSummary + "; phone " + contact);
+      state.consultAction = undefined;
+      return end("Thank you, " + customerName + ". I've recorded your details for our purchasing team to contact you about your " + carSummary + ". No inspection has been booked.", "", "team_accepted", "lead");
     }
-    state.consultAction = undefined;
-    state.salesConsultation = false;
-    state.visitDeclinedForPrice = false;
-    state.question = "time";
-    return end("Thank you, "+customerName+". Let's arrange your free inspection for the "+carSummary+". Which day would you like to visit? We are closed on Sundays.", "time", "visit_proposed", "lead");
+    if (state.consultAction === "booking") {
+      state.salesConsultation = false;
+      state.consultAction = undefined;
+      return end("Great, " + customerName + ". Let's arrange the free inspection. Which day and time can you bring your car? We're closed on Sundays.", "time", "visit_proposed", "lead");
+    }
+    if (state.question === "consult_inspection" && (priceQuestion || objects)) {
+      if (!state.consultExplained || !state.visitDeclinedForPrice) {
+        state.visitDeclinedForPrice = true;
+        return end(["I understand you'd like to discuss the price first.", METHOD_EXPLANATION, "Both selling options require an inspection before we can confirm an offer.", "Would you prefer to arrange a free inspection or have our purchasing team call you first?"].join("\n\n"), "consult_choice", "collecting", "lead");
+      }
+      state.consultAction = "callback";
+      if (!uaeNumber(contact)) {state.awaitingUaeCallbackNumber = true;return end("I understand. Our purchasing team can discuss this with you. What UAE mobile number should they call?", "uae_callback", "collecting", "lead");}
+      state.consent = "accepted";
+      note("CALL BACK: Customer still requests valuation before inspection; vehicle " + carSummary);
+      return end("I understand. I'll pass your details and price question to our purchasing team for a callback. No inspection has been booked.", "", "team_accepted", "lead");
+    }
+    if (state.question === "consult_choice") {
+      if (/\b(?:call|team|phone|callback)\b/i.test(text)) {state.consultAction = "callback";return end("Understood. I'll arrange for our purchasing team to contact you. Please confirm your UAE mobile number.", "uae_callback", "collecting", "lead");}
+      return end("Would you prefer the free inspection or a callback from our purchasing team?", "consult_choice", "collecting", "lead");
+    }
+    return end("Thank you, " + customerName + ". The best way to get an accurate final offer is a free inspection of your " + carSummary + ". When would you be able to bring it in?", "consult_inspection", "collecting", "lead");
   }
+
   const dubaiLocalTime = new Date(now.getTime() + 4 * 3600000);
   const day = dubaiLocalTime.getUTCDay(), hour = dubaiLocalTime.getUTCHours();
   const open = day !== 0 && hour >= (day === 5 ? 12 : 10) && hour < 19;
