@@ -158,11 +158,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // Listings, images and attachments are not readable by Kaya. Never treat
   // "check this" as an answer to the next questionnaire field.
   const hasExternalLink = /(?:https?:\/\/|www\.)\S+|(?:\b[a-z0-9-]+\.)+(?:com|ae|net|org|io|app|co|me)\/\S*/i.test(text);
-  const referencesSharedMedia = /^(?:check|see|open|look(?:\s+at)?|view)\s+(?:this|that|it|the\s+(?:link|photo|picture|image|ad|listing))(?:\s+(?:link|photo|picture|image|ad|listing))?(?:\s+for\s+(?:all\s+)?(?:the\s+)?(?:info|information|details))?[.! ]*$/i.test(text);
+  const referencesSharedMedia = /^(?:check|see|open|look(?:\s+at)?|view)\s+(?:(?:this|that|it|the|my)\s+)?(?:link|ad|listing|photo|picture|image)?(?:\s+for\s+(?:all\s+)?(?:the\s+)?(?:info|information|details))?[.! ]*$/i.test(text) && /(?:check\s+this|check\s+that|link|ad|listing|photo|picture|image)/i.test(text);
   const mediaPlaceholder = /^\[?(?:image|photo|picture|attachment|file|document|video|unsupported(?:\s+media)?)\]?(?:\s+(?:attached|sent))?[.! ]*$/i.test(text);
-  const linkFollowup = /^(?:check|see|open|look(?:\s+at)?|view)\s+(?:(?:the|my|that|this)\s+)?(?:link|ad|listing|photo|picture|image)(?:\s+for\s+(?:all\s+)?(?:the\s+)?(?:info|information|details))?[.! ]*$/i.test(text);
-  if (hasExternalLink || referencesSharedMedia || mediaPlaceholder || linkFollowup) {
-    const repeated = Boolean(state.externalMediaPending);
+  const recentLink = (c.messages ?? []).slice(-12).some(m => m.role === "user" && /(?:https?:\/\/|www\.)\S+/i.test(m.content));
+  const mediaContext = Boolean(state.externalMediaPending || recentLink);
+  if (hasExternalLink || referencesSharedMedia || mediaPlaceholder) {
+    const repeated = mediaContext && !hasExternalLink;
     state.externalMediaPending = true;
     state.externalMediaReminderCount = (state.externalMediaReminderCount ?? 0) + 1;
     const missing = [
@@ -171,13 +172,16 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       !c.specs ? "GCC or non-GCC specs" : "",
     ].filter(Boolean);
     const reply = repeated
-      ? "I understand the information is in the link, but I'm unable to open or read it here. Please type the car details directly in this chat so I can help you."
+      ? "I understand the details are in the link, but I still can't open or read it here. Please type the car details in this chat so I can help you."
       : "Thanks for sharing. I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" + (missing.length ? " (" + missing.join(", ") + ")" : "") + "?";
     return end(reply, state.question || (!c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : "specs"), "collecting");
   }
-  // The link explanation is a temporary conversation state, not an answer.
-  // Keep all known car details and resume the same missing field on a real reply.
-  if (state.externalMediaPending) state.externalMediaPending = false;
+  if (/^(?:crazy|stupid|useless|dumb|bad|terrible)\s+(?:bot|robot|ai)|^(?:you(?:'re| are)\s+)?(?:not\s+listening|not\s+understanding)|^this\s+(?:bot|robot|ai)\s+(?:is\s+)?(?:crazy|stupid|useless|bad)/i.test(text)) {
+    state.externalMediaPending = mediaContext;
+    return end("I'm sorry, I understand your frustration. I can't read the listing you shared, and I shouldn't keep asking unrelated questions. Would you prefer that someone from our team contacts you to help?", "callback", "collecting", "lead");
+  }
+  // Keep link context in persisted state until the seller provides real details.
+  if (state.externalMediaPending && /(?:\b(?:bmw|mercedes|toyota|nissan|audi|lexus|porsche|honda|ford|kia|hyundai)\b|\b20\d\d\b|\b\d+\s*k\s*km\b)/i.test(text)) state.externalMediaPending = false;
 
   // Only an uncertain answer to the SELLING-TIMELINE question triggers the
   // flexible cash-purchase / free-consignment explanation. Uncertainty about
