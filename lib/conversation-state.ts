@@ -18,7 +18,7 @@ export type FlowState = {
   customerAgreedSlot?: boolean;
   askedFields?: Record<string, boolean>;
   externalMediaPending?: boolean; externalMediaReminderCount?: number;
-  consultAction?: "booking" | "callback"; salesConsultation?: boolean; salesMethod?: "Cash Deal" | "Consignment"; visitDeclinedForPrice?: boolean; awaitingUaeCallbackNumber?: boolean;
+  consultExplained?: boolean; consultAction?: "booking" | "callback"; salesConsultation?: boolean; salesMethod?: "Cash Deal" | "Consignment"; visitDeclinedForPrice?: boolean; awaitingUaeCallbackNumber?: boolean;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
 export type Turn = { updates: Record<string, any>; state: FlowState; reply: string; confirm?: boolean; crm?: "lead" | "booking" | "change"; defaultDate?: string };
@@ -327,83 +327,61 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (amount && !/\b(?:km|kms|model|year|fines)\b/i.test(text) && !(Number(amount[1]) >= 1980 && Number(amount[1]) <= 2035 && !amount[2])) updates.mortgage_amount = String(Number(amount[1].replace(/,/g, "")) * (amount[2] ? 1000 : 1));
   }
   if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
-  // Future sellers seeking a valuation need a consultation, not an appointment loop.
-  // This branch runs after vehicle and finance extraction, so we preserve facts.
+
+  // Consultation: collect facts once, then route to booking or purchasing-team callback.
   const pastCustomerMessages = (c.messages ?? []).filter(m => m.role === "user").map(m => m.content);
   const hasFutureValuation = futureSellerPriceInquiry(text, pastCustomerMessages, !!state.salesConsultation);
   const explicitBookingNow = explicitVisitRequest(text);
-  if (!wasBooked && (state.salesConsultation || hasFutureValuation) && !explicitBookingNow) {
+  if (!wasBooked && (state.salesConsultation || hasFutureValuation)) {
     state.salesConsultation = true;
-    if (/^(sorry|apologies|my apologies|sorry i was busy|sorry was busy|i was busy)[!. ]*$/i.test(text)) {
-      return end(["No problem at all! 😊", "We can book a free inspection appointment, or have our purchasing team call you to discuss your car and selling options.", "Which would you prefer?" ].join(String.fromCharCode(10,10)), "consult_choice", "collecting");
-    }
-    const suppliedMethod = saleMethod(text);
-    if (suppliedMethod) { state.salesMethod = suppliedMethod; updates.sales_inquiry = suppliedMethod; }
-    const decline = refusesVisitForPrice(text);
-    if (decline) { state.visitDeclinedForPrice = true; note("PRICE FIRST: Customer declined inspection; do not pressure booking"); }
-    if (hasFutureValuation && !c.sell_timeline) updates.sell_timeline = text;
     const carDetails = {make:updates.make||vehicle.make,model:updates.model||vehicle.model,year:updates.year||vehicle.year,mileage:updates.mileage||vehicle.mileage,specs:updates.specs||vehicle.specs};
     const missing = missingCarDetails(carDetails);
-    const carSummary = [carDetails.make,carDetails.model,carDetails.year,carDetails.mileage ? carDetails.mileage+" km":"",carDetails.specs,updates.loan||c.loan ? "loan: "+(updates.loan||c.loan):""].filter(Boolean).join(", ");
-    const chosen = state.salesMethod ? "I've noted your preference for "+(state.salesMethod==="Cash Deal"?"direct cash purchase":"free consignment")+". " : "";
-    const chooseBooking = /^(?:book|booking|inspection|appointment|free inspection|book appointment|book inspection|i want to book|i prefer inspection)[.! ]*$/i.test(text);
-    const chooseCallback = /^(?:call|callback|call back|call me|phone call|team call|have them call|i prefer callback|i prefer a call)[.! ]*$/i.test(text);
-    if (chooseBooking) state.consultAction = "booking";
-    if (chooseCallback) state.consultAction = "callback";
-    if (state.consultAction && missing.length) {
-      return end("Of course. Before I arrange that, could you please share the missing vehicle information: "+missing.join(", ")+"? I have kept the details you already provided.", "consult_details", "collecting", "lead");
+    const carSummary = [carDetails.make,carDetails.model,carDetails.year,carDetails.mileage ? carDetails.mileage+" km":"",carDetails.specs].filter(Boolean).join(", ");
+    const firstConsultation = !c.flow_state?.salesConsultation && !state.consultExplained;
+    const apology = /^(?:sorry|apologies|my apologies|sorry i was busy|sorry was busy|i was busy)[!. ]*$/i.test(text);
+    const wantsBooking = explicitBookingNow || /^(?:book|booking|inspection|appointment|free inspection|book appointment|book inspection|i want to book|i prefer inspection)[.! ]*$/i.test(text);
+    const wantsCallback = /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|want.*call|phone me)\b/i.test(text) || /^(?:call|phone call|team call|have them call|i prefer a call)[.! ]*$/i.test(text);
+    if (wantsBooking) state.consultAction = "booking";
+    else if (wantsCallback) state.consultAction = "callback";
+    const method = saleMethod(text);
+    if (method) {state.salesMethod = method; updates.sales_inquiry = method;}
+    if (refusesVisitForPrice(text)) {state.visitDeclinedForPrice = true; note("PRICE FIRST: Customer declined inspection");}
+    if (hasFutureValuation && !c.sell_timeline) updates.sell_timeline = text;
+    if (firstConsultation) state.consultExplained = true;
+    if (apology) return end(["No problem at all! 😊","We can book a free inspection appointment, or have our purchasing team call you to discuss your car and selling options.","Which would you prefer?"].join(String.fromCharCode(10,10)), "consult_choice", "collecting");
+    if (missing.length) {
+      const intro = firstConsultation ? ["I understand you would like to explore the price before visiting.", METHOD_EXPLANATION, "I will forward your information to our purchasing team so they can contact you personally to discuss your car and the available selling options."] : [];
+      return end([...intro,"To complete your car details, could you please share "+missing.join(", ")+"?"].join(String.fromCharCode(10,10)), "consult_details", "collecting", "lead");
     }
-    if (state.consultAction === "booking") {
-      state.salesConsultation = false;
-      state.consultAction = undefined;
-      state.visitDeclinedForPrice = false;
-      return end("Certainly. Which day would you like to visit us for your free car inspection? We are closed on Sundays.", "time", "visit_proposed", "lead");
-    }
-    const phone = numberFromMessage(text);
+    const customerName = updates.name || c.name;
+    if (!customerName) return end("Thank you, I have your car details: "+carSummary+".\n\nMay I have your name so our team can assist you personally?", "consult_name", "collecting", "lead");
     if (state.awaitingUaeCallbackNumber) {
-      if (phone && uaeNumber(phone)) {
-        updates.alternative_phone = phone;
-        state.awaitingUaeCallbackNumber = false;
-        state.consultAction = undefined;
-        state.consent = "accepted";
-        note("NOT READY YET: Accepted personal call; future seller; preferred method: "+(state.salesMethod||"Undecided")+"; UAE callback: "+phone);
-        return end("Thank you. I've recorded "+phone+" for our purchasing team to discuss your "+(carSummary||"car")+" and the selling options. No inspection has been booked.", "", "team_accepted", "lead");
-      }
-      return end("Please share a UAE mobile number starting with +971 5 or 05 so our team can call you. We won't arrange an inspection unless you request one.", "uae_callback", "collecting");
+      const number = numberFromMessage(text);
+      if (!number || !uaeNumber(number)) return end("Please share a UAE mobile number starting with +971 5 or 05 for our team to call.", "uae_callback", "collecting");
+      updates.alternative_phone = number;
+      state.awaitingUaeCallbackNumber = false;
+      state.consultAction = undefined;
+      state.consent = "accepted";
+      note("CALL BACK: Future seller; phone "+number+"; vehicle "+carSummary);
+      return end("Thank you, "+customerName+". I have recorded "+number+" for our purchasing team to call you about your "+carSummary+". No inspection has been booked.", "", "team_accepted", "lead");
     }
-    const callbackRequested = state.consultAction === "callback" || /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|want.*call|yes.*call|phone me)\b/i.test(text) || question === "consult_choice" && YES.test(text);
-    if (callbackRequested) {
-      if (!uaeNumber(String(c.phone||""))) {
+    if (!state.consultAction) return end(["Thank you, "+customerName+". I have your car details: "+carSummary+".","Would you prefer to book a free inspection appointment, or have our purchasing team call you first?"].join(String.fromCharCode(10,10)), "consult_choice", "collecting", "lead");
+    if (state.consultAction === "callback") {
+      const contact = String(c.phone||"");
+      if (!uaeNumber(contact)) {
         state.awaitingUaeCallbackNumber = true;
-        return end("Of course. Our team can discuss your car and the two selling options. Which UAE mobile number (+971 5...) can they call?", "uae_callback", "collecting");
+        return end("Of course, "+customerName+". What UAE mobile number (+971 5...) should our purchasing team call?", "uae_callback", "collecting", "lead");
       }
       state.consultAction = undefined;
       state.consent = "accepted";
-      note("NOT READY YET: Accepted personal call; future seller; preferred method: "+(state.salesMethod||"Undecided"));
-      return end("Of course. Our purchasing team can contact you on this WhatsApp number to discuss your "+(carSummary||"car")+" and the selling options. No inspection has been booked.", "", "team_accepted", "lead");
+      note("CALL BACK: Future seller; vehicle "+carSummary+"; phone "+contact);
+      return end("Thank you, "+customerName+". Our purchasing team will contact you on your WhatsApp number to discuss your "+carSummary+". No inspection has been booked.", "", "team_accepted", "lead");
     }
-    if (missing.length) {
-      const message = [
-        "I understand you would like to explore the price before visiting.",
-        METHOD_EXPLANATION,
-        "I will forward your information to our purchasing team so they can contact you personally to discuss your car and the available selling options.",
-        "To make sure they have all the necessary information, could you please share your car details: "+missing.join(", ")+"?",
-        chosen
-      ].filter(Boolean).join(String.fromCharCode(10,10));
-      return end(message, "consult_details", "collecting", "lead");
-    }
-    if (decline || state.visitDeclinedForPrice || state.priceRequests && PRICE_CONCERN.test(text)) {
-      state.priceRequests = (state.priceRequests??0)+1;
-      return end("I understand you don't want to visit without discussing the value first. "+chosen+"I have your car details: "+carSummary+". Our team can discuss the options but can't promise a price without inspection. Which selling method would you prefer — direct cash purchase or free consignment? Would you like our team to call you to discuss it? No appointment is required.", "consult_choice", "collecting", "lead");
-    }
-    if (suppliedMethod) return end(chosen+"I've recorded your car details: "+carSummary+". Would you prefer a free inspection this week or a callback from our team to discuss the sales method first?", "consult_choice", "collecting", "lead");
-    return end("I understand. Since you're planning to sell later, it makes sense to explore your options first. "+METHOD_EXPLANATION+" I already have your car details: "+carSummary+". Do you prefer a direct cash sale or free consignment? Would you like an optional inspection this week, or a callback from our team to discuss the options?", "consult_choice", "collecting", "lead");
-  }
-  if (state.salesConsultation && explicitBookingNow) {
+    state.consultAction = undefined;
     state.salesConsultation = false;
     state.visitDeclinedForPrice = false;
-    state.awaitingUaeCallbackNumber = false;
     state.question = "time";
+    return end("Thank you, "+customerName+". Let's arrange your free inspection for the "+carSummary+". Which day would you like to visit? We are closed on Sundays.", "time", "visit_proposed", "lead");
   }
   const dubaiLocalTime = new Date(now.getTime() + 4 * 3600000);
   const day = dubaiLocalTime.getUTCDay(), hour = dubaiLocalTime.getUTCHours();
