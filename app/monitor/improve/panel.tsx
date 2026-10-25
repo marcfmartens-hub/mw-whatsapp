@@ -2,6 +2,7 @@
 import {useEffect,useState} from "react";
 import Link from "next/link";
 import TestChat from "../test-chat/test-chat";
+import ImprovementActions from "./actions";
 type Config={enabled:boolean;autoApprove:boolean;fullAutonomous?:boolean;schedules:Record<string,{mode:string;minutes:number}>};
 type Data={state:{config:Config;revision:number;updated_by:string};runs:any[];reviews:any[];proposals:any[];autoReleases:any[];publishing?:{ready:boolean;reason:string}};
 export default function IntelligenceLab(){
@@ -55,5 +56,5 @@ export default function IntelligenceLab(){
  :tab==="Solutions & Tests"?<div style={card}><h2>Proposals and validation</h2><p>{data?.proposals?.length||0} stored proposals. The isolated Test Chat currently provides a mock analysis flow; no real fix is generated or tested by that flow.</p>{data?.proposals?.slice(0,20).map((p,i)=><details key={i}><summary>{p.status} · {p.severity||"review"} · {p.reason?.slice(0,100)}</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(p.validation||{},null,2)}</pre></details>)}</div>
  :tab==="Deployments"?<div style={card}><h2>Deployment and rollback</h2><p>Mockup deployment: <b>DISABLED</b>. The existing production improvement service has its own separate publishing logic; this new lab does not trigger it.</p><p>Existing release records: {data?.autoReleases?.length||0}.</p><p>Publishing connection: {data?.publishing?.ready?"Configured":"Not ready or unavailable"}.</p></div>
  :<div style={card}><h2>Learning history</h2><p>Existing improvement run history: {data?.runs?.length||0} runs.</p>{data?.runs?.slice(0,20).map((r,i)=><p key={i}>{r.kind} · {r.status} · {r.started_at?new Date(r.started_at).toLocaleString():"Unknown date"}</p>)}</div>}
- </div></main>;
+ <div style={{marginTop:22}}><ImprovementActions proposals={data?.proposals||[]} releases={data?.autoReleases||[]} enabled={!!data?.state?.config.enabled} onRefresh={load}/></div></div></main>;
 }
