@@ -187,7 +187,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const contextualIntro = situation && !alreadyAcknowledged ? situation : "";
 
   const prefix: string[] = contextualIntro ? [contextualIntro] : [];
-  const deadlinePattern = /(?:sell|sale|sold).{0,60}(?:this wee[k|l]|before .*leave|asap)|this wee[k|l].{0,60}(?:sell|sale|sold)/i;
+  // A stated departure and need to sell is already a selling timeline.
+  // Customers often write "going back home next week ... sell this weel".
+  const deadlinePattern = /(?:sell|sale|sold).{0,100}(?:this wee[k|l]|before .*leave|asap|urgent|today|tomorrow)|this wee[k|l].{0,100}(?:sell|sale|sold)|(?:leaving|going back home|moving back|flying home|relocating).{0,120}(?:need to sell|have to sell|must sell|sell my car)/i;
   if (deadlinePattern.test(text)) updates.sell_timeline = text;
   if (!updates.sell_timeline && !c.sell_timeline) {
     const earlier = [...(c.messages ?? [])].reverse().find(m => m.role === "user" && deadlinePattern.test(m.content));
@@ -354,7 +356,8 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const loan = updates.loan || c.loan;
   if (Number(vehicle.year) >= 2020 && !/^(yes|no)$/i.test(loan ?? "") && !asked.loan) return askOnce("loan", "Does the car have a loan?")!;
   if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount) && !asked.balance) return askOnce("balance", "How much is left on the loan?")!;
-  if (!(updates.sell_timeline || c.sell_timeline) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
+  const priorUrgency = (c.messages ?? []).some(m => m.role === "user" && /(?:leav(?:e|ing)|going back home|mov(?:e|ing) back|flying home|relocat(?:e|ing)|visa cancel).{0,140}(?:sell|car)|(?:sell|car).{0,140}(?:this wee[k|l]|urgent|asap|before (?:i|we) leave)/i.test(m.content));
+  if (!(updates.sell_timeline || c.sell_timeline || priorUrgency) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
   if (!state.proposedDate) return end(answer(arrival()), "time", "visit_proposed");
   return end(answer(`What time would you like to come on ${appointmentDay(state.proposedDate)}?`), "exact_time", "visit_proposed");
 }
