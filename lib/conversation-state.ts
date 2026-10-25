@@ -364,8 +364,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const apology = /^(?:sorry|apologies|my apologies|sorry i was busy|sorry was busy|i was busy)[!. ]*$/i.test(text);
     const wantsBooking = explicitBookingNow || /^(?:book|booking|inspection|appointment|free inspection|book appointment|book inspection|i want to book|i prefer inspection)[.! ]*$/i.test(text);
     const wantsCallback = /\b(?:call me|call back|callback|team.*call|team.*contact|prefer.*call|want.*call|phone me)\b/i.test(text) || /^(?:call|phone call|team call|have them call|i prefer a call)[.! ]*$/i.test(text);
-    if (wantsBooking) state.consultAction = "booking";
-    else if (wantsCallback) state.consultAction = "callback";
+    const agreesToInspection = state.question === "consult_inspection" && /^(?:yes|yeah|yep|sure|ok|okay|please|sounds good|lets do it|let us do it)[!. ]*$/i.test(text);
+    const objectsToInspection = refusesVisitForPrice(text) || (state.question === "consult_inspection" && /\b(?:no|not yet|not now|not ready|dont want|do not want|cannot|cant|prefer.*call|first.*price|before.*price)\b/i.test(text));
+    if (wantsBooking || agreesToInspection) state.consultAction = "booking";
+    else if (wantsCallback || objectsToInspection) state.consultAction = "callback";
     const method = saleMethod(text);
     if (method) {state.salesMethod = method; updates.sales_inquiry = method;}
     if (refusesVisitForPrice(text)) {state.visitDeclinedForPrice = true; note("PRICE FIRST: Customer declined inspection");}
@@ -373,7 +375,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (firstConsultation) state.consultExplained = true;
     if (apology) return end(["No problem at all! 😊","We can book a free inspection appointment, or have our purchasing team call you to discuss your car and selling options.","Which would you prefer?"].join(String.fromCharCode(10,10)), "consult_choice", "collecting");
     if (missing.length) {
-      const intro = firstConsultation ? ["I understand you would like to explore the price before visiting.", METHOD_EXPLANATION, "I will forward your information to our purchasing team so they can contact you personally to discuss your car and the available selling options."] : [];
+      const intro = firstConsultation ? ["I understand you would like to explore the price before visiting.", METHOD_EXPLANATION, "The best way to receive an accurate final offer is to book a free inspection. Once we have inspected your car, our purchasing team can confirm the offer. When could you bring your car in?"] : [];
       return end([...intro,"To complete your car details, could you please share "+missing.join(", ")+"?"].join(String.fromCharCode(10,10)), "consult_details", "collecting", "lead");
     }
     const customerName = updates.name || c.name;
@@ -388,8 +390,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       note("CALL BACK: Future seller; phone "+number+"; vehicle "+carSummary);
       return end("Thank you, "+customerName+". I have recorded "+number+" for our purchasing team to call you about your "+carSummary+". No inspection has been booked.", "", "team_accepted", "lead");
     }
-    if (!state.consultAction) return end(["Thank you, "+customerName+". I have your car details: "+carSummary+".","Would you prefer to book a free inspection appointment, or have our purchasing team call you first?"].join(String.fromCharCode(10,10)), "consult_choice", "collecting", "lead");
+    if (!state.consultAction) return end(["Thank you, "+customerName+". I have your car details: "+carSummary+".","The best way to receive an accurate final offer is through a free inspection. When could you bring your car in?"].join(String.fromCharCode(10,10)), "consult_inspection", "collecting", "lead");
     if (state.consultAction === "callback") {
+      note("INSPECTION DECLINED: Customer prefers discussion first; purchasing team callback requested");
       const contact = String(c.phone||"");
       if (!uaeNumber(contact)) {
         state.awaitingUaeCallbackNumber = true;
