@@ -95,4 +95,21 @@ assert(/Tuesday/i.test(lateReply.reply),"Monday after-hours must offer Tuesday")
 const earlyReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T22:30:00Z"));
 assert(/today/i.test(earlyReply.reply),"Tuesday after midnight should offer today");
 
+// Real customer failures must remain blocked by every production build.
+const priceSeller={make:"Toyota",model:"Camry",year:"2008",mileage:"300000",specs:"GCC",sell_timeline:"Leaving next month",messages:[]};
+const priceFirst=turn(priceSeller,"How much you can give");
+assert(/cash purchase|cash deal/i.test(priceFirst.reply),"Price question ignored");
+assert(!/may i have your name/i.test(priceFirst.reply),"Price question overridden by name");
+const priceAgain=turn(priceSeller,"Price");
+assert(!/may i have your name/i.test(priceAgain.reply),"Repeated price request overridden by name");
+const angry=turn(priceSeller,"Are you stupid");
+assert(/sorry/i.test(angry.reply)&&!/may i have your name/i.test(angry.reply),"Customer frustration ignored");
+const paused={messages:[]};
+const pause=turn(paused,"I'm busy now I'll get back to you");
+assert(pause.state.status==="customer_will_contact"&&!/make|model|year/i.test(pause.reply),"Pause intent ignored");
+const buyer={messages:[]};
+const buying=turn(buyer,"Do you have Sonata 2017?");
+assert(/sales team/i.test(buying.reply),"Buyer intent not recognized");
+const buyerFollow=turn(buyer,"I am looking to buy instead sir");
+assert(!/mileage|gcc specs|planning to sell/i.test(buyerFollow.reply),"Buyer redirected into seller flow");
 console.log("Kaya conversation stress checks passed:",assertions);
