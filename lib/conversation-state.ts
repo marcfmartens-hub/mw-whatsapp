@@ -265,6 +265,18 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // Booking-first: ask each optional field once, then move forward.
   // This is persisted with the conversation and does not reset on unrelated replies.
   const asked = state.askedFields ?? {};
+  // Existing live chats may predate this tracker. Recover already-asked fields
+  // from Kaya's prior messages so deployment does not restart questions.
+  for (const message of c.messages ?? []) {
+    if (message.role !== "assistant") continue;
+    const spoken = message.content.toLowerCase();
+    if (/what car|car's (?:make|model)|model and year|make and model/.test(spoken)) asked.vehicle = true;
+    if (/what's the mileage|how many kilometres|mileage on the car/.test(spoken)) asked.mileage = true;
+    if (/is it gcc specs|gcc specs, non-gcc/.test(spoken)) asked.specs = true;
+    if (/outstanding loan|does the car have a loan/.test(spoken)) asked.loan = true;
+    if (/outstanding balance|how much is left on the loan/.test(spoken)) asked.balance = true;
+    if (/when are you planning to sell/.test(spoken)) asked.sell = true;
+  }
   const askOnce = (key: string, reply: string): Turn | null => {
     if (asked[key]) return null;
     asked[key] = true;
