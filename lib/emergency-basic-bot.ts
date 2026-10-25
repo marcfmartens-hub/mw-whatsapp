@@ -2,7 +2,7 @@ import { type Conversation, updateConversation, getConversation } from "./supaba
 import { sendWhatsAppMessage } from "./meta";
 import { extractVehicleInfo } from "./claude";
 import { createBiginContact, moveLeadToCallBack } from "./bigin";
-import { slotValid, LOCATION, dateFromText, timeFromText } from "./conversation-state";
+import { slotValid, LOCATION, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
 
 export const EMERGENCY_MODE = "Emergency Chat Bot V1";
 const SCHEDULE_QUESTION = "Which day and time do you want for the inspection?";
@@ -18,7 +18,7 @@ export function inspectionTime(time:string):string {
 // Keep location and contact information without appending the old opening-hours line.
 const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
-type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[] };
+type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean };
 const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
  return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
@@ -32,6 +32,28 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  // omit uncertainty; explicit specs and mileage answers must still be retained.
  const vehicleStage=["vehicle","contact","confirm"].includes(b.basicStep);
  const history=(c.messages||[]) as {role:string;content:string}[];
+ // Migrate old chats using the last meaningful question, even if a later bad
+ // reply restarted the questionnaire. Never discard their recorded facts.
+ if(!old.basicMode){
+   const assistants=history.filter(m=>m.role==="assistant");
+   const scheduling=[...assistants].reverse().find(m=>/what time|which day.*inspection|when.*bring/i.test(m.content));
+   const timeline=assistants.some(m=>/when.*planning to sell/i.test(m.content));
+   if(old.status==="booked")b.basicStep="done";
+   else if(old.proposedDate||scheduling){b.basicStep="daytime";b.proposedDate=old.proposedDate||dateFromText(scheduling?.content||"",now);b.proposedTime=old.proposedTime;}
+   else if(timeline)b.basicStep="timeline";
+ }
+ let recovered:any={make:c.make,model:c.model,year:c.year};
+ let previousQuestion="";
+ for(const entry of [...history,{role:"user",content:text}]){
+   if(entry.role==="assistant"){previousQuestion=entry.content;continue;}
+   recovered=supportedVehicle(entry.content,recovered,{},/mileage/i.test(previousQuestion)?"mileage":"");
+   // A short year after a year question is a year, never an odometer reading.
+   if(/year/i.test(previousQuestion)&&/^\s*(?:19|20)?\d{2}\s*$/.test(entry.content)){
+     const n=Number(entry.content.trim());if(n>=90&&n<=99)recovered.year=String(1900+n);
+     else if(n>=0&&n<=new Date(now).getUTCFullYear()%100+1)recovered.year=String(2000+n);
+   }
+ }
+ for(const k of ["make","model","year"])if(recovered[k])u[k]=recovered[k];
  const userTexts=[...history.filter(m=>m.role==="user").map(m=>m.content),text];
  for(const answer of userTexts){
    if(/\b(non[ -]?gcc|not gcc|american specs|european specs|japanese specs|korean specs|chinese specs)\b/i.test(answer))u.specs="Non-GCC";
@@ -43,7 +65,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  }
  // An explicit field extracted from this message takes precedence over older history,
  // except that an uncertain specs answer must never be overwritten by a guess.
- for(const k of ["make","model","year","mileage","specs"])if(fields[k])u[k]=fields[k];
+ for(const k of ["make","model","year","mileage","specs"])if(fields[k]&&!u[k])u[k]=fields[k];
  if(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(text))u.specs="Unknown";
  const value=(k:string)=>u[k]||c[k];
  const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
@@ -104,15 +126,14 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  else if(b.basicStep==="vehicle"){
    if(book){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
    else if(/\b(today|tomorrow|week|month|asap|urgent|soon|now)\b/i.test(msg)&&!/\b(km|kms)\b/i.test(msg)){
-     u.sell_timeline=msg.slice(0,200);b.basicStep="choice";reply="Would you prefer to book a free inspection or have our team call you?";
+     u.sell_timeline=msg.slice(0,200);b.basicStep="daytime";reply=SCHEDULE_QUESTION;
    }else nextVehicle();
  }
  else if(b.basicStep==="timeline"){
-   if(book){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
-   else {
-     if(/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|ready|day|sell|selling)\b/i.test(msg))u.sell_timeline=msg.slice(0,200);
-     b.basicStep="choice";reply="Would you prefer to book a free inspection or have our team call you?";
-   }
+   if(book||/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|immediately|ready|day|sell|selling)\b/i.test(msg)){
+     if(!book)u.sell_timeline=msg.slice(0,200);
+     b.basicStep="daytime";reply=SCHEDULE_QUESTION;
+   }else callback();
  }
  else if(b.basicStep==="choice"){
    if(book||yes||date||time){
@@ -125,8 +146,13 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}
  }
  else if(b.basicStep==="daytime"){
-   if(date)b.proposedDate=date;if(time)b.proposedTime=time;
-   if(!date&&!time){if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}}
+   const immediate=/^(now|immediately|asap)[.!]?$/i.test(msg);
+   if(!immediate){if(date)b.proposedDate=date;if(time)b.proposedTime=time;}
+   if(immediate){
+     if(b.scheduleClarified)callback();
+     else {b.scheduleClarified=true;reply=b.proposedDate?"What time do you want for the inspection on "+inspectionDay(b.proposedDate)+"?":SCHEDULE_QUESTION;}
+   }
+   else if(!date&&!time){callback();}
    else if(!b.proposedDate)reply="Which day do you want for the inspection?";
    else if(!b.proposedTime)reply="What time do you want for the inspection?";
    else if(!slotValid(b.proposedDate,b.proposedTime,now)){b.proposedDate=undefined;b.proposedTime=undefined;reply="That time isn't available. "+SCHEDULE_QUESTION;}
