@@ -295,7 +295,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const statements = [updates.sell_timeline, c.sell_timeline, ...(c.messages ?? []).filter(m => m.role === "user").map(m => m.content)].filter(Boolean) as string[];
     const weekdayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
     for (const statement of statements) {
-      const match = statement.match(/\\b(?:sell|selling|sale|sold)\\b.{0,90}?\\b(?:on\\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b/i);
+      const match = statement.match(/\b(?:sell|selling|sale|sold)\b.{0,90}?\b(?:on\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
       if (!match) continue;
       const wanted = weekdayNames.indexOf(match[1].toLowerCase());
       const offset = (wanted - day + 7) % 7 || 7;
