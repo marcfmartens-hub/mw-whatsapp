@@ -172,7 +172,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       !c.specs ? "GCC or non-GCC specs" : "",
     ].filter(Boolean);
     const reply = repeated
-      ? "I understand the details are in the link, but I still can't open or read it here. Please type the car details in this chat so I can help you."
+      ? "I understand the details are in the link, but I still can't open external links or read the advertisement here. Please type the car details in this chat so I can help you."
       : "Thanks for sharing. I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" + (missing.length ? " (" + missing.join(", ") + ")" : "") + "?";
     return end(reply, state.question || (!c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : "specs"), "collecting");
   }
