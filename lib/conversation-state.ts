@@ -38,6 +38,8 @@ export function validName(value: unknown): value is string {
 }
 const title = (s: string) => s.toLowerCase().replace(/\b[a-z]/g, x => x.toUpperCase());
 export function findName(text: string, c: Chat, question: string): string | undefined {
+  // Reject conversational questions/statements before trying to infer a name.
+  if (/\b(?:robot|bot|virtual assistant|artificial intelligence)\b/i.test(text) || /^(?:you(?:'re| are)|are you|you're|youre)\b/i.test(text)) return validName(c.name) ? c.name : undefined;
   const explicit = text.match(/\b(?:my name(?: is)?|name is|call me|this is|i am|i'm|car under)\s+([a-z][a-z'-]*(?:[ \t]+[a-z][a-z'-]*){0,3})/i)?.[1];
   if (explicit && validName(explicit)) return title(explicit);
   if (validName(c.name)) return c.name;
@@ -159,7 +161,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     const greeting = hour < 12 ? "Good morning!" : hour < 17 ? "Good afternoon!" : "Good evening!";
     return end(greeting + " Which car are you selling (make, model and year)?", "vehicle", "collecting");
   }
-  if (/\\b(?:you(?:'re| are)|ur|u r)\\s+(?:a\\s+)?(?:robot|bot|ai)\\b|\\bare you (?:a )?(?:robot|bot|ai)\\b/i.test(text)) {
+  if (/\b(?:you(?:'re| are)|ur|u r)\s+(?:a\s+)?(?:robot|bot|ai)\b|\bare you (?:a )?(?:robot|bot|ai)\b/i.test(text)) {
     return end("I'm Kaya, Mister Wheelz's virtual assistant 😊 I can help you sell your car quickly and arrange a free car inspection. Which car are you selling (make, model and year)?", "vehicle", "collecting");
   }
   const name = findName(text, c, question);
