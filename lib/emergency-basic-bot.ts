@@ -2,6 +2,7 @@ import { type Conversation, updateConversation, getConversation } from "./supaba
 import { sendWhatsAppMessage } from "./meta";
 import { extractVehicleInfo } from "./claude";
 import { createBiginContact, moveLeadToCallBack } from "./bigin";
+import { CAR_MAKES } from "./carData";
 import { slotValid, LOCATION, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
 
 export const EMERGENCY_MODE = "Emergency Chat Bot V1";
@@ -24,6 +25,23 @@ const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
  return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|now|asap|immediately|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
 };
+// Match brand spellings deterministically before the optional AI extractor.
+// Customers commonly write Mercedes, VW, Skoda or LandRover rather than canonical labels.
+export function emergencyVehicle(text:string,known:any={},question=""){
+ let normalized=text;
+ const escape=(s:string)=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+ for(const [alias,canonical]of Object.entries(CAR_MAKES)){
+   if(alias.toLowerCase()===canonical.toLowerCase()||normalized.toLowerCase().includes(canonical.toLowerCase()))continue;
+   normalized=normalized.replace(new RegExp("\\b"+escape(alias)+"\\b","gi"),canonical);
+ }
+ normalized=normalized.replace(/\bvw\b/gi,"Volkswagen");
+ const result=supportedVehicle(normalized,known,{},question);
+ if(result.make==="Mercedes-Benz"){
+   const code=normalized.match(/\b(?:CLA|CLS|GLA|GLB|GLC|GLE|GLS|[ABCEGS])\s?\d{2,3}\b/i)?.[0];
+   if(code&&!known.model)result.model=code.replace(/\s/g,"").toUpperCase();
+ }
+ return result;
+}
 export function emergencyInput(text:string){
  const kinds:string[]=[];
  if(/\[(?:photo|image)\]/i.test(text))kinds.push("pictures");
@@ -58,7 +76,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  let previousQuestion="";
  for(const entry of [...history,{role:"user",content:text}]){
    if(entry.role==="assistant"){previousQuestion=entry.content;continue;}
-   recovered=supportedVehicle(entry.content,recovered,{},/mileage/i.test(previousQuestion)?"mileage":"");
+   recovered=emergencyVehicle(entry.content,recovered,/mileage/i.test(previousQuestion)?"mileage":"");
    // A short year after a year question is a year, never an odometer reading.
    if(/year/i.test(previousQuestion)&&/^\s*(?:19|20)?\d{2}\s*$/.test(entry.content)){
      const n=Number(entry.content.trim());if(n>=90&&n<=99)recovered.year=String(1900+n);
@@ -85,7 +103,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const greeting=/^(?:(?:hi+|hello+|hey+)(?: there| kaya)?|hiya|howdy|salaam|salam|good\s+(?:morning|afternoon|evening|day))[\s!.,👋😊]*$/i.test(msg);
  const sellingTime=msg.match(/\b(next month|this month|next week|this week|end of (?:the |this )?month|in (?:\d+|a|one|two|three|four) (?:days?|weeks?|months?)|today|tomorrow|asap|urgent|soon|now|immediately)\b/i)?.[0];
  if(sellingTime&&(["name","vehicle","timeline"].includes(b.basicStep)||/\b(sell|selling)\b/i.test(msg)))u.sell_timeline=sellingTime;
- const sellerIntent=/\b(sell|selling|car|vehicle)\b/i.test(msg) || !!supportedVehicle(msg,{},{}).make;
+ const sellerIntent=/\b(sell|selling|car|vehicle)\b/i.test(msg) || !!emergencyVehicle(msg).make;
  const priceMatch=msg.match(/\b(?:asking(?: price)?|selling price|my price(?: is)?|looking for|want)\s*(?:is\s*)?(?:aed|dhs?|dirhams?)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?\b/i);
  const priceQuestion=/\?|\b(how much|what.*(?:price|offer)|can you|will you|would you|worth|valuation|estimate|your offer|you pay|you give)\b/i.test(msg);
  const statedPrice=!!priceMatch&&!priceQuestion;
@@ -134,7 +152,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    }else if(!value("make")&&!b.askedVehicle!.includes("make")){
      b.askedVehicle!.push("make");reply="Which car are you planning to sell?";
    }else nextVehicle();
-   reply="No problem, we can help you with that. "+reply;
+   reply=(/\b(sell|selling)\b/i.test(msg)?"No problem, we can help you with that. ":"Ok, nice. ")+reply;
  };
  const callback=()=>{
    b.basicStep="callback";

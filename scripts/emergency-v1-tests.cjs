@@ -160,3 +160,12 @@ r=turn(c,'How much will you pay?');assert.equal(r.state.basicStep,'objection_cho
 // A price statement alone during scheduling does not become a callback.
 c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Asking 75k');assert.equal(r.state.basicStep,'daytime');assert.equal(r.action,'collecting');assert.doesNotMatch(r.reply,/virtual assistant/);
 console.log('Stated asking prices, retained mileage, objection choice, repeated objections and resumed bookings passed');
+
+// First answer may be the brand/model, with common brand aliases and no name or sell verb.
+for(const [input,make,model]of [['Mercedes s500','Mercedes-Benz','S500'],['Mercedes C200','Mercedes-Benz','C200'],['BMW X5','BMW','X5'],['Toyota Camry','Toyota','Camry'],['Nissan Patrol','Nissan','Patrol'],['VW Golf','Volkswagen','Golf']]){
+ c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name please?'}]};
+ r=turn(c,input);assert.equal(c.make,make);assert.equal(c.model,model);assert.equal(c.name,undefined);assert.equal(r.reply,'Ok, nice. What year is it?');assert.equal(r.state.basicStep,'vehicle');
+ r=turn(c,'2020');assert.equal(r.reply,'What is the mileage?');turn(c,'50000 km');turn(c,'GCC');turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
+}
+c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name?'}]};r=turn(c,'Mercedes S500 2020');assert.equal(c.year,'2020');assert.equal(r.reply,'Ok, nice. What is the mileage?');
+console.log('First-answer vehicle recognition: aliases, Mercedes variants, missing-field checks and complete bookings passed');
