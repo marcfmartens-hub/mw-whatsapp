@@ -253,10 +253,6 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (nextDay === 0) { nextDay = 1; daysAhead++; }
   const when = daysAhead === 0 ? "today" : daysAhead === 1 ? "tomorrow" : "Monday";
   const openAt = nextDay === 5 ? "12 PM" : "10 AM";
-  const arrival = () => {
-    const target=iso(new Date(+dubaiLocalTime+daysAhead*86400e3));
-    return (open?"":"We're currently closed. ")+inspectionExplanation+" What time can you bring your car "+(daysAhead?"on "+appointmentDay(target):"today")+"?";
-  };
   const appointmentDay = (date: string) => {
     const d = new Date(date + "T12:00:00Z");
     const label = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()];
@@ -267,6 +263,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     return "next week "+label+" "+n+suffix+" of "+d.toLocaleString("en-GB",{month:"long",timeZone:"UTC"});
   };
   const inspectionExplanation = "Before buying your car, we need a quick free inspection to verify its condition. If everything is in order and we agree on a price, we can buy it and pay cash the same day.";
+  const arrival = () => {
+    const target = iso(new Date(+dubaiLocalTime + daysAhead * 86400e3));
+    const sundayNotice = day === 0 || (day === 6 && daysAhead > 0) ? "We're closed on Sundays. " : "";
+    const closedNotice = !open && !sundayNotice ? "We're currently closed. " : "";
+    return sundayNotice + closedNotice + inspectionExplanation + " What time can you bring your car " + (daysAhead ? "on " + appointmentDay(target) : "today") + "?";
+  };
   const followUp = () => (updates.sell_timeline || c.sell_timeline || state.askedFields?.sell) ? arrival() : "When are you planning to sell your car?";
   if (/tomorrow is sunday|tomorrow's sunday|sunday is closed|closed on sunday/i.test(text)) {
     state.proposedDate=undefined;state.proposedTime=undefined;state.customerAgreedSlot=false;
@@ -288,6 +290,11 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const dayPart = text.match(/\b(morning|afternoon|evening)\b/i)?.[1]?.toLowerCase() as FlowState["part"];
   if (dayPart) state.part = dayPart;
   if (date && state.proposedDate && date !== state.proposedDate) { state.proposedTime = undefined; state.customerAgreedSlot = false; state.timeMin = undefined; state.timeMax = undefined; }
+  if (date && new Date(date + "T12:00:00Z").getUTCDay() === 0) {
+    state.proposedDate = undefined; state.proposedTime = undefined; state.customerAgreedSlot = false;
+    const monday = iso(new Date(Date.parse(date + "T12:00:00Z") + 86400e3));
+    return end(answer("We're closed on Sundays. " + inspectionExplanation + " What time can you bring your car on " + appointmentDay(monday) + "?"), "time", "visit_proposed");
+  }
   if (date) state.proposedDate = date;
   if (question === "confirm" && YES.test(text)) { date = state.proposedDate; time = state.proposedTime; }
   if (time) {
