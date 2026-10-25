@@ -1,3 +1,4 @@
+import {futureSellerPriceInquiry,refusesVisitForPrice} from "./future-seller";
 export interface Chat { phone: string; last_message_at?:string|null; name?: string | null; step?: number; appointment_date?: string | null; appointment_time?: string | null; bigin_pushed_at?: string | null; car_conditions?: string | null; messages?: {role: string; content: string}[] | null }
 export interface Finding { code: string; severity: "warning" | "critical"; message: string; evidence: string; suggestion: string }
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -58,6 +59,17 @@ export function detect(chat: Chat) {
     const last=preceding[preceding.length-1]??"";
     if (/\b(?:i'?ll|i will|im|i'?m)\s+call\s+you\b/i.test(last) && !/\bcall me|please call|call back\b/i.test(last)) add("callback_direction", "critical", "Kaya may have reversed who will call", last+" → "+m.content, "Share our details; promise a callback only after an explicit team-call request.");
   }
+  for(let i=0;i<messages.length;i++){
+    const m=messages[i];
+    if(m.role!=="assistant")continue;
+    const preceding=messages.slice(0,i).filter(x=>x.role==="user").map(x=>x.content);
+    const latest=preceding[preceding.length-1]||"";
+    const prior=preceding.slice(0,-1);
+    if((futureSellerPriceInquiry(latest,prior)||refusesVisitForPrice(latest)&&prior.some(x=>/\\b(?:december|next month|in \\d+ months?|not ready)\\b/i.test(x)))&&/what time.{0,100}(?:bring|come)|what day.{0,80}(?:inspection|bring)|book.{0,50}(?:monday|tomorrow)/i.test(m.content)){
+      add("future_seller_booking_pressure","critical","Kaya pushed an inspection despite a future seller's price concern",latest+" → "+m.content,"Offer direct cash purchase and free consignment, retain known vehicle details and offer callback without requiring a visit.");
+      break;
+    }
+  }
   const lastUser=users[users.length-1]?.content??"";
   const declined=/\b(not ready|no need to book|no thanks|i'?ll let you know)\b/i.test(lastUser);
   const handover=/\b(team|someone)\b.{0,45}\b(call you|contact you|be in touch|get back)/i.test(assistants[assistants.length-1]?.content??"");
@@ -73,6 +85,8 @@ export const FIXTURES: { name: string; chat: Chat; codes: string[] }[] = [
   {name:"Repeated question",chat:{phone:"test",messages:[{role:"assistant",content:"What time would you like to come?"},{role:"user",content:"3 PM"},{role:"assistant",content:"What time would you like to come?"}]},codes:["repeated_reply"]},
   {name:"Specs unknown must not be asked again",chat:{phone:"test",messages:[{role:"assistant",content:"Is it GCC specs, non-GCC, or are you unsure?"},{role:"user",content:"Unsure"},{role:"assistant",content:"Is it GCC specs?"}]},codes:["question_after_unknown"]},
   {name:"Paraphrased repeated year question",chat:{phone:"test",messages:[{role:"assistant",content:"What year is the car?"},{role:"user",content:"Annasamy Sankar"},{role:"assistant",content:"Could you type the car's year?"}]},codes:["question_loop"]},
+  {name:"Future seller must not be pushed to book",chat:{phone:"test",messages:[{role:"user",content:"I am leaving in December but first want to know how much the car is worth"},{role:"assistant",content:"What time can you bring the car on Monday?"}]},codes:["future_seller_booking_pressure"]},
+  {name:"Future seller consultation is correct",chat:{phone:"test",messages:[{role:"user",content:"I am leaving in December and want to know the price"},{role:"assistant",content:"We offer direct cash sale and free consignment. Would you prefer a callback?"}]},codes:[]},
   {name:"Successful booking stays unflagged",chat:{phone:"test",name:"Ali",appointment_date:"2026-10-17",appointment_time:"15:00",bigin_pushed_at:"2026-10-15",messages:[{role:"user",content:"Book Saturday at 3 PM"},{role:"assistant",content:"You're booked for Saturday at 3 PM."}]},codes:[]},
 ];
 export function regression() { return FIXTURES.map(f=>({name:f.name,passed:JSON.stringify(detect(f.chat).findings.map(x=>x.code).sort())===JSON.stringify([...f.codes].sort())})); }
