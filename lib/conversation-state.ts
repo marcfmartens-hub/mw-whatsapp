@@ -1,5 +1,6 @@
 import { CAR_MAKES, CAR_MODELS } from "./carData";
 import { specsStatement, mulkiyaAnswer, MULKIYA_QUESTION } from "./specs";
+import { understandCustomer, extractContext, decideNextResponse, type ContextMemory } from "./conversation-quality";
 
 export type Status = "collecting" | "visit_proposed" | "awaiting_confirmation" | "booked" | "default_pending" | "reconfirmation" | "team_accepted" | "customer_will_contact" | "closed";
 export const STATUS_LABELS: Record<Status, string> = {
@@ -16,6 +17,7 @@ export type FlowState = {
   pendingTask?: { date: string; time: string; request: string };
   customerAgreedSlot?: boolean;
   askedFields?: Record<string, boolean>;
+  contextMemory?: ContextMemory;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
 export type Turn = { updates: Record<string, any>; state: FlowState; reply: string; confirm?: boolean; crm?: "lead" | "booking" | "change"; defaultDate?: string };
@@ -139,11 +141,19 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const previous = lastAssistant(c), local = new Date(+now + 4 * 3600e3);
   const inferredQuestion = /your name/i.test(previous) ? "name" : /outstanding balance/i.test(previous) ? "balance" : /any.*loan|mortgage on/i.test(previous) ? "loan" : /mileage/i.test(previous) ? "mileage" : /gcc.*right|specs.*\?/i.test(previous) ? "specs" : /what exact time/i.test(previous) ? "exact_time" : /what time/i.test(previous) ? "time" : /personal call|team to contact/i.test(previous) ? "callback" : undefined;
   const question = state.question ?? inferredQuestion ?? "";
+  // Stage 1: understand the latest message in context; stage 2: extract durable customer context.
+  const interpretation = understandCustomer(text, question);
+  state.contextMemory = extractContext(state.contextMemory, interpretation);
   const updates: Record<string, any> = {};
   const end = (reply: string, q?: string, status?: Status, crm?: Turn["crm"]): Turn => {
     if (q !== undefined) state.question = q;
     if (status) state.status = status;
     const booked = state.status === "booked";
+    // Stages 3–5: remember, decide and validate without changing booking or CRM decisions.
+    const reviewed = decideNextResponse({ proposed: reply, previous, customer: text, question: q,
+      status: state.status, memory: state.contextMemory ?? {}, interpretation });
+    reply = reviewed.reply;
+    state.contextMemory = reviewed.memory;
     updates.flow_state = state;
     updates.step = booked || ["default_pending", "team_accepted", "customer_will_contact", "closed"].includes(state.status) ? 8 : ["visit_proposed", "awaiting_confirmation", "reconfirmation"].includes(state.status) ? 7 : q === "name" ? 1 : q === "vehicle" ? 2 : q === "mileage" || q === "specs" ? 4 : q === "loan" || q === "balance" ? 5 : 6;
     updates.appointment_date = booked ? state.proposedDate : null;
