@@ -10,6 +10,7 @@ export type ContextMemory = {
   acknowledgedUrgency?: boolean;
   repeatedQuestions?: number;
   lastCustomerIntent?: string;
+  lastPrompts?: string[];
 };
 export type Interpretation = {
   urgency: boolean;
@@ -56,7 +57,8 @@ export function decideNextResponse(args:{
   if(["booked","default_pending","reconfirmation","team_accepted","customer_will_contact","closed"].includes(status)
     ||/\b(?:non-gcc|mulkiya|engine.number|not available|outside an available|please confirm before i book|you're booked|i've booked)\b/i.test(proposed))
     return {reply:proposed,memory,reason:"protected_business_rule"};
-  const duplicate=sameQuestion(previous,proposed);
+  const recent=memory.lastPrompts??[];
+  const duplicate=sameQuestion(previous,proposed)||recent.some(p=>sameQuestion(p,proposed));
   if(duplicate)memory.repeatedQuestions=(memory.repeatedQuestions||0)+1;
   else memory.repeatedQuestions=0;
   let reply=proposed;
@@ -90,5 +92,7 @@ export function decideNextResponse(args:{
     reply="Thanks. What day and time would you like to come to our Al Quoz branch for the free inspection?";
     reason="prevent_unconsented_booking";
   }
+  // Compare against several recent assistant replies to stop A-B-A-B loops.
+  memory.lastPrompts=[...recent,reply].slice(-6);
   return {reply,memory,reason};
 }
