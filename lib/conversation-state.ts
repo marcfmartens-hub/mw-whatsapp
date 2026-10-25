@@ -187,6 +187,13 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const contextualIntro = situation && !alreadyAcknowledged ? situation : "";
 
   const prefix: string[] = contextualIntro ? [contextualIntro] : [];
+  // When the seller answers a vehicle question with their situation instead,
+  // explicitly return to the missing vehicle rather than jumping to mileage.
+  if (contextualIntro && !vehicle.make && !wasBooked) {
+    state.askedFields = { ...(state.askedFields ?? {}), vehicle: true };
+    return end(contextualIntro + " Please let me know which car you're selling (make, model and year).", "vehicle", "collecting");
+  }
+
   if (LOCATION_REQUEST.test(text)) prefix.push(LOCATION);
   if (/\b(free|fees?|charges?|commission|cost.*inspection)\b/i.test(text)) prefix.push("The inspection is free, takes 10–15 minutes, and there's no obligation to sell.");
   if (/\b(number|phone number|call you|call them)\b/i.test(text)) prefix.push(`Our customer service number is ${CONTACT_NUMBER}.`);
