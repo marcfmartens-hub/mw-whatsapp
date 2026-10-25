@@ -74,8 +74,8 @@ const accepted=turn(urgent,"Ok");
 assert(accepted.state.status==="team_accepted","Accepted callback not handed over");
 const late={name:"Daniel",make:"BMW",model:"X5",year:"2023",mileage:"Unknown",specs:"GCC",loan:"No",sell_timeline:"Now",messages:[]};
 const lateReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T19:30:00Z"));
-assert(/tomorrow at 10 AM/i.test(lateReply.reply),"After-hours next day wording incorrect");
+assert(/Monday/i.test(lateReply.reply) && !/Sunday/i.test(lateReply.reply),"After-hours must offer Monday, not Sunday");
 const earlyReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T22:30:00Z"));
-assert(/today/i.test(earlyReply.reply),"After midnight should refer to today");
+assert(/Monday/i.test(earlyReply.reply) && /closed on Sundays/i.test(earlyReply.reply),"Sunday must offer Monday and explain closure");
 
 console.log("Kaya conversation stress checks passed:",assertions);
