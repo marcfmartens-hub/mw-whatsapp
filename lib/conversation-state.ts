@@ -220,13 +220,24 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (amount && !/\b(?:km|kms|model|year|fines)\b/i.test(text) && !(Number(amount[1]) >= 1980 && Number(amount[1]) <= 2035 && !amount[2])) updates.mortgage_amount = String(Number(amount[1].replace(/,/g, "")) * (amount[2] ? 1000 : 1));
   }
   if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
-  if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("All our inspections take place at our branch in Al Quoz. It takes about 10–15 minutes, and if we agree on the price, we can buy your car and pay cash straight away. What time can you bring your car?"), "time", wasBooked ? "reconfirmation" : "collecting");
+  const local = new Date(now.getTime() + 4 * 3600000);
+  const day = local.getUTCDay(), hour = local.getUTCHours();
+  const open = day !== 0 && hour >= (day === 5 ? 12 : 10) && hour < 19;
+  let nextDay = day, daysAhead = 0;
+  if (day === 0 || hour >= 19) { nextDay = (day + 1) % 7; daysAhead = 1; }
+  if (nextDay === 0) { nextDay = 1; daysAhead++; }
+  const when = daysAhead === 0 ? "today" : daysAhead === 1 ? "tomorrow" : "Monday";
+  const openAt = nextDay === 5 ? "12 PM" : "10 AM";
+  const arrival = () => open ? "What time can you bring your car today?" : `We're currently closed, but we open ${daysAhead ? "again " + when + " at" : "at"} ${openAt}. What time can you bring your car ${when}?`;
+  const followUp = () => (updates.sell_timeline || c.sell_timeline || state.askedFields?.sell) ? arrival() : "When are you planning to sell your car?";
+  if (/\b(?:not sure|don't know|cannot say|can't say) when i can (?:come|bring)/i.test(text)) return end(answer("No problem! Would you prefer that our team gives you a call tomorrow to arrange a convenient time?"), "callback", "collecting", "lead");
+  if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("All our inspections take place at our branch in Al Quoz. It takes about 10–15 minutes, and if we agree on the price, we can buy your car and pay cash straight away. ${followUp()}"), "time", wasBooked ? "reconfirmation" : "collecting");
   if (/\b(?:call ?back|call me|arrange a call|call tomorrow|call on tomorrow|contact me tomorrow)\b/i.test(text)) {
     state.consent = "accepted"; note("Callback requested: " + text);
     return end(answer("Of course. Our purchasing team can call you on this WhatsApp number."), "", "team_accepted", "lead");
   }
   if (/\b(?:not in (?:a )?hurry|next month|in 30 days|(?:will|i'?ll) (?:check|update|inform)|let me (?:think|check)|i'?ll let you know|once i'?m free|when i'?m ready)\b/i.test(text)) return end(answer("No problem. When would you like to come for a free inspection?"), "time", "collecting");
-  if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) { state.priceRequests = (state.priceRequests ?? 0) + 1; return end(answer(`I understand that the price matters before you make the trip. The final offer follows the free 10–15 minute inspection, with no obligation to sell.${price ? " I've recorded your asking price for the team." : ""} ${state.priceRequests >= 2 ? CHOICE : "What time can you bring your car to our branch?"}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting"); }
+  if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) { state.priceRequests = (state.priceRequests ?? 0) + 1; return end(answer(`I understand that the price matters before you make the trip. The final offer follows the free 10–15 minute inspection, with no obligation to sell.${price ? " I've recorded your asking price for the team." : ""} ${state.priceRequests >= 2 ? CHOICE : "${followUp()}"}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting"); }
   if (question === "callback" && !YES.test(text) && !dateFromText(text, now) && !timeFromText(text, true)) return end(answer("No problem. Contact us when you're ready, or let me know if you would like a personal call."), "callback");
   // Explicit travel-time statements are not arrival commitments.
   if ((/\b(leav(?:e|ing)|depart|before|after|between|onwards)\b/i.test(text) || /\d\s*(?:am|pm)?\s+(?:to|and)\s+\d/i.test(text)) && /\d/.test(text)) { state.proposedTime = undefined; const range = text.match(/(?:between\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:to|and|[-–])\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/i); if (range) { const a = timeFromText(`${range[1]}:${range[2] ?? "00"}${range[3] || range[6] || ""}`, true), b = timeFromText(`${range[4]}:${range[5] ?? "00"}${range[6] || range[3] || ""}`, true); if (a && b) { state.timeMin = mins(a); state.timeMax = mins(b); } } const day = dateFromText(text, now); if (day) state.proposedDate = day; return end(answer(/leav|depart/i.test(text) ? "What time would you arrive at our branch? Our last inspection starts at 6:30 PM." : "What exact arrival time within that availability would you prefer?"), "exact_time", "visit_proposed"); }
