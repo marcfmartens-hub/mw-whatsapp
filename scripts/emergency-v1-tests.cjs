@@ -169,3 +169,26 @@ for(const [input,make,model]of [['Mercedes s500','Mercedes-Benz','S500'],['Merce
 }
 c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name?'}]};r=turn(c,'Mercedes S500 2020');assert.equal(c.year,'2020');assert.equal(r.reply,'Ok, nice. What is the mileage?');
 console.log('First-answer vehicle recognition: aliases, Mercedes variants, missing-field checks and complete bookings passed');
+
+// Sweep the entire registry instead of assuming the Mercedes fix covers other brands.
+const {CAR_MAKES,CAR_MODELS}=require('../lib/carData.ts');
+let brandCases=0;const failures=[];
+for(const [alias,make]of Object.entries(CAR_MAKES)){
+ for(const spelling of new Set([make,alias])){
+  const model=CAR_MODELS[make]?.[0];
+  for(const input of [spelling,model?spelling+' '+model:null].filter(Boolean)){
+   c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name?'}]};
+   r=turn(c,input);brandCases++;
+   if(c.make!==make||c.name||r.state.basicStep!=='vehicle'||/virtual assistant|callback/.test(r.reply)||(model&&input!==spelling&&c.model!==model))failures.push({input,expected:make,actual:c.make,model:c.model,reply:r.reply});
+  }
+ }
+}
+assert.deepEqual(failures,[]);console.log('All-brand registry sweep passed: '+brandCases+' brand and model cases');
+
+let modelCases=0;const modelFailures=[];
+for(const [make,models]of Object.entries(CAR_MODELS))for(const model of models){
+ c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name?'}]};
+ r=turn(c,make+' '+model);modelCases++;
+ if(c.make!==(CAR_MAKES[make]||make)||c.model!==model||c.name||r.state.basicStep!=='vehicle'||/virtual assistant|callback/.test(r.reply))modelFailures.push({make,model,actualMake:c.make,actualModel:c.model,reply:r.reply});
+}
+assert.deepEqual(modelFailures,[]);console.log('Complete model registry sweep passed: '+modelCases+' brand/model combinations');

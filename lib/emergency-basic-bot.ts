@@ -2,7 +2,7 @@ import { type Conversation, updateConversation, getConversation } from "./supaba
 import { sendWhatsAppMessage } from "./meta";
 import { extractVehicleInfo } from "./claude";
 import { createBiginContact, moveLeadToCallBack } from "./bigin";
-import { CAR_MAKES } from "./carData";
+import { CAR_MAKES, CAR_MODELS } from "./carData";
 import { slotValid, LOCATION, dateFromText, timeFromText, supportedVehicle } from "./conversation-state";
 
 export const EMERGENCY_MODE = "Emergency Chat Bot V1";
@@ -31,11 +31,19 @@ export function emergencyVehicle(text:string,known:any={},question=""){
  let normalized=text;
  const escape=(s:string)=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
  for(const [alias,canonical]of Object.entries(CAR_MAKES)){
-   if(alias.toLowerCase()===canonical.toLowerCase()||normalized.toLowerCase().includes(canonical.toLowerCase()))continue;
+   if(alias.toLowerCase()===canonical.toLowerCase()||new RegExp("(?<![a-z0-9])"+escape(canonical)+"(?![a-z0-9])","i").test(normalized))continue;
    normalized=normalized.replace(new RegExp("\\b"+escape(alias)+"\\b","gi"),canonical);
  }
  normalized=normalized.replace(/\bvw\b/gi,"Volkswagen");
  const result=supportedVehicle(normalized,known,{},question);
+ const brandOnly=Object.values(CAR_MAKES).find(make=>make.toLowerCase()===normalized.trim().toLowerCase());
+ if(brandOnly&&!known.make)result.make=brandOnly;
+ if(!result.make&&/\bseat\b/i.test(normalized)&&/\b(sell|selling)\b/i.test(normalized))result.make="SEAT";
+ const modelKey=Object.keys(CAR_MODELS).find(make=>(CAR_MAKES[make]||make)===result.make);
+ if(modelKey&&!known.model){
+   const model=[...CAR_MODELS[modelKey]].sort((a,b)=>b.length-a.length).find(model=>new RegExp("(?<![a-z0-9])"+escape(model)+"(?![a-z0-9])","i").test(normalized));
+   if(model)result.model=model;
+ }
  if(result.make==="Mercedes-Benz"){
    const code=normalized.match(/\b(?:CLA|CLS|GLA|GLB|GLC|GLE|GLS|[ABCEGS])\s?\d{2,3}\b/i)?.[0];
    if(code&&!known.model)result.model=code.replace(/\s/g,"").toUpperCase();
