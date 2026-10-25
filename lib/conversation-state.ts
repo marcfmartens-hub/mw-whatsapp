@@ -374,6 +374,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (hasFutureValuation && !c.sell_timeline) updates.sell_timeline = text;
     if (firstConsultation) state.consultExplained = true;
     if (apology) return end(["No problem at all! 😊","We can book a free inspection appointment, or have our purchasing team call you to discuss your car and selling options.","Which would you prefer?"].join(String.fromCharCode(10,10)), "consult_choice", "collecting");
+    const priceFollowup = /how much|what.*offer|offer.*price|price first|give.*price/i.test(text);
+    if (missing.length && priceFollowup && !firstConsultation) {
+      note("VALUATION QUESTION: Purchasing team callback requested");
+      state.consultAction = "callback";
+      return end("I understand you want to know how much we can offer. I will forward your question to our purchasing team. Please share your car details so they have the full picture: " + missing.join(", ") + ".", "consult_details", "collecting", "lead");
+    }
     if (missing.length) {
       const intro = firstConsultation ? ["I understand you would like to explore the price before visiting.", METHOD_EXPLANATION, "The best way to receive an accurate final offer is to book a free inspection. Once we have inspected your car, our purchasing team can confirm the offer. When could you bring your car in?"] : [];
       return end([...intro,"To complete your car details, could you please share "+missing.join(", ")+"?"].join(String.fromCharCode(10,10)), "consult_details", "collecting", "lead");
