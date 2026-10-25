@@ -364,7 +364,16 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       note("NOT READY YET: Accepted personal call; future seller; preferred method: "+(state.salesMethod||"Undecided"));
       return end("Of course. Our purchasing team can contact you on this WhatsApp number to discuss your "+(carSummary||"car")+" and the selling options. No inspection has been booked.", "", "team_accepted", "lead");
     }
-    if (missing.length) return end("I understand you'd like to explore the price before visiting. "+METHOD_EXPLANATION+" To brief our team, could you share the "+missing[0]+"? "+chosen, "consult_details", "collecting", "lead");
+    if (missing.length) {
+      const message = [
+        "I understand you would like to explore the price before visiting.",
+        METHOD_EXPLANATION,
+        "I will forward your information to our purchasing team so they can contact you personally to discuss your car and the available selling options.",
+        "To make sure they have all the necessary information, could you please share your car details: "+missing.join(", ")+"?",
+        chosen
+      ].filter(Boolean).join(String.fromCharCode(10,10));
+      return end(message, "consult_details", "collecting", "lead");
+    }
     if (decline || state.visitDeclinedForPrice || state.priceRequests && PRICE_CONCERN.test(text)) {
       state.priceRequests = (state.priceRequests??0)+1;
       return end("I understand you don't want to visit without discussing the value first. "+chosen+"I have your car details: "+carSummary+". Our team can discuss the options but can't promise a price without inspection. Which selling method would you prefer — direct cash purchase or free consignment? Would you like our team to call you to discuss it? No appointment is required.", "consult_choice", "collecting", "lead");
