@@ -53,4 +53,11 @@ assert(cb.state.status==="team_accepted" && !cb.confirm,"Callback became appoint
 const nonGcc={make:"Toyota",model:"Camry",year:"2021",mileage:"30000",messages:[]};
 const ng=turn(nonGcc,"American specs");
 assert(!ng.confirm,"Non-GCC claim booked");
+const booking={make:"Kia",model:"Optima",year:"2016",messages:[]};
+const offer=turn(booking,"I want to sell tomorrow");
+assert(!offer.confirm,"Booked without time or consent");
+const timed=turn(booking,"4pm");
+assert(!timed.confirm,"Booked without name");
+const named=turn(booking,"My name is John");
+assert(named.confirm && named.state.status==="booked","Agreed appointment was not booked");
 console.log("Kaya conversation stress checks passed:",assertions);
