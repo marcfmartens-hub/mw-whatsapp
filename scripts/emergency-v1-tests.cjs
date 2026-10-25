@@ -8,7 +8,7 @@ const base=()=>({phone:'971501234567',messages:[]});
 function turn(c,text,fields={}){const r=planEmergencyTurn(c,text,fields,now);Object.assign(c,r.updates);c.messages.push({role:'user',content:text},{role:'assistant',content:r.reply});return r;}
 let c=base();assert.match(turn(c,'Start').reply,/name/);turn(c,'Marc');assert.equal(c.name,'Marc');turn(c,'Toyota Camry 2022',{make:'Toyota',model:'Camry',year:'2022'});assert.equal(c.flow_state.basicStep,'vehicle');turn(c,'50000 GCC',{mileage:'50000',specs:'GCC'});assert.equal(c.flow_state.basicStep,'timeline');turn(c,'Today');assert.equal(c.flow_state.basicStep,'daytime');let r=turn(c,'Book tomorrow at 11 am');assert.equal(c.flow_state.basicStep,'done');assert.doesNotMatch(r.reply,/Please confirm|Is that correct|Dubai time|2026-10|Mon–Sat/);assert.equal(r.action,'booked');assert.equal(c.appointment_date,'2026-10-27');assert.match(r.reply,/maps.app/);r=turn(c,'Thanks');assert.equal(r.action,'collecting');assert.equal(c.flow_state.status,'booked');
 c=base();turn(c,'Start');r=turn(c,'How much?');assert.equal(c.flow_state.basicStep,'objection_choice');r=turn(c,'How much will you pay?');assert.equal(c.flow_state.basicStep,'callback');assert.match(r.reply,/name/);r=turn(c,'John');assert.equal(r.action,'callback');assert.equal(c.name,'John');assert.equal(turn(c,'yes').action,'collecting');
-c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.equal(r.action,'callback');c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
+c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=turn(c,'Friday at 11 am');assert.notEqual(r.action,'booked');assert.match(r.reply,/isn't available/);assert.doesNotMatch(r.reply,/Monday–Saturday|Dubai time/);r=turn(c,'Sunday at 2 pm');assert.equal(r.action,'collecting');c={...base(),name:'Marc',make:'BMW',model:'X5',year:'2022',mileage:'40000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};turn(c,'Tuesday');r=turn(c,'11 am');assert.equal(c.flow_state.basicStep,'done');
 c={...base(),name:'Marc',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'I cannot come');assert.equal(r.state.basicStep,'objection_choice');assert.match(r.reply,/virtual assistant/);r=turn(c,'I still cannot come');assert.equal(r.action,'callback');assert.doesNotMatch(r.reply,/make|model|year/);
 console.log('Emergency V1: booking, missing fields, objections, callbacks, terminal state, Friday and Sunday checks passed');
 
@@ -29,8 +29,8 @@ console.log('Simplified scheduling: exact transcript, automatic confirmation, mi
 
 // Current report: uncertainty is a complete specs answer and must not be repeated.
 c=base();turn(c,'Start');assert.equal(turn(c,'Jace').reply,'Which car are you planning to sell?');
-r=turn(c,'Bmw 2020 x5 not sure',{make:'BMW',model:'X5',year:'2020'});assert.equal(c.specs,'Unknown');assert.equal(r.reply,'What is the mileage?');
-r=turn(c,'125k km');assert.equal(c.mileage,'125000');assert.equal(r.reply,'When are you planning to sell the car?');assert.doesNotMatch(r.reply,/GCC|mileage/);
+r=turn(c,'Bmw 2020 x5 not sure',{make:'BMW',model:'X5',year:'2020'});assert.equal(c.specs,'Unknown');assert.equal(r.reply.replace(/^No problem\. /,''),'What is the mileage?');
+r=turn(c,'125k km');assert.equal(c.mileage,'125000');assert.equal(r.reply.replace(/^No problem\. /,''),'When are you planning to sell the car?');assert.doesNotMatch(r.reply,/GCC|mileage/);
 // Each missing field is asked once. Ignored answers do not cause loops or block booking.
 c=base();turn(c,'Start');turn(c,'Jace');let prompts=[];
 for(let i=0;i<6;i++)prompts.push(turn(c,'okay').reply);
@@ -39,11 +39,11 @@ turn(c,'book');turn(c,'tomorrow');r=turn(c,'2 pm');assert.equal(r.action,'booked
 // Uncertain specs with punctuation or do-not-know must stay in the basic flow.
 for(const answer of ["not sure?","I don't know","I do not know"]){
  c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['specs']},messages:[{role:'assistant',content:'Is it GCC or non-GCC?'}]};
- r=turn(c,answer);assert.equal(c.specs,'Unknown');assert.equal(r.reply,'When are you planning to sell the car?');
+ r=turn(c,answer);assert.equal(c.specs,'Unknown');assert.equal(r.reply.replace(/^No problem\. /,''),'When are you planning to sell the car?');
 }
 // Non-GCC and numeric mileage are retained; already captured fields are skipped.
 c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'},messages:[]};
-r=turn(c,'Non GCC');assert.equal(c.specs,'Non-GCC');assert.equal(r.reply,'What is the mileage?');r=turn(c,'125000');assert.equal(c.mileage,'125000');assert.equal(r.reply,'When are you planning to sell the car?');
+r=turn(c,'Non GCC');assert.equal(c.specs,'Non-GCC');assert.equal(r.reply.replace(/^No problem\. /,''),'What is the mileage?');r=turn(c,'125000');assert.equal(c.mileage,'125000');assert.equal(r.reply.replace(/^No problem\. /,''),'When are you planning to sell the car?');
 console.log('One-at-a-time collection: reported chat, uncertain specs, skipped answers and known-field checks passed');
 
 // Historical Patrol chat: preserve all facts, interpret 22 as year, and go to booking.
@@ -54,7 +54,7 @@ c={...base(),name:'mo',make:'Nissan',model:'Patrol',mileage:'22',specs:'GCC',mes
  {role:'assistant',content:'Is it GCC specs?'},{role:'user',content:'GCC'},
  {role:'assistant',content:'When are you planning to sell?'},
 ]};
-r=turn(c,'Now');assert.equal(c.make,'Nissan');assert.equal(c.model,'Patrol');assert.equal(c.year,'2022');assert.equal(c.mileage,'47000');assert.equal(r.reply,'Which day and time do you want for the inspection?');r=turn(c,'tomorrow at 2 pm');assert.equal(r.action,'booked');assert.doesNotMatch(r.reply,/make|model|year/);
+r=turn(c,'Now');assert.equal(c.make,'Nissan');assert.equal(c.model,'Patrol');assert.equal(c.year,'2022');assert.equal(c.mileage,'47000');assert.equal(r.reply,'What time can you come today?');r=turn(c,'tomorrow at 2 pm');assert.equal(r.action,'booked');assert.doesNotMatch(r.reply,/make|model|year/);
 // Once prompted to schedule, refusal/unrelated answers hand over without repeating questions.
 c={...base(),name:'mo',make:'Nissan',model:'Patrol',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'timeline'}};
 assert.equal(turn(c,'Now').state.basicStep,'daytime');assert.equal(turn(c,'maybe later').action,'callback');
@@ -66,10 +66,10 @@ r=planEmergencyTurn(c,'Now',{},new Date('2026-10-25T12:00:00Z'));assert.equal(r.
 // NOW in scheduling uses inspection opening hours in Dubai and never repeats.
 for(const [clock,expected,day] of [
  ['2026-10-26T08:00:00Z','What time can you come today?','2026-10-26'],
- ['2026-10-25T13:04:00Z',"We're closed now. What time can you come tomorrow?",'2026-10-26'],
- ['2026-10-26T15:00:00Z',"We're closed now. What time can you come tomorrow?",'2026-10-27'],
- ['2026-10-30T07:00:00Z',"We're closed now. What time can you come tomorrow?",'2026-10-31'],
- ['2026-10-31T15:00:00Z',"We're closed now. What time can you come Monday 2nd of November?",'2026-11-02'],
+ ['2026-10-25T13:04:00Z',"We're closed now, but we open again tomorrow at 10 am. What time can you come tomorrow?",'2026-10-26'],
+ ['2026-10-26T15:00:00Z',"We're closed now, but we open again tomorrow at 10 am. What time can you come tomorrow?",'2026-10-27'],
+ ['2026-10-30T07:00:00Z',"We're closed now, but we open again tomorrow at 10 am. What time can you come tomorrow?",'2026-10-31'],
+ ['2026-10-31T15:00:00Z',"We're closed now, but we open again Monday 2nd of November at 10 am. What time can you come Monday 2nd of November?",'2026-11-02'],
 ]){
  c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',specs:'Unknown',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};
  r=planEmergencyTurn(c,'Now',{},new Date(clock));assert.equal(r.reply,expected);assert.equal(r.state.proposedDate,day);
@@ -81,7 +81,7 @@ console.log('NOW opening-hours checks: today, closed Sunday, after closing, Frid
 
 // Ignoring the name to give selling intent is valid input, not an objection.
 c=base();turn(c,'Start');r=turn(c,'I want to sell my bmw');assert.equal(c.make,'BMW');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(c.flow_state.basicStep,'vehicle');assert.doesNotMatch(r.reply,/virtual assistant|callback/);
-r=turn(c,'X5 2020');assert.equal(c.model,'X5');assert.equal(c.year,'2020');assert.equal(r.reply,'What is the mileage?');turn(c,'125k km');turn(c,"I don't know");turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
+r=turn(c,'X5 2020');assert.equal(c.model,'X5');assert.equal(c.year,'2020');assert.equal(r.reply.replace(/^No problem\. /,''),'What is the mileage?');turn(c,'125k km');turn(c,"I don't know");turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
 for(const [input,data,question] of [
  ['I want to sell my car',{},'Which car are you planning to sell?'],
  ['I want to sell my BMW X5',{make:'BMW',model:'X5'},'What year is it?'],
@@ -127,7 +127,7 @@ console.log('Greetings and media: time-aware greeting, photos, files, audio, lin
 // Exact report: capture make AND selling timeline, finish details, skip answered timeframe.
 c=base();turn(c,'Start');turn(c,'Hi');r=turn(c,"I'm selling my bmw next month");
 assert.equal(c.make,'BMW');assert.equal(c.sell_timeline,'next month');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(r.state.basicStep,'vehicle');
-r=turn(c,'X5 2020');assert.equal(r.reply,'What is the mileage?');r=turn(c,'125k km');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,"I'm not sure");assert.equal(r.reply,'Would you like to book a free inspection this week or next month?');assert.equal(c.sell_timeline,'next month');assert.doesNotMatch(r.reply,/When are you planning/);
+r=turn(c,'X5 2020');assert.equal(r.reply.replace(/^No problem\. /,''),'What is the mileage?');r=turn(c,'125k km');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,"I'm not sure");assert.equal(r.reply.replace(/^No problem\. /,''),'Would you like to book a free inspection this week or next month?');assert.equal(c.sell_timeline,'next month');assert.doesNotMatch(r.reply,/When are you planning/);
 // Same rule in name stage and for every brand, including when some details are known.
 for(const input of ['I want to sell my Toyota next month','Selling my Nissan next week']){
  c=base();turn(c,'Start');r=turn(c,input);assert.match(r.reply,/model and year/);assert.equal(r.state.basicStep,'vehicle');assert.ok(c.sell_timeline);
@@ -138,7 +138,7 @@ console.log('Combined selling data: capture timeline, finish missing car fields 
 // Future seller is offered this week or next month after details, then books their selection.
 for(const window of ['This week','Next month']){
  c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',sell_timeline:'next month',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};
- r=turn(c,'GCC');assert.equal(r.reply,'Would you like to book a free inspection this week or next month?');assert.equal(r.state.basicStep,'inspection_window');
+ r=turn(c,'GCC');assert.equal(r.reply.replace(/^No problem\. /,''),'Would you like to book a free inspection this week or next month?');assert.equal(r.state.basicStep,'inspection_window');
  r=turn(c,window);assert.equal(r.state.basicStep,'daytime');
  r=turn(c,window==='This week'?'tomorrow at 2 pm':'5 November at 2 pm');assert.equal(r.action,'booked');assert.equal(c.appointment_date,window==='This week'?'2026-10-27':'2026-11-05');
 }
@@ -149,7 +149,7 @@ for(const inquiry of ['What price can you offer?','Do you offer home service?','
 console.log('Future-inspection choices and direct inquiry-to-callback protocol passed');
 
 // A stated asking price is data, never a quote request or mileage.
-c=base();turn(c,'Start');turn(c,'Hi');turn(c,'I want to sell my Toyota Camry');turn(c,'2020');r=turn(c,'Only 20k km\nAsking 75k');assert.equal(c.mileage,'20000');assert.equal(c.flow_state.askingPriceAed,'75000');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,'GCC');assert.equal(r.reply,'When are you planning to sell the car?');r=turn(c,'Now');assert.equal(r.state.basicStep,'daytime');assert.doesNotMatch(r.reply,/callback/);
+c=base();turn(c,'Start');turn(c,'Hi');turn(c,'I want to sell my Toyota Camry');turn(c,'2020');r=turn(c,'Only 20k km\nAsking 75k');assert.equal(c.mileage,'20000');assert.equal(c.flow_state.askingPriceAed,'75000');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,'GCC');assert.equal(r.reply.replace(/^No problem\. /,''),'When are you planning to sell the car?');r=turn(c,'Now');assert.equal(r.state.basicStep,'daytime');assert.doesNotMatch(r.reply,/callback/);
 for(const input of ['Asking price 75k','My price is AED 75000','Selling price 75,000']){
  c={...base(),name:'Jace',make:'Toyota',model:'Camry',year:'2020',mileage:'20000',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};
  r=turn(c,input);assert.equal(c.flow_state.askingPriceAed,'75000');assert.equal(c.mileage,'20000');assert.equal(r.reply,'Is it GCC or non-GCC?');assert.equal(r.action,'collecting');
@@ -165,7 +165,7 @@ console.log('Stated asking prices, retained mileage, objection choice, repeated 
 for(const [input,make,model]of [['Mercedes s500','Mercedes-Benz','S500'],['Mercedes C200','Mercedes-Benz','C200'],['BMW X5','BMW','X5'],['Toyota Camry','Toyota','Camry'],['Nissan Patrol','Nissan','Patrol'],['VW Golf','Volkswagen','Golf']]){
  c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name please?'}]};
  r=turn(c,input);assert.equal(c.make,make);assert.equal(c.model,model);assert.equal(c.name,undefined);assert.equal(r.reply,'Ok, nice. What year is it?');assert.equal(r.state.basicStep,'vehicle');
- r=turn(c,'2020');assert.equal(r.reply,'What is the mileage?');turn(c,'50000 km');turn(c,'GCC');turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
+ r=turn(c,'2020');assert.equal(r.reply.replace(/^No problem\. /,''),'What is the mileage?');turn(c,'50000 km');turn(c,'GCC');turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
 }
 c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'name'},messages:[{role:'assistant',content:'May I know your name?'}]};r=turn(c,'Mercedes S500 2020');assert.equal(c.year,'2020');assert.equal(r.reply,'Ok, nice. What is the mileage?');
 console.log('First-answer vehicle recognition: aliases, Mercedes variants, missing-field checks and complete bookings passed');
@@ -192,3 +192,18 @@ for(const [make,models]of Object.entries(CAR_MODELS))for(const model of models){
  if(c.make!==(CAR_MAKES[make]||make)||c.model!==model||c.name||r.state.basicStep!=='vehicle'||/virtual assistant|callback/.test(r.reply))modelFailures.push({make,model,actualMake:c.make,actualModel:c.model,reply:r.reply});
 }
 assert.deepEqual(modelFailures,[]);console.log('Complete model registry sweep passed: '+modelCases+' brand/model combinations');
+
+// Current transcript: urgency variants never set Sunday as the proposed visit.
+const sundayEvening=new Date('2026-10-25T14:19:00Z');
+for(const stage of ['timeline','daytime'])for(const urgent of ['Now','I can come now','Can I come now?','I will come right away','I can bring the car now']){
+ c={...base(),name:'Jace',make:'Mercedes-Benz',model:'S500',year:'2020',mileage:'125000',specs:'Unknown',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:stage}};
+ r=planEmergencyTurn(c,urgent,{},sundayEvening);assert.equal(r.reply,"We're closed now, but we open again tomorrow at 10 am. What time can you come tomorrow?");assert.equal(r.state.proposedDate,'2026-10-26');
+ Object.assign(c,r.updates);c.messages.push({role:'assistant',content:r.reply});
+ r=planEmergencyTurn(c,'8 pm',{},sundayEvening);assert.equal(r.state.proposedDate,'2026-10-26');assert.equal(r.state.proposedTime,undefined);assert.match(r.reply,/10 am and 6:30 pm/);assert.doesNotMatch(r.reply,/Which day and time/);
+ Object.assign(c,r.updates);c.messages.push({role:'assistant',content:r.reply});r=planEmergencyTurn(c,'2 pm',{},sundayEvening);assert.equal(r.action,'booked');assert.equal(r.updates.appointment_date,'2026-10-26');
+}
+for(const uncertain of ["I don't know","I'm not sure",'Not sure','No idea','Dont know']){
+ c={...base(),make:'Mercedes-Benz',model:'S500',year:'2020',mileage:'125000',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['specs']}};
+ r=turn(c,uncertain);assert.equal(r.reply,'No problem. When are you planning to sell the car?');assert.equal(c.specs,'Unknown');
+}
+console.log('Urgency phrases: Sunday next opening, late-time correction, retained day, booking and uncertainty acknowledgements passed');

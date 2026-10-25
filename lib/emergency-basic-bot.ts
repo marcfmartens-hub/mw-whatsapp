@@ -95,8 +95,8 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const userTexts=[...history.filter(m=>m.role==="user").map(m=>m.content),text];
  for(const answer of userTexts){
    if(/\b(non[ -]?gcc|not gcc|american specs|european specs|japanese specs|korean specs|chinese specs)\b/i.test(answer))u.specs="Non-GCC";
-   else if(/\bgcc\b/i.test(answer)&&!/\b(not sure|unsure|unknown|don'?t know|do not know|gcc or)\b/i.test(answer))u.specs="GCC";
-   else if(/\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(answer) && (vehicleStage||/\b(specs|specifications|gcc|bmw|toyota|mercedes|audi|nissan|lexus|porsche|ford|honda)\b/i.test(answer)))u.specs="Unknown";
+   else if(/\bgcc\b/i.test(answer)&&!/\b(not sure|unsure|unknown|don'?t know|dont know|do not know|no idea|not certain|gcc or)\b/i.test(answer))u.specs="GCC";
+   else if(/\b(not sure|unsure|unknown|don'?t know|dont know|do not know|no idea|not certain)\b/i.test(answer) && (vehicleStage||/\b(specs|specifications|gcc|bmw|toyota|mercedes|audi|nissan|lexus|porsche|ford|honda)\b/i.test(answer)))u.specs="Unknown";
    const mileage=answer.match(/\b(\d[\d,]*(?:\.\d+)?)\s*(k)?\s*(?:km|kms|kilomet(?:er|re)s?)\b/i)
      || (vehicleStage?answer.trim().match(/^(\d[\d,]*(?:\.\d+)?)\s*(k)$/i):null);
    if(mileage)u.mileage=String(Math.round(Number(mileage[1].replace(/,/g,""))*(mileage[2]?1000:1)));
@@ -104,10 +104,13 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  // An explicit field extracted from this message takes precedence over older history,
  // except that an uncertain specs answer must never be overwritten by a guess.
  for(const k of ["make","model","year","mileage","specs"])if(fields[k]&&!u[k])u[k]=fields[k];
- if(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(text))u.specs="Unknown";
+ if(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|dont know|do not know|no idea|not certain)\b/i.test(text))u.specs="Unknown";
  const value=(k:string)=>u[k]||c[k];
  const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
- const msg=text.trim();
+ const msg=text.trim().replace(/[’‘]/g,"'");
+ const uncertain=/\b(not sure|unsure|unknown|don'?t know|dont know|do not know|no idea|not certain)\b/i.test(msg);
+ const immediate=/\b(now|immediately|asap|right away|straight away)\b/i.test(msg)&&!/(?:not|can't|cannot)\s+(?:come\s+)?now/i.test(msg)&&!timeFromText(msg,true);
+ if(uncertain&&vehicleStage)u.specs="Unknown";
  const greeting=/^(?:(?:hi+|hello+|hey+)(?: there| kaya)?|hiya|howdy|salaam|salam|good\s+(?:morning|afternoon|evening|day))[\s!.,👋😊]*$/i.test(msg);
  const sellingTime=msg.match(/\b(next month|this month|next week|this week|end of (?:the |this )?month|in (?:\d+|a|one|two|three|four) (?:days?|weeks?|months?)|today|tomorrow|asap|urgent|soon|now|immediately)\b/i)?.[0];
  if(sellingTime&&(["name","vehicle","timeline"].includes(b.basicStep)||/\b(sell|selling)\b/i.test(msg)))u.sell_timeline=sellingTime;
@@ -201,6 +204,21 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
      reply="Your free inspection is confirmed for "+inspectionDay(b.proposedDate)+" at "+inspectionTime(b.proposedTime)+".\n\n"+BOOKING_LOCATION;
    }
  };
+ const arrangeSoon=()=>{
+   b.basicStep="daytime";
+   const local=new Date(+now+4*3600e3),today=local.toISOString().slice(0,10);
+   const minutes=local.getUTCHours()*60+local.getUTCMinutes();
+   const open=local.getUTCDay()!==0&&minutes>=(local.getUTCDay()===5?720:600)&&minutes<1110;
+   let target=today;
+   if(!open){let next=new Date(+local+86400e3);while(next.getUTCDay()===0)next=new Date(+next+86400e3);target=next.toISOString().slice(0,10);}
+   const tomorrow=new Date(+local+86400e3).toISOString().slice(0,10);
+   const label=target===today?"today":target===tomorrow?"tomorrow":inspectionDay(target);
+   const opens=new Date(target+"T12:00:00Z").getUTCDay()===5?"12 pm":"10 am";
+   b.proposedDate=target;b.proposedTime=undefined;
+   const question="What time can you come "+label+"?";
+   if(history.some(m=>m.role==="assistant"&&m.content.includes(question)))callback();
+   else reply=(open?"":"We're closed now, but we open again "+label+" at "+opens+". ")+question;
+ };
  // Terminal acknowledgements must never restart booking or create another callback.
  if(media.kinds.length&&!msg){
    // Attachments never answer a pending field and never advance the flow.
@@ -228,10 +246,14 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    callback();
  }
  else if(call)callback();
- else if(refuse)objectionChoice();
+ else if(refuse&&!uncertain)objectionChoice();
  else if((sellerIntent||statedPrice) && ["name","choice"].includes(b.basicStep))continueSeller();
  else if(!(c.messages||[]).some((m:any)=>m.role==="assistant") && !old.basicMode){reply="Hi, I'm Kaya, Mister Wheelz's virtual assistant. What’s your name?";b.basicStep="name";}
- else if(!statedPrice&&(inquiry.test(msg)||(objection&&!date&&!time&&!book&&!(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know|gcc|non-gcc)\b/i.test(msg)))))objectionChoice();
+ else if(!statedPrice&&(inquiry.test(msg)||(objection&&!date&&!time&&!book&&!(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|dont know|do not know|no idea|not certain|gcc|non-gcc)\b/i.test(msg)))))objectionChoice();
+ else if(immediate&&(["timeline","daytime","choice","objection_choice","inspection_window"].includes(b.basicStep)||b.basicStep==="vehicle"&&book)){
+   if(b.basicStep==="timeline")u.sell_timeline=msg.slice(0,200);
+   arrangeSoon();
+ }
  else if(b.basicStep==="objection_choice"){
    if(book||yes||date||time){
      b.basicStep="daytime";
@@ -257,7 +279,8 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else nextVehicle();
  }
  else if(b.basicStep==="timeline"){
-   if(book||/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|immediately|ready|day|sell|selling)\b/i.test(msg)){
+   if(immediate){u.sell_timeline=msg.slice(0,200);arrangeSoon();}
+   else if(book||/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|immediately|ready|day|sell|selling)\b/i.test(msg)){
      if(!book)u.sell_timeline=msg.slice(0,200);
      b.basicStep="daytime";reply=SCHEDULE_QUESTION;
    }else callback();
@@ -285,29 +308,19 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}
  }
  else if(b.basicStep==="daytime"){
-   const immediate=/^(now|immediately|asap)[.!]?$/i.test(msg);
    if(!immediate){if(date)b.proposedDate=date;if(time)b.proposedTime=time;}
-   if(immediate){
-     const local=new Date(+now+4*3600e3),today=local.toISOString().slice(0,10);
-     const minutes=local.getUTCHours()*60+local.getUTCMinutes();
-     const open=local.getUTCDay()!==0&&minutes>=(local.getUTCDay()===5?720:600)&&minutes<1110;
-     let target=today;
-     if(!open){let next=new Date(+local+86400e3);while(next.getUTCDay()===0)next=new Date(+next+86400e3);target=next.toISOString().slice(0,10);}
-     const tomorrow=new Date(+local+86400e3).toISOString().slice(0,10);
-     const label=target===today?"today":target===tomorrow?"tomorrow":inspectionDay(target);
-     b.proposedDate=target;b.proposedTime=undefined;
-     const question="What time can you come "+label+"?";
-     if(history.some(m=>m.role==="assistant"&&m.content.includes(question))){
-       callback();
-     }else reply=(open?"":"We're closed now. ")+question;
-   }
+   if(immediate)arrangeSoon();
    else if(!date&&!time){callback();}
    else if(!b.proposedDate)reply="Which day do you want for the inspection?";
+   else if(new Date(b.proposedDate+"T12:00:00Z").getUTCDay()===0)arrangeSoon();
    else if(!b.proposedTime)reply="What time do you want for the inspection?";
    else if(b.inspectionWindow==="next_month" && b.proposedDate.slice(0,7)!==new Date(Date.UTC(new Date(+now+4*3600e3).getUTCFullYear(),new Date(+now+4*3600e3).getUTCMonth()+1,1)).toISOString().slice(0,7)){
      b.proposedDate=undefined;b.proposedTime=undefined;reply="Please provide the date and time in the month you selected.";
    }
-   else if(!slotValid(b.proposedDate,b.proposedTime,now)){b.proposedDate=undefined;b.proposedTime=undefined;reply="That time isn't available. "+SCHEDULE_QUESTION;}
+   else if(!slotValid(b.proposedDate,b.proposedTime,now)){
+     const opens=new Date(b.proposedDate+"T12:00:00Z").getUTCDay()===5?"12 pm":"10 am";
+     b.proposedTime=undefined;reply="That time isn't available. Please choose a time between "+opens+" and 6:30 pm on "+inspectionDay(b.proposedDate)+".";
+   }
    else {b.basicStep="contact";contact();}
  }
  else if(b.basicStep==="contact"){
@@ -321,6 +334,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    b.basicStep="contact";contact();
  }
  else {b.basicStep="choice";reply=CHOICE;}
+ if(uncertain&&reply&&!/^No problem[,.]/i.test(reply))reply="No problem. "+reply;
  if(media.kinds.length){
    const kinds=media.kinds.join(", ").replace(/, ([^,]+)$/, " or $1");
    reply="Unfortunately, I'm not able to open "+kinds+"."+(reply?" "+reply:"");
