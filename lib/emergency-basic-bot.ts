@@ -82,6 +82,8 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
  const msg=text.trim();
  const greeting=/^(?:(?:hi+|hello+|hey+)(?: there| kaya)?|hiya|howdy|salaam|salam|good\s+(?:morning|afternoon|evening|day))[\s!.,👋😊]*$/i.test(msg);
+ const sellingTime=msg.match(/\b(next month|this month|next week|this week|end of (?:the |this )?month|in (?:\d+|a|one|two|three|four) (?:days?|weeks?|months?)|today|tomorrow|asap|urgent|soon|now|immediately)\b/i)?.[0];
+ if(sellingTime&&(["name","vehicle","timeline"].includes(b.basicStep)||/\b(sell|selling)\b/i.test(msg)))u.sell_timeline=sellingTime;
  const sellerIntent=/\b(sell|selling|car|vehicle)\b/i.test(msg) || !!supportedVehicle(msg,{},{}).make;
  const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
  const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
@@ -100,6 +102,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const nextVehicle=()=>{
    const k=vehicleKeys.find(k=>!value(k)&&!b.askedVehicle!.includes(k));
    if(k){b.askedVehicle!.push(k);b.basicStep="vehicle";reply=questions[k];}
+   else if(value("sell_timeline")){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
    else {b.basicStep="timeline";reply="When are you planning to sell the car?";}
  };
  const continueSeller=()=>{
@@ -177,9 +180,8 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  }
  else if(b.basicStep==="vehicle"){
    if(book){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
-   else if(/\b(today|tomorrow|week|month|asap|urgent|soon|now)\b/i.test(msg)&&!/\b(km|kms)\b/i.test(msg)){
-     u.sell_timeline=msg.slice(0,200);b.basicStep="daytime";reply=SCHEDULE_QUESTION;
-   }else nextVehicle();
+   else if(/\b(sell|selling)\b/i.test(msg))continueSeller();
+   else nextVehicle();
  }
  else if(b.basicStep==="timeline"){
    if(book||/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|immediately|ready|day|sell|selling)\b/i.test(msg)){

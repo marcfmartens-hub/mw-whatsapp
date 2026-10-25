@@ -123,3 +123,14 @@ for(const [input,label]of [['[photo]','pictures'],['[file]','files'],['[audio]',
 c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'timeline'}};r=turn(c,'[audio]');assert.match(r.reply,/when you are planning to sell/);assert.equal(r.state.basicStep,'timeline');
 c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['mileage']}};r=turn(c,'[photo] 125k km');assert.equal(c.mileage,'125000');assert.match(r.reply,/pictures/);assert.match(r.reply,/GCC/);
 console.log('Greetings and media: time-aware greeting, photos, files, audio, links, pending stage and captions passed');
+
+// Exact report: capture make AND selling timeline, finish details, skip answered timeframe.
+c=base();turn(c,'Start');turn(c,'Hi');r=turn(c,"I'm selling my bmw next month");
+assert.equal(c.make,'BMW');assert.equal(c.sell_timeline,'next month');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(r.state.basicStep,'vehicle');
+r=turn(c,'X5 2020');assert.equal(r.reply,'What is the mileage?');r=turn(c,'125k km');assert.equal(r.reply,'Is it GCC or non-GCC?');r=turn(c,"I'm not sure");assert.equal(r.reply,'Which day and time do you want for the inspection?');assert.equal(c.sell_timeline,'next month');assert.doesNotMatch(r.reply,/When are you planning/);
+// Same rule in name stage and for every brand, including when some details are known.
+for(const input of ['I want to sell my Toyota next month','Selling my Nissan next week']){
+ c=base();turn(c,'Start');r=turn(c,input);assert.match(r.reply,/model and year/);assert.equal(r.state.basicStep,'vehicle');assert.ok(c.sell_timeline);
+}
+c={...base(),name:'Jace',make:'Toyota',model:'Corolla',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'}};r=turn(c,'Selling next month');assert.equal(r.reply,'No problem, we can help you with that. What year is it?');assert.equal(c.sell_timeline,'next month');
+console.log('Combined selling data: capture timeline, finish missing car fields and skip answered timeframe passed');
