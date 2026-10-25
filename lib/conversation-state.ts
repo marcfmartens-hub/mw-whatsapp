@@ -157,7 +157,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   // Listings, images and attachments are not readable by Kaya. Never treat
   // "check this" as an answer to the next questionnaire field.
   const hasExternalLink = /(?:https?:\/\/|www\.)\S+|(?:\b[a-z0-9-]+\.)+(?:com|ae|net|org|io|app|co|me)\/\S*/i.test(text);
-  const referencesSharedMedia = /^(?:check|see|open|look(?:\s+at)?|view)(?:\s+(?:this|that|it|the\s+(?:link|photo|picture|image|ad|listing)))?(?:\s+(?:link|photo|picture|image|ad|listing))?[.! ]*$/i.test(text);
+  const referencesSharedMedia = /^(?:check|see|open|look(?:\s+at)?|view)\s+(?:this|that|it|the\s+(?:link|photo|picture|image|ad|listing))(?:\s+(?:link|photo|picture|image|ad|listing))?(?:\s+for\s+(?:all\s+)?(?:the\s+)?(?:info|information|details))?[.! ]*$/i.test(text);
   const mediaPlaceholder = /^\[?(?:image|photo|picture|attachment|file|document|video|unsupported(?:\s+media)?)\]?(?:\s+(?:attached|sent))?[.! ]*$/i.test(text);
   if (hasExternalLink || referencesSharedMedia || mediaPlaceholder) {
     const requested = [
