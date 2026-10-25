@@ -38,12 +38,12 @@ for (let mask = 0; mask < 128; mask++) {
   }
   assert(bookingPrompt,"Never reached booking mask="+mask);
 }
-const mileage = {make:"Kia",model:"Seltos",year:"2023",messages:[]};
+const mileage = {name:"Daniel",make:"Kia",model:"Seltos",year:"2023",messages:[]};
 turn(mileage,"Hi");
 const m=turn(mileage,"65k");
 assert(m.updates.mileage==="65000","65k not captured");
 assert(!/mileage/i.test(m.reply),"Repeated mileage after 65k");
-const unknown={make:"Toyota",model:"Camry",year:"2020",mileage:"80000",messages:[]};
+const unknown={name:"Daniel",make:"Toyota",model:"Camry",year:"2020",mileage:"80000",messages:[]};
 turn(unknown,"Hi");
 const u=turn(unknown,"I don't know");
 assert(u.updates.specs==="Unknown"||unknown.specs==="Unknown"||u.state.question!=="specs","Stuck on specs");
@@ -60,4 +60,22 @@ const timed=turn(booking,"4pm");
 assert(!timed.confirm,"Booked without name");
 const named=turn(booking,"My name is Daniel");
 assert(named.confirm && named.state.status==="booked","Agreed appointment was not booked");
+
+const urgent={name:"Daniel",make:"BMW",model:"X5",year:"2023",mileage:"Unknown",specs:"GCC",loan:"No",sell_timeline:"Now",messages:[]};
+const priceReply=turn(urgent,"Can you give me price first");
+assert(!/would you like to arrange the inspection/i.test(priceReply.reply),"Price reply re-asks appointment");
+assert(/what time can you bring/i.test(priceReply.reply),"Price reply lacks contextual arrival question");
+const homeReply=turn(urgent,"You can come to my place?");
+assert(/all our inspections take place at our branch/i.test(homeReply.reply),"Home visit response is negative");
+assert(/10.15 minutes/i.test(homeReply.reply),"Home visit reply omits inspection duration");
+const uncertain=turn(urgent,"I'm not sure when I can come");
+assert(uncertain.state.question==="callback","Uncertain visit does not offer callback");
+const accepted=turn(urgent,"Ok");
+assert(accepted.state.status==="team_accepted","Accepted callback not handed over");
+const late={name:"Daniel",make:"BMW",model:"X5",year:"2023",mileage:"Unknown",specs:"GCC",loan:"No",sell_timeline:"Now",messages:[]};
+const lateReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T19:30:00Z"));
+assert(/tomorrow at 10 AM/i.test(lateReply.reply),"After-hours next day wording incorrect");
+const earlyReply=planTurn(late,"Can you give me price first",{},new Date("2026-10-26T22:30:00Z"));
+assert(/today/i.test(earlyReply.reply),"After midnight should refer to today");
+
 console.log("Kaya conversation stress checks passed:",assertions);
