@@ -18,7 +18,7 @@ export function inspectionTime(time:string):string {
 // Keep location and contact information without appending the old opening-hours line.
 const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
-type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean };
+type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[] };
 const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
  return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
@@ -102,8 +102,19 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const callback=()=>{
    b.basicStep="callback";
    const missing=[!value("name")?"name":null,!phone()?"phone number":null].filter(Boolean);
-   if(missing.length) reply="No problem. I'll forward your request to the team so they can help you as best as possible. Please provide your "+missing.join(" and ")+".";
-   else {b.basicStep="done";action="callback";reply="Thank you, "+value("name")+". I've recorded your callback request for the team.";}
+   const asked=new Set(b.callbackAsked||[]);
+   for(const m of history.filter(m=>m.role==="assistant")){
+     if(/Please provide your name/i.test(m.content))asked.add("name");
+     if(/Please provide your (?:name and )?phone number/i.test(m.content))asked.add("phone number");
+   }
+   const unasked=missing.filter(k=>!asked.has(String(k)));
+   if(unasked.length){
+     b.callbackAsked=[...asked,...unasked.map(String)];
+     reply="No problem. I'll forward your request to the team so they can help you as best as possible. Please provide your "+unasked.join(" and ")+".";
+   }else {
+     b.basicStep="done";action="callback";
+     reply=missing.length?"Understood. I'll pass the details you've shared to the team.":"Thank you, "+value("name")+". I've recorded your callback request for the team.";
+   }
  };
  const contact=()=>{
    if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime,now)){
@@ -190,7 +201,16 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    b.basicStep="contact";contact();
  }
  else {b.basicStep="choice";reply=CHOICE;}
- if(reply.includes("?")&&history.some(m=>m.role==="assistant"&&m.content.trim()===reply.trim()))callback();
+ // Final guard applies to EVERY reply, including statements and callback prompts.
+ // Keep sent text in state so trimming message history cannot re-enable repeats.
+ const normalize=(s:string)=>s.toLowerCase().replace(/[’‘]/g,"'").replace(/[^a-z0-9]+/g," ").trim();
+ const sent=new Set([...(old.sentReplies||[]),...history.filter(m=>m.role==="assistant").map(m=>normalize(m.content))]);
+ if(reply&&sent.has(normalize(reply))){
+   if(b.basicStep!=="done")callback();
+   if(sent.has(normalize(reply)))reply="";
+ }
+ if(reply)sent.add(normalize(reply));
+ b.sentReplies=[...sent];
  b.status=b.basicStep==="done" && action==="collecting" ? (old.status||"collecting") : action==="booked"?"booked":action==="callback"?"team_accepted":"collecting";
  u.flow_state={...old,...b,version:1};
  return {reply,updates:u,action,state:b};
@@ -199,10 +219,10 @@ export async function emergencyBasicTurn(c:Conversation,text:string) {
  const fields=await extractVehicleInfo(text,{make:c.make||undefined,model:c.model||undefined,year:c.year||undefined}).catch(()=>({}));
  const turn=planEmergencyTurn(c,text,fields);
  const fresh=await getConversation(c.phone);
- const messages=[...(fresh?.messages||c.messages||[]),{role:"assistant" as const,content:turn.reply}].slice(-40);
+ const messages=[...(fresh?.messages||c.messages||[]),...(turn.reply?[{role:"assistant" as const,content:turn.reply}]:[])].slice(-40);
  // Record the request before telling the customer it is confirmed.
  await updateConversation(c.phone,{...turn.updates,messages,step:turn.action==="booked"?8:Math.max(c.step||0,1)});
- await sendWhatsAppMessage(c.phone,turn.reply);
+ if(turn.reply)await sendWhatsAppMessage(c.phone,turn.reply);
  const saved=await getConversation(c.phone);
  if(saved && turn.action!=="collecting") {
    const note=EMERGENCY_MODE+" — "+turn.action+"\nSelling timeline: "+(saved.sell_timeline||"unknown");

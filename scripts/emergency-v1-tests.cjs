@@ -96,3 +96,15 @@ for(const [input,make]of [['I want to sell my Toyota','Toyota'],['I want to sell
 }
 for(const input of ['My car','Car','I want to sell a vehicle']){c=base();turn(c,'Hi');r=turn(c,input);assert.match(r.reply,/Which car are you planning to sell/);assert.equal(c.name,undefined);}
 console.log('Brand-independent selling intent and generic car/vehicle messages passed');
+
+// Exact report: acknowledgement after a missing-name request never repeats that request.
+c={...base(),make:'Toyota',model:'Corolla',year:'2009',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};
+r=turn(c,"I'll let you nlknow");assert.match(r.reply,/Please provide your name/);
+const request=r.reply;r=turn(c,'Ok');assert.notEqual(r.reply,request);assert.doesNotMatch(r.reply,/provide your name/);assert.equal(r.action,'callback');
+let sent=new Set(c.messages.filter(m=>m.role==='assistant').map(m=>m.content));
+for(const text of ['Ok','Ok','Thanks','Ok','Thanks']){r=turn(c,text);if(r.reply){assert.ok(!sent.has(r.reply),'Duplicate text was emitted');sent.add(r.reply);}}
+// Legacy callback state without tracking still sees that the name was already asked.
+c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'callback'},messages:[{role:'assistant',content:request}]};r=turn(c,'Ok');assert.doesNotMatch(r.reply,/provide your name/);assert.equal(r.action,'callback');
+// Persistent dedupe survives message truncation and harmless punctuation differences.
+c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'done',status:'team_accepted',sentReplies:['thank you']},messages:[]};r=turn(c,'Ok');assert.equal(r.reply,'');
+console.log('All-reply dedupe: callback acknowledgement, legacy state, terminal messages and persistent history passed');
