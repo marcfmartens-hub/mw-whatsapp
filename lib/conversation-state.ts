@@ -149,7 +149,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const repeatedRequest = /\b(?:repeat|again|remind me|explain again|say that again)\b/i.test(text);
   const normalizeReply = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const deduplicateReply = (draft: string): string => {
-    if (repeatedRequest || !previousAssistantReplies.length) return draft;
+    if (repeatedRequest || !previousAssistantReplies.length || state.externalMediaPending && /external links|photos and attachments|listing you shared/i.test(draft)) return draft;
     let output = draft;
     const prior = previousAssistantReplies.map(normalizeReply);
     const blocks = output.split(String.fromCharCode(10,10));
