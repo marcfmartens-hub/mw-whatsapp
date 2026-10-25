@@ -334,6 +334,9 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const explicitBookingNow = explicitVisitRequest(text);
   if (!wasBooked && (state.salesConsultation || hasFutureValuation) && !explicitBookingNow) {
     state.salesConsultation = true;
+    if (/^(sorry|apologies|my apologies|sorry i was busy|sorry was busy|i was busy)[!. ]*$/i.test(text)) {
+      return end(["No problem at all! 😊", "We can book a free inspection appointment, or have our purchasing team call you to discuss your car and selling options.", "Which would you prefer?" ].join(String.fromCharCode(10,10)), "consult_choice", "collecting");
+    }
     const suppliedMethod = saleMethod(text);
     if (suppliedMethod) { state.salesMethod = suppliedMethod; updates.sales_inquiry = suppliedMethod; }
     const decline = refusesVisitForPrice(text);
