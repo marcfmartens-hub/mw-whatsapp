@@ -291,7 +291,24 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     return "next week "+label+" "+n+suffix+" of "+d.toLocaleString("en-GB",{month:"long",timeZone:"UTC"});
   };
   const inspectionExplanation = "Before buying your car, we need a quick free inspection to verify its condition. If everything is in order and we agree on a price, we can buy it and pay cash the same day.";
+  const requestedSellingDay = () => {
+    const statements = [updates.sell_timeline, c.sell_timeline, ...(c.messages ?? []).filter(m => m.role === "user").map(m => m.content)].filter(Boolean) as string[];
+    const weekdayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+    for (const statement of statements) {
+      const match = statement.match(/\\b(?:sell|selling|sale|sold)\\b.{0,90}?\\b(?:on\\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b/i);
+      if (!match) continue;
+      const wanted = weekdayNames.indexOf(match[1].toLowerCase());
+      const offset = (wanted - day + 7) % 7 || 7;
+      return { wanted, date: iso(new Date(+dubaiLocalTime + offset * 86400e3)) };
+    }
+    return null;
+  };
   const arrival = () => {
+    const requested = requestedSellingDay();
+    if (requested && requested.wanted !== 0) {
+      state.proposedDate = requested.date;
+      return inspectionExplanation + " What time would you like to come on " + appointmentDay(requested.date) + "?";
+    }
     const target = iso(new Date(+dubaiLocalTime + daysAhead * 86400e3));
     const sundayNotice = day === 0 || (day === 6 && daysAhead > 0) ? "We're closed on Sundays. " : "";
     const closedNotice = !open && !sundayNotice ? "We're currently closed. " : "";
