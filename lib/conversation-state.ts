@@ -154,6 +154,24 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
+  // Listings, images and attachments are not readable by Kaya. Never treat
+  // "check this" as an answer to the next questionnaire field.
+  const hasExternalLink = /(?:https?:\/\/|www\.)\S+|(?:\b[a-z0-9-]+\.)+(?:com|ae|net|org|io|app|co|me)\/\S*/i.test(text);
+  const referencesSharedMedia = /^(?:check|see|open|look(?:\s+at)?|view)(?:\s+(?:this|that|it|the\s+(?:link|photo|picture|image|ad|listing)))?(?:\s+(?:link|photo|picture|image|ad|listing))?[.! ]*$/i.test(text);
+  const mediaPlaceholder = /^\[?(?:image|photo|picture|attachment|file|document|video|unsupported(?:\s+media)?)\]?(?:\s+(?:attached|sent))?[.! ]*$/i.test(text);
+  if (hasExternalLink || referencesSharedMedia || mediaPlaceholder) {
+    const requested = [
+      !c.make || !c.model || !c.year ? "make, model and year" : "",
+      !c.mileage ? "mileage" : "",
+      !c.specs ? "whether it's GCC specs" : "",
+    ].filter(Boolean).join(", ");
+    return end(
+      "Sorry, I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" +
+      (requested ? " (" + requested + ")" : "") + "?",
+      requested ? (!c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : "specs") : question,
+      "collecting"
+    );
+  }
   // Only an uncertain answer to the SELLING-TIMELINE question triggers the
   // flexible cash-purchase / free-consignment explanation. Uncertainty about
   // specs, availability or inspection times must not enter this branch.
