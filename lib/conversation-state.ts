@@ -15,6 +15,7 @@ export type FlowState = {
   vehicles?: Vehicle[]; part?: "morning" | "afternoon" | "evening"; timeMin?: number; timeMax?: number;
   pendingTask?: { date: string; time: string; request: string };
   customerAgreedSlot?: boolean;
+  askedFields?: Record<string, boolean>;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
 export type Turn = { updates: Record<string, any>; state: FlowState; reply: string; confirm?: boolean; crm?: "lead" | "booking" | "change"; defaultDate?: string };
@@ -185,7 +186,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const answer = (reply: string) => [...prefix, reply].filter(Boolean).join("\n\n");
   if (/\b(?:just (?:inquiring|enquiring|inquiry|inquire)|only (?:inquiring|enquiring)|not ready|husband (?:is )?not (?:here|available)|too far|location is (?:too )?far)\b/i.test(text)) {
     note("Not ready / objection: " + text);
-    return end(answer(/\b(?:too far|location is .*far)\b/i.test(text) ? "I understand the distance is inconvenient. Inspections are only at our Al Quoz branch. Would you prefer a call with our team instead?" : "No pressure to book. Would you prefer a call from our team, or to contact us when you're ready?"), "callback", "collecting");
+    return end(answer(/\b(?:too far|location is .*far)\b/i.test(text) ? "I understand. We only inspect cars at our Al Quoz branch. Would another day work for you?" : "No problem. The inspection is free. Would you like to arrange a visit when you are ready?"), "time", "collecting");
   }
   if (SELF_CONTACT.test(text)) { state.consent = "declined"; note("CUSTOMER WILL CALL: No callback requested"); if (wasBooked) { state.previousDate = state.proposedDate; state.previousTime = state.proposedTime; } return end(answer(`Understood. Contact us on ${CONTACT_NUMBER} whenever you're ready.${wasBooked ? " Your visit will need reconfirming before we treat it as definite." : " Have a nice day!"}`), "", "customer_will_contact", wasBooked ? "change" : "lead"); }
   if (/\b(cancel|already sold|sold the car|not coming|stop messaging|do not contact|don't contact|unsubscribe|remove my number)\b/i.test(text) || NO.test(text) && question !== "loan" && question !== "specs" && question !== "mulkiya") { state.consent = "declined"; return end(answer("Understood. We won't continue the booking. You're welcome to contact us whenever you need us."), "", "closed", wasBooked ? "change" : "lead"); }
@@ -219,12 +220,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     if (amount && !/\b(?:km|kms|model|year|fines)\b/i.test(text) && !(Number(amount[1]) >= 1980 && Number(amount[1]) <= 2035 && !amount[2])) updates.mortgage_amount = String(Number(amount[1].replace(/,/g, "")) * (amount[2] ? 1000 : 1));
   }
   if (/\b(?:asap|soon|sell|ready|not in.*hurry|in \d+ days|next month|this month|next week|good (?:price|offer))\b/i.test(text) && !LOCATION_REQUEST.test(text)) updates.sell_timeline = text;
-  if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer(`Inspections take place only at our branch in Al Quoz 4, Dubai; we don't do home visits. Would visiting the branch work for you, or would you prefer a personal call?`), "choice", wasBooked ? "reconfirmation" : "collecting");
+  if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("We only inspect cars at our Al Quoz branch. Would you be able to visit us?"), "time", wasBooked ? "reconfirmation" : "collecting");
   if (/\b(?:call ?back|call me|arrange a call|call tomorrow|call on tomorrow|contact me tomorrow)\b/i.test(text)) {
     state.consent = "accepted"; note("Callback requested: " + text);
     return end(answer("Of course. Our purchasing team can call you on this WhatsApp number."), "", "team_accepted", "lead");
   }
-  if (/\b(?:not in (?:a )?hurry|next month|in 30 days|(?:will|i'?ll) (?:check|update|inform)|let me (?:think|check)|i'?ll let you know|once i'?m free|when i'?m ready)\b/i.test(text)) return end(answer("No problem. May our team call you on this WhatsApp number to discuss the car?"), "callback", "collecting");
+  if (/\b(?:not in (?:a )?hurry|next month|in 30 days|(?:will|i'?ll) (?:check|update|inform)|let me (?:think|check)|i'?ll let you know|once i'?m free|when i'?m ready)\b/i.test(text)) return end(answer("No problem. When would you like to come for a free inspection?"), "time", "collecting");
   if (PRICE.test(text) && !/\b(free|charge|fee|commission)\b/i.test(text)) { state.priceRequests = (state.priceRequests ?? 0) + 1; return end(answer(`I understand that the price matters before you make the trip. The final offer follows the free 10–15 minute inspection, with no obligation to sell.${price ? " I've recorded your asking price for the team." : ""} ${state.priceRequests >= 2 ? CHOICE : "Would you like to arrange the inspection?"}`), state.priceRequests >= 2 ? "choice" : "time", wasBooked ? state.status : "collecting"); }
   if (question === "callback" && !YES.test(text) && !dateFromText(text, now) && !timeFromText(text, true)) return end(answer("No problem. Contact us when you're ready, or let me know if you would like a personal call."), "callback");
   // Explicit travel-time statements are not arrival commitments.
@@ -245,8 +246,10 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const hasIntent = !!time && !/\?|\b(maybe|perhaps|if|busy|cannot|can'?t)\b/i.test(text);
   if (hasIntent && state.proposedDate && state.proposedTime) state.customerAgreedSlot = true;
   const knownLoan = updates.loan || c.loan;
-  const essential = !!(vehicle.make && vehicle.model && vehicle.year && vehicle.mileage && vehicle.specs);
-  const financeReady = Number(vehicle.year) < 2020 || /^no$/i.test(knownLoan ?? "") || /^yes$/i.test(knownLoan ?? "") && !!(updates.mortgage_amount || c.mortgage_amount);
+  // Missing vehicle/finance details must not prevent an explicitly agreed inspection.
+  // Verified non-GCC cars are already intercepted above and cannot be booked.
+  const essential = true;
+  const financeReady = true;
   if (essential && financeReady && state.proposedDate && state.proposedTime && slotValid(state.proposedDate, state.proposedTime, now) && (hasIntent || !wasBooked && state.customerAgreedSlot || question === "name" && !!name && state.status === "awaiting_confirmation")) {
     if (!validName(name || c.name)) return end(answer("May I have your name for the booking?"), "name", "awaiting_confirmation");
     const reply = answer(`You're booked for ${state.proposedDate} at ${state.proposedTime}. Our team will be in touch to confirm the details. Please bring your Emirates ID and Mulkiya.\n\n${LOCATION}`);
@@ -259,42 +262,24 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   }
   if (wasBooked && !date && !time) return end(answer(prefix.length ? "Let us know if you need to change the visit." : "You're welcome. Let us know if you need anything else about the inspection."), state.question);
   if (/\[(photo|file|sent photos\/files)\]/i.test(text)) { if (!state.mediaExplained) { prefix.push("I can't read photos or files, but I can use any details you type here."); state.mediaExplained = true; } }
-  // HARD RULE: Never send an identical unanswered question twice in succession.
-  // A new fact (such as a name) is acknowledged, but the missing field remains required.
-  // If no new fact was supplied, offer human help instead of looping.
-  // Question history persists with the conversation; never loop on a missing field.
-  // One clarification is allowed, then offer a human handover without restarting the form.
-  const next = (q: string, reply: string) => {
-    if (prefix.length && q === question && !Object.keys(updates).some(k => ["make","model","year","mileage","specs","name"].includes(k))) return end(answer("Is there anything else you would like to know before arranging an inspection?"), "choice", "collecting");
-    const history = (state as FlowState & { questionHistory?: Record<string, { attempts: number; lastPrompt: string }> }).questionHistory ?? {};
-    const previousEntry = history[q];
-    const changed = !!nameAcknowledgement || Object.keys(updates).some(k => !["flow_state", "step", "appointment_date", "appointment_time"].includes(k));
-    const previousIsQuestion = state.question === q;
-    const attempts = !changed ? (previousEntry?.attempts ?? (previousIsQuestion ? 1 : 0)) : 0;
-    if (attempts >= 2) {
-      if (state.question === "callback") return end(answer("You can contact our purchasing team whenever you are ready. " + CONTACT_NUMBER), "", "customer_will_contact");
-      state.question = "callback";
-      return end(answer("Would you prefer our purchasing team to call you and help with the remaining details?"), "callback", "collecting");
-    }
-    if (attempts === 1) {
-      history[q] = { attempts: 2, lastPrompt: reply };
-      (state as FlowState & { questionHistory?: typeof history }).questionHistory = history;
-      return end(answer("No problem if you're unsure. " + (q === "specs" ? "We can continue with the specifications marked as unknown." : "Could you clarify that detail, or would you prefer our team to help?")), q, "collecting");
-    }
-    history[q] = { attempts: 1, lastPrompt: reply };
-    (state as FlowState & { questionHistory?: typeof history }).questionHistory = history;
-    return end(answer([nameAcknowledgement, reply].filter(Boolean).join(" ")), q, "collecting");
+  // Booking-first: ask each optional field once, then move forward.
+  // This is persisted with the conversation and does not reset on unrelated replies.
+  const asked = state.askedFields ?? {};
+  const askOnce = (key: string, reply: string): Turn | null => {
+    if (asked[key]) return null;
+    asked[key] = true;
+    state.askedFields = asked;
+    return end(answer([nameAcknowledgement, reply].filter(Boolean).join(" ")), key, "collecting");
   };
-  if (!(c.messages?.some(m => m.role === "assistant")) && !name && !vehicle.make && !prefix.length) return next("name", "I'm Kaya from Mister Wheelz. May I know your name, please?");
-  if (!vehicle.make || !vehicle.model || !vehicle.year) { const missing = [!vehicle.make ? "make" : "", !vehicle.model ? "model" : "", !vehicle.year ? "year" : ""].filter(Boolean); return next("vehicle", `Could you type the car's ${missing.join(" and ")}?`); }
-  if (!vehicle.mileage) return next("mileage", "What's the mileage on the car?");
-  if (!vehicle.specs) return next("specs", "Is it GCC specs, non-GCC, or are you unsure?");
+  // The customer can give facts in any order. Never restart the questionnaire.
+  if (!vehicle.make && !asked.vehicle) return askOnce("vehicle", "What car are you selling?")!;
+  if (vehicle.make && (!vehicle.model || !vehicle.year) && !asked.vehicle) return askOnce("vehicle", "What's the model and year?")!;
+  if (!vehicle.mileage && !asked.mileage) return askOnce("mileage", "What's the mileage?")!;
+  if (!vehicle.specs && !asked.specs) return askOnce("specs", "Is it GCC specs? If you're not sure, that's fine.")!;
   const loan = updates.loan || c.loan;
-  if (Number(vehicle.year) >= 2020 && !/^(yes|no)$/i.test(loan ?? "")) return next("loan", "Is there an outstanding loan or mortgage on the car?");
-  if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount)) return next("balance", "We can help with free loan settlement. How much is the outstanding balance?");
-  if (!(updates.sell_timeline || c.sell_timeline) && question !== "sell") return next("sell", "When are you planning to sell the car?");
-  if (/\bnext week\b/i.test(text)) return next("time", "Which day next week would suit you for the inspection?");
-  const today = local.getUTCDay() !== 0 && local.getUTCHours() < 18;
-  const day = today ? "today" : "tomorrow";
-  return next("time", `Which day and arrival time would suit you for the free inspection? We can look at ${day}, or a later day that works for you.`);
+  if (Number(vehicle.year) >= 2020 && !/^(yes|no)$/i.test(loan ?? "") && !asked.loan) return askOnce("loan", "Does the car have a loan?")!;
+  if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount) && !asked.balance) return askOnce("balance", "How much is left on the loan?")!;
+  if (!(updates.sell_timeline || c.sell_timeline) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
+  if (!state.proposedDate) return end(answer("When would you like to come for a free inspection?"), "time", "visit_proposed");
+  return end(answer(`What time would you like to come on ${state.proposedDate}?`), "exact_time", "visit_proposed");
 }
