@@ -39,7 +39,7 @@ export default function TestChat() {
   finally {setBusy(false);}
  }
  const orange="#fd9800";
- return <main style={{minHeight:"100vh",background:"#f3f5f8",padding:"20px",fontFamily:"Arial,sans-serif",color:"#17202d"}}>
+ return (<main style={{minHeight:"100vh",background:"#f3f5f8",padding:"20px",fontFamily:"Arial,sans-serif",color:"#17202d"}}>
  <div style={{maxWidth:1040,margin:"auto"}}>
  <header style={{background:"#151c29",color:"white",padding:24,borderRadius:16}}>
  <div style={{fontSize:24,fontWeight:800}}><span style={{color:orange}}>KAYA</span> · Real Conversation Test</div>
@@ -69,5 +69,5 @@ export default function TestChat() {
  </div>
  </section>
  <section style={{background:"white",borderRadius:16,padding:16}}><strong>Real engine state</strong><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",fontSize:12,background:"#f4f6f8",padding:12,borderRadius:10}}>{JSON.stringify(state||{status:"No messages yet"},null,2)}</pre></section>
- </div></div></main>;
+ </div></div></main>);
 }
