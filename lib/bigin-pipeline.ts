@@ -29,15 +29,16 @@ export async function ensureBiginPipeline(contactId:string,c:any,token:string):P
  const outcome:BiginOutcome=c.bigin_outcome;
  const target=await pipelineTarget(token,outcome);
  const rows=await read(`${BASE}/Contacts/${contactId}/Pipelines?pipeline_id=${target.id}&fields=Deal_Name,Stage,Sub_Pipeline,Created_Time`,token);
- const existing=(rows.data||[]).filter((r:any)=>r.Sub_Pipeline===target.sub).sort((a:any,b:any)=>String(b.Created_Time||"").localeCompare(String(a.Created_Time||"")))[0];
+ let existing=(rows.data||[]).filter((r:any)=>r.Sub_Pipeline===target.sub).sort((a:any,b:any)=>String(b.Created_Time||"").localeCompare(String(a.Created_Time||"")))[0];
  const managed=["Booking","New Booking","Booked Appointments","New Appointments - Chat Bot","Call Back","New Message","No Response"];
- if(existing&&!managed.includes(existing.Stage)){
+ if(existing&&!managed.includes(existing.Stage)&&c.preserve_staff_stage){
    const check=await read(`${BASE}/Pipelines/${existing.id}?fields=Stage,Contact_Name`,token);
    const saved=check.data?.[0];
    if(!saved||String(saved.Contact_Name?.id)!==contactId)throw new Error("Staff card contact verification failed");
    console.log(`[Bigin] preserving staff-managed card=${existing.id} stage=${saved.Stage}`);
    return {contactId,pipelineId:String(existing.id),stage:saved.Stage,teamPipelineId:target.id};
  }
+ if(existing&&!managed.includes(existing.Stage))existing=undefined;
  const data:Record<string,any>={
   Deal_Name:([c.name||c.make||"WhatsApp seller",c.make,c.model,c.year].filter(Boolean).join(" · ")+" · "+String(c.phone||c.phone_number||"").slice(-4)).slice(0,255),
   Pipeline:{id:target.id},Sub_Pipeline:target.sub,Stage:target.stage,Contact_Name:{id:contactId},

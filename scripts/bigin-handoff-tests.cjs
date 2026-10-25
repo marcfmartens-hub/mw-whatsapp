@@ -42,6 +42,11 @@ global.fetch=async(url,opts={})=>{
  let result=await ensureBiginPipeline('c1',{...lead,bigin_outcome:'callback'},'not-a-real-token');assert.equal(result.pipelineId,'p1');assert.equal(posts,1);
  await ensureBiginPipeline('c1',{...lead,bigin_outcome:'callback'},'not-a-real-token');assert.equal(posts,1);assert.equal(puts,1);
  result=await ensureBiginPipeline('c1',{...lead,bigin_outcome:'booked',appointment_date:'2026-10-26',appointment_time:'13:00'},'not-a-real-token');assert.equal(result.stage,'Booking');assert.equal(saved.Appointment_Date_and_Time,'2026-10-26T13:00:00+04:00');
+ saved.Stage='Lost | Stage 1';
+ const previousWrites=posts+puts;
+ const kept=await ensureBiginPipeline('c1',{...lead,bigin_outcome:'callback',preserve_staff_stage:true},'not-a-real-token');assert.equal(kept.stage,'Lost | Stage 1');assert.equal(posts+puts,previousWrites);
+ const beforeFresh=posts;
+ const fresh=await ensureBiginPipeline('c1',{...lead,bigin_outcome:'callback'},'not-a-real-token');assert.equal(fresh.stage,'Call Back');assert.equal(posts,beforeFresh+1);
  failWrite=true;await assert.rejects(()=>ensureBiginPipeline('c1',{...lead,bigin_outcome:'callback'},'not-a-real-token'),/write failed/);failWrite=false;
  badRead=true;await assert.rejects(()=>ensureBiginPipeline('c1',{...lead,bigin_outcome:'callback'},'not-a-real-token'),/read-back/);badRead=false;
  record={...lead,flow_state:{status:'team_accepted'}};writes=[];accepted=false;
