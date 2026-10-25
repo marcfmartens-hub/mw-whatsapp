@@ -11,7 +11,7 @@ export default function ImprovementActions({proposals,releases,enabled,onRefresh
   catch(e:any){setStatus("Error: "+(e.message||"Request failed"))}finally{setBusy("")}
  }
  const btn:React.CSSProperties={padding:"10px 13px",borderRadius:9,border:"1px solid #d1d5db",background:"#fff",fontWeight:700,margin:4};
- return <section style={{padding:16,border:"1px solid #dfe3e9",borderRadius:12,background:"white"}}>
+ return (<section style={{padding:16,border:"1px solid #dfe3e9",borderRadius:12,background:"white"}}>
  <h3 style={{marginTop:0}}>Production improvement controls</h3>
  <p style={{fontSize:13,color:"#667085"}}These buttons use the existing evidence review, validation, publishing and rollback services. A queued action is not a successful deployment. They do not operate on sandbox conversations.</p>
  <button style={btn} disabled={!!busy||!enabled} onClick={()=>action("analyze_recent",{count:10})}>Analyze latest 10 chats</button>
@@ -32,5 +32,5 @@ export default function ImprovementActions({proposals,releases,enabled,onRefresh
  <b>{String(r.status||"unknown")}</b> · {String(r.created_at||"")} {r.error&&<p style={{color:"#b42318"}}>{String(r.error)}</p>}
  <button style={btn} disabled={!!busy||!r.id} onClick={()=>action("rollback_code",{release:r.id},"Request rollback of this production release?")}>Rollback</button>
  </div>)}
- </section>;
+ </section>);
 }
