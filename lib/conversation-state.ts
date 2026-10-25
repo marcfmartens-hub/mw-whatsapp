@@ -358,7 +358,14 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const financeReady = true;
   if (essential && financeReady && state.proposedDate && state.proposedTime && slotValid(state.proposedDate, state.proposedTime, now) && (hasIntent || !wasBooked && state.customerAgreedSlot || question === "name" && !!name && state.status === "awaiting_confirmation")) {
     if (!validName(name || c.name)) return end(answer("May I have your name for the booking?"), "name", "awaiting_confirmation");
-    const reply = answer(`You're booked for ${state.proposedDate} at ${state.proposedTime}. Our team will be in touch to confirm the details. Please bring your Emirates ID and Mulkiya.\n\n${LOCATION}`);
+    const bookedDate = new Date(state.proposedDate + "T12:00:00Z");
+    const bookedDay = bookedDate.toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" });
+    const bookedMonth = bookedDate.toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
+    const bookedNumber = bookedDate.getUTCDate();
+    const bookedSuffix = bookedNumber % 100 >= 11 && bookedNumber % 100 <= 13 ? "th" : bookedNumber % 10 === 1 ? "st" : bookedNumber % 10 === 2 ? "nd" : bookedNumber % 10 === 3 ? "rd" : "th";
+    const [bookedHour, bookedMinute] = state.proposedTime.split(":").map(Number);
+    const bookedTime = String(bookedHour % 12 || 12) + (bookedMinute ? ":" + String(bookedMinute).padStart(2, "0") : "") + " " + (bookedHour >= 12 ? "pm" : "am");
+    const reply = answer(`You're booked for ${bookedDay} ${bookedNumber}${bookedSuffix} of ${bookedMonth} at ${bookedTime}. Our team will be in touch to confirm the details. Please bring your Emirates ID and Mulkiya.\\n\\n${LOCATION}`);
     const result = end(reply, "", "booked", wasBooked ? "change" : "booking"); result.confirm = true; result.updates.appointment_date = state.proposedDate; result.updates.appointment_time = state.proposedTime; return result;
   }
   if (essential && financeReady && state.proposedDate && !state.proposedTime) {
