@@ -180,6 +180,15 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
+  // Intent-first gate: customer availability and consent override any questionnaire.
+  // Do not infer an appointment or callback from a polite postponement.
+  const pauseIntent = /\b(?:i(?:'m| am)\s+(?:busy|occupied|working|in a meeting)|busy\s+(?:now|at the moment|right now)|can(?:not|'t)\s+(?:talk|chat|reply)\s+(?:now|right now)|not\s+(?:a good|the right)\s+time|i(?:'ll| will)\s+(?:get back to you|message you|text you|reach out|contact you|call you)\s*(?:later|soon|when i(?:'m| am) free)?|(?:let me|i need to)\s+(?:get back to you|think about it)|talk\s+(?:later|another time))\b/i.test(text);
+  const explicitRequestNow = /\b(?:please\s+call\s+me|can\s+you\s+call\s+me|call\s+me\s+(?:later|tomorrow|at)|book\s+(?:me|an appointment)|schedule\s+(?:an?\s+)?inspection)\b/i.test(text);
+  if (!wasBooked && pauseIntent && !explicitRequestNow) {
+    state.consent = "declined";
+    note("CUSTOMER WILL CONTACT: Paused by customer; no callback or automated follow-up requested");
+    return end("No problem at all! 😊 Take your time. Message us whenever you're ready. Have a great day!", "", "customer_will_contact", "lead");
+  }
   // Listings, images and attachments are not readable by Kaya. Never treat
   // "check this" as an answer to the next questionnaire field.
   const hasExternalLink = /(?:https?:\/\/|www\.)\S+|(?:\b[a-z0-9-]+\.)+(?:com|ae|net|org|io|app|co|me)\/\S*/i.test(text);
