@@ -3,6 +3,7 @@ import { sessionUser } from "@/lib/monitorRole";
 import { planTurn, type Chat, type Vehicle } from "@/lib/conversation-state";
 import { extractVehicleInfo } from "@/lib/claude";
 import { learnedMessage } from "@/lib/kaya-improve/learning";
+import { detect, regression } from "@/lib/kaya-improve/detect";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 export async function POST(req: NextRequest) {
@@ -26,7 +27,9 @@ export async function POST(req: NextRequest) {
       ? await extractVehicleInfo(message, { make: chat.make || undefined, model: chat.model || undefined, year: chat.year || undefined }).catch(() => ({})) : {};
     const turn = planTurn(chat, interpreted, fields);
     const next = { ...chat, ...turn.updates, messages: [...messages, { role: "user", content: message }, { role: "assistant", content: turn.reply }].slice(-30) };
-    return NextResponse.json({ reply: turn.reply, chat: next, state: turn.state, source: "production-conversation-engine", isolated: true, note: turn.defaultDate ? "A default slot was proposed but availability was not checked in this isolated test." : undefined }, { headers: { "Cache-Control": "no-store" } });
+    const analysis = detect({phone:"00000000",name:next.name,appointment_date:next.appointment_date,appointment_time:next.appointment_time,messages:next.messages});
+    const tests = regression();
+    return NextResponse.json({ reply: turn.reply, chat: next, state: turn.state, intelligence:{findings:analysis.findings.map((f,i)=>({...f,id:`test-${i+1}`,status:"flagged",verification:"Rule-based detection; requires independent confirmation"})),regression:{passed:tests.filter(t=>t.passed).length,total:tests.length,results:tests},stages:[{name:"Detect",status:"complete"},{name:"Flag",status:analysis.findings.length?"flagged":"clear"},{name:"Analyze",status:analysis.findings.length?"awaiting independent verification":"not required"},{name:"Solution",status:analysis.findings.length?"suggestions available":"not required"},{name:"Test",status:"baseline regression executed"},{name:"Deploy",status:"sandbox blocked"}]}, source: "production-conversation-engine", isolated: true, note: turn.defaultDate ? "A default slot was proposed but availability was not checked in this isolated test." : undefined }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     console.error("[test-chat]", e);
     return NextResponse.json({ error: "Test engine failed" }, { status: 500 });
