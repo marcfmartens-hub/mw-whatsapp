@@ -16,6 +16,7 @@ export type FlowState = {
   pendingTask?: { date: string; time: string; request: string };
   customerAgreedSlot?: boolean;
   askedFields?: Record<string, boolean>;
+  externalMediaPending?: boolean; externalMediaReminderCount?: number;
 };
 export type Chat = Record<string, any> & { messages?: { role: string; content: string }[] | null };
 export type Turn = { updates: Record<string, any>; state: FlowState; reply: string; confirm?: boolean; crm?: "lead" | "booking" | "change"; defaultDate?: string };
@@ -159,19 +160,25 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const hasExternalLink = /(?:https?:\/\/|www\.)\S+|(?:\b[a-z0-9-]+\.)+(?:com|ae|net|org|io|app|co|me)\/\S*/i.test(text);
   const referencesSharedMedia = /^(?:check|see|open|look(?:\s+at)?|view)\s+(?:this|that|it|the\s+(?:link|photo|picture|image|ad|listing))(?:\s+(?:link|photo|picture|image|ad|listing))?(?:\s+for\s+(?:all\s+)?(?:the\s+)?(?:info|information|details))?[.! ]*$/i.test(text);
   const mediaPlaceholder = /^\[?(?:image|photo|picture|attachment|file|document|video|unsupported(?:\s+media)?)\]?(?:\s+(?:attached|sent))?[.! ]*$/i.test(text);
-  if (hasExternalLink || referencesSharedMedia || mediaPlaceholder) {
-    const requested = [
+  const linkFollowup = /^(?:check|see|open|look(?:\s+at)?|view)\s+(?:(?:the|my|that|this)\s+)?(?:link|ad|listing|photo|picture|image)(?:\s+for\s+(?:all\s+)?(?:the\s+)?(?:info|information|details))?[.! ]*$/i.test(text);
+  if (hasExternalLink || referencesSharedMedia || mediaPlaceholder || linkFollowup) {
+    const repeated = Boolean(state.externalMediaPending);
+    state.externalMediaPending = true;
+    state.externalMediaReminderCount = (state.externalMediaReminderCount ?? 0) + 1;
+    const missing = [
       !c.make || !c.model || !c.year ? "make, model and year" : "",
       !c.mileage ? "mileage" : "",
-      !c.specs ? "whether it's GCC specs" : "",
-    ].filter(Boolean).join(", ");
-    return end(
-      "Sorry, I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" +
-      (requested ? " (" + requested + ")" : "") + "?",
-      requested ? (!c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : "specs") : question,
-      "collecting"
-    );
+      !c.specs ? "GCC or non-GCC specs" : "",
+    ].filter(Boolean);
+    const reply = repeated
+      ? "I understand the information is in the link, but I'm unable to open or read it here. Please type the car details directly in this chat so I can help you."
+      : "Thanks for sharing. I can't open external links or view photos and attachments here. Could you please type the car details directly in the chat" + (missing.length ? " (" + missing.join(", ") + ")" : "") + "?";
+    return end(reply, state.question || (!c.make || !c.model || !c.year ? "vehicle" : !c.mileage ? "mileage" : "specs"), "collecting");
   }
+  // The link explanation is a temporary conversation state, not an answer.
+  // Keep all known car details and resume the same missing field on a real reply.
+  if (state.externalMediaPending) state.externalMediaPending = false;
+
   // Only an uncertain answer to the SELLING-TIMELINE question triggers the
   // flexible cash-purchase / free-consignment explanation. Uncertainty about
   // specs, availability or inspection times must not enter this branch.
