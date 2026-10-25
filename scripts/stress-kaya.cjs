@@ -59,5 +59,6 @@ assert(!offer.confirm,"Booked without time or consent");
 const timed=turn(booking,"4pm");
 assert(!timed.confirm,"Booked without name");
 const named=turn(booking,"My name is John");
+console.log("BOOKING_DEBUG",JSON.stringify({offer:{q:offer.state.question,reply:offer.reply},timed:{q:timed.state.question,reply:timed.reply},named:{q:named.state.question,reply:named.reply,confirm:named.confirm},chat:{name:booking.name,date:booking.flow_state?.proposedDate,time:booking.flow_state?.proposedTime,status:booking.flow_state?.status}}));
 assert(named.confirm && named.state.status==="booked","Agreed appointment was not booked");
 console.log("Kaya conversation stress checks passed:",assertions);
