@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const interpreted = learnedMessage(message);
-    const fields: Vehicle = /\\d|\\b(car|model|gcc|spec|sell|selling)\\b/i.test(message)
+    const fields: Vehicle = /\d|\b(car|model|gcc|spec|sell|selling)\b/i.test(message)
       ? await extractVehicleInfo(message, { make: chat.make || undefined, model: chat.model || undefined, year: chat.year || undefined }).catch(() => ({})) : {};
     const turn = planTurn(chat, interpreted, fields);
     const next = { ...chat, ...turn.updates, messages: [...messages, { role: "user", content: message }, { role: "assistant", content: turn.reply }].slice(-30) };
