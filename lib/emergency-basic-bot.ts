@@ -18,7 +18,7 @@ export function inspectionTime(time:string):string {
 // Keep location and contact information without appending the old opening-hours line.
 const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
-type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string };
+type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[] };
 const nameFrom = (text:string) => {
  const n=text.trim().replace(/^(my name is|i am|i'm|this is)\s+/i, "").replace(/[.!]+$/, "");
  return /^[a-z][a-z '-]{1,45}$/i.test(n) && !/\b(hi|hello|hey|call|yes|no|okay|ok|price|cash|today|tomorrow|book|inspection|why|what|how|want|selling|sell|please|thanks|thank|stop|later|team|human|location)\b/i.test(n) ? n : null;
@@ -28,19 +28,45 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const b:State = /Emergency (Basic|Chat) Bot V1/.test(old.basicMode||"") ? {...old,basicMode:EMERGENCY_MODE} : {basicMode:EMERGENCY_MODE,basicStep:c.name?"vehicle":"name"};
  const u:Record<string,any>={};
  for(const k of ["make","model","year","mileage","specs"]) if(fields[k])u[k]=fields[k];
+ // Read earlier customer answers as well as the current message. The extractor can
+ // omit uncertainty; explicit specs and mileage answers must still be retained.
+ const vehicleStage=["vehicle","contact","confirm"].includes(b.basicStep);
+ const history=(c.messages||[]) as {role:string;content:string}[];
+ const userTexts=[...history.filter(m=>m.role==="user").map(m=>m.content),text];
+ for(const answer of userTexts){
+   if(/\b(non[ -]?gcc|not gcc|american specs|european specs|japanese specs|korean specs|chinese specs)\b/i.test(answer))u.specs="Non-GCC";
+   else if(/\bgcc\b/i.test(answer)&&!/\b(not sure|unsure|unknown|don'?t know|do not know|gcc or)\b/i.test(answer))u.specs="GCC";
+   else if(/\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(answer) && (vehicleStage||/\b(specs|specifications|gcc|bmw|toyota|mercedes|audi|nissan|lexus|porsche|ford|honda)\b/i.test(answer)))u.specs="Unknown";
+   const mileage=answer.match(/\b(\d[\d,]*(?:\.\d+)?)\s*(k)?\s*(?:km|kms|kilomet(?:er|re)s?)\b/i)
+     || (vehicleStage?answer.trim().match(/^(\d[\d,]*(?:\.\d+)?)\s*(k)$/i):null);
+   if(mileage)u.mileage=String(Math.round(Number(mileage[1].replace(/,/g,""))*(mileage[2]?1000:1)));
+ }
+ // An explicit field extracted from this message takes precedence over older history,
+ // except that an uncertain specs answer must never be overwritten by a guess.
+ for(const k of ["make","model","year","mileage","specs"])if(fields[k])u[k]=fields[k];
+ if(vehicleStage&&/\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(text))u.specs="Unknown";
  const value=(k:string)=>u[k]||c[k];
  const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
  const msg=text.trim();
  const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
  const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
- const refuse=/\b(no|not now|not interested|not ready|can't|cannot|don't|do not|refuse|stop|never)\b/i.test(msg);
+ const refuse=/\b(no|not now|not interested|not ready|can't|cannot|don't(?! know)|do not(?! know)|refuse|stop|never)\b/i.test(msg);
  const objection=/\?|\b(price|how much|offer|valuation|home visit|pickup|pick up|why|how does|explain|loan|mortgage|consignment|cash|politic|religion|location|address)\b/i.test(msg);
  const yes=/^(yes|yes please|yeah|yep|confirm|confirmed|correct|sure|ok|okay|fine)[.!]?$/i.test(msg);
  const date=dateFromText(msg,now), time=timeFromText(msg,true);
+ if(b.basicStep==="vehicle" && /mileage/i.test(history.filter(m=>m.role==="assistant").at(-1)?.content||"") && /^\d[\d,]*$/.test(msg))u.mileage=msg.replace(/,/g,"");
  let reply="", action="collecting";
- const missingVehicle=()=>["make","model","year","mileage","specs"].filter(k=>!value(k));
- const labels:Record<string,string>={make:"make",model:"model",year:"year",mileage:"mileage",specs:"GCC specifications or whether you're unsure"};
- const askVehicle=()=>"Please share your car's "+missingVehicle().map(k=>labels[k]).join(", ")+".";
+ const vehicleKeys=["make","model","year","mileage","specs"];
+ const questions:Record<string,string>={make:"What make is the car?",model:"Which model is it?",year:"What year is it?",mileage:"What is the mileage?",specs:"Is it GCC or non-GCC?"};
+ b.askedVehicle=[...(b.askedVehicle||[])];
+ // Restore asked fields for chats started before per-field tracking was added.
+ const lastAssistant=history.filter(m=>m.role==="assistant").at(-1)?.content||"";
+ for(const k of vehicleKeys)if((lastAssistant===questions[k] || k==="specs"&&/Please share your car's GCC/i.test(lastAssistant))&&!b.askedVehicle.includes(k))b.askedVehicle.push(k);
+ const nextVehicle=()=>{
+   const k=vehicleKeys.find(k=>!value(k)&&!b.askedVehicle!.includes(k));
+   if(k){b.askedVehicle!.push(k);b.basicStep="vehicle";reply=questions[k];}
+   else {b.basicStep="timeline";reply="When are you planning to sell the car?";}
+ };
  const callback=()=>{
    b.basicStep="callback";
    const missing=[!value("name")?"name":null,!phone()?"phone number":null].filter(Boolean);
@@ -54,7 +80,6 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    }
    else if(!value("name"))reply="May I have your name for the booking?";
    else if(!phone())reply="What phone number should we use for your booking?";
-   else if(missingVehicle().length)reply=askVehicle();
    else {
      u.appointment_date=b.proposedDate;u.appointment_time=b.proposedTime;
      u.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";action="booked";
@@ -70,20 +95,24 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  }
  else if(call || refuse)callback();
  else if(!(c.messages||[]).some((m:any)=>m.role==="assistant") && !old.basicMode){reply="Hi, I'm Kaya, Mister Wheelz's virtual assistant. What’s your name?";b.basicStep="name";}
- else if(objection && !date && !time && !book){if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}}
+ else if(objection && !date && !time && !book && !(vehicleStage && /\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(msg))){if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}}
  else if(b.basicStep==="name"){
    const n=nameFrom(msg);
-   if(n){u.name=n;b.basicStep="vehicle";reply=missingVehicle().length?askVehicle():"When are you planning to sell your car?";if(!missingVehicle().length)b.basicStep="timeline";}
+   if(n){u.name=n;b.basicStep="vehicle";reply="Which car are you planning to sell?";}
    else {b.offscript=true;b.basicStep="choice";reply=CHOICE;}
  }
  else if(b.basicStep==="vehicle"){
-   if(!missingVehicle().length){b.basicStep="timeline";reply="When are you planning to sell your car?";}
-   else if(Object.keys(u).length)reply=askVehicle();
-   else if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}
+   if(book){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
+   else if(/\b(today|tomorrow|week|month|asap|urgent|soon|now)\b/i.test(msg)&&!/\b(km|kms)\b/i.test(msg)){
+     u.sell_timeline=msg.slice(0,200);b.basicStep="choice";reply="Would you prefer to book a free inspection or have our team call you?";
+   }else nextVehicle();
  }
  else if(b.basicStep==="timeline"){
-   if(/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|ready|day|sell|selling)\b/i.test(msg)){u.sell_timeline=msg.slice(0,200);b.basicStep="choice";reply="Would you prefer to book a free inspection or have our team call you?";}
-   else if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}
+   if(book){b.basicStep="daytime";reply=SCHEDULE_QUESTION;}
+   else {
+     if(/\b(today|tomorrow|week|month|year|asap|urgent|soon|now|ready|day|sell|selling)\b/i.test(msg))u.sell_timeline=msg.slice(0,200);
+     b.basicStep="choice";reply="Would you prefer to book a free inspection or have our team call you?";
+   }
  }
  else if(b.basicStep==="choice"){
    if(book||yes||date||time){

@@ -26,3 +26,22 @@ r=turn(c,'tomorrow at 2 pm');assert.equal(r.action,'collecting');assert.match(r.
 c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'confirm',proposedDate:'2026-10-27',proposedTime:'14:00'}};
 assert.equal(turn(c,'Yes').action,'booked');
 console.log('Simplified scheduling: exact transcript, automatic confirmation, missing data and legacy YES passed');
+
+// Current report: uncertainty is a complete specs answer and must not be repeated.
+c=base();turn(c,'Hi');assert.equal(turn(c,'Jace').reply,'Which car are you planning to sell?');
+r=turn(c,'Bmw 2020 x5 not sure',{make:'BMW',model:'X5',year:'2020'});assert.equal(c.specs,'Unknown');assert.equal(r.reply,'What is the mileage?');
+r=turn(c,'125k km');assert.equal(c.mileage,'125000');assert.equal(r.reply,'When are you planning to sell the car?');assert.doesNotMatch(r.reply,/GCC|mileage/);
+// Each missing field is asked once. Ignored answers do not cause loops or block booking.
+c=base();turn(c,'Hi');turn(c,'Jace');let prompts=[];
+for(let i=0;i<7;i++)prompts.push(turn(c,'okay').reply);
+assert.equal(new Set(prompts.slice(0,5)).size,5);assert.equal(prompts.filter(p=>p==='What is the mileage?').length,1);assert.equal(prompts.filter(p=>p==='Is it GCC or non-GCC?').length,1);assert.ok(prompts.includes('When are you planning to sell the car?'));
+turn(c,'book');turn(c,'tomorrow');r=turn(c,'2 pm');assert.equal(r.action,'booked');
+// Uncertain specs with punctuation or do-not-know must stay in the basic flow.
+for(const answer of ["not sure?","I don't know","I do not know"]){
+ c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['specs']},messages:[{role:'assistant',content:'Is it GCC or non-GCC?'}]};
+ r=turn(c,answer);assert.equal(c.specs,'Unknown');assert.equal(r.reply,'When are you planning to sell the car?');
+}
+// Non-GCC and numeric mileage are retained; already captured fields are skipped.
+c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle'},messages:[]};
+r=turn(c,'Non GCC');assert.equal(c.specs,'Non-GCC');assert.equal(r.reply,'What is the mileage?');r=turn(c,'125000');assert.equal(c.mileage,'125000');assert.equal(r.reply,'When are you planning to sell the car?');
+console.log('One-at-a-time collection: reported chat, uncertain specs, skipped answers and known-field checks passed');
