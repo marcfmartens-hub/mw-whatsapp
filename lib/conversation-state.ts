@@ -150,6 +150,8 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const repeatedRequest = /\b(?:repeat|again|remind me|explain again|say that again)\b/i.test(text);
   const normalizeReply = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const deduplicateReply = (draft: string): string => {
+    // Intent-handled replies must never be replaced by questionnaire fallbacks.
+    if (state.question === "consult_choice" || state.question === "consult_inspection" || state.question === "buyer_contact" || state.question === "buyer_name" || state.question === "buyer_phone" || state.status === "customer_will_contact") return draft;
     if (repeatedRequest || !previousAssistantReplies.length || state.externalMediaPending && /external links|photos and attachments|listing you shared/i.test(draft)) return draft;
     let output = draft;
     const prior = previousAssistantReplies.map(normalizeReply);
@@ -181,6 +183,21 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
+  // Interrupt normal form collection for direct price questions and frustration.
+  // This runs before name, mileage, booking and other questionnaire branches.
+  const customerFrustrated = /\b(?:are you stupid|you(?:'re| are) stupid|idiot|not listening|not understanding|stop repeating|asked you already|what is wrong with you|useless bot|stupid bot)\b/i.test(text);
+  const priceDemand = /^(?:price|price\??|how much\??|how much (?:you|can you|will you|would you) (?:give|offer|pay).*|i want to know (?:the )?price|tell me (?:the )?price|what(?:'s| is) (?:the )?(?:price|offer)).*$/i.test(text);
+  const priorPriceRequest = (c.messages ?? []).some(m => m.role === "user" && /\b(?:price|how much|worth|offer)\b/i.test(m.content));
+  if (!wasBooked && (priceDemand || customerFrustrated && (priorPriceRequest || state.salesConsultation))) {
+    state.salesConsultation = true;
+    state.consultExplained = true;
+    const details = {make:updates.make||c.make,model:updates.model||c.model,year:updates.year||c.year,mileage:updates.mileage||c.mileage,specs:updates.specs||c.specs};
+    const missing = missingCarDetails(details);
+    if (missing.length && !customerFrustrated) return end("I understand you want to know how much we can get for your car. To help our purchasing team assess it, please share " + missing.join(", ") + ".", "consult_details", "collecting", "lead");
+    state.visitDeclinedForPrice = true;
+    return end((customerFrustrated ? "I'm sorry. You're right — I should have answered your question instead of repeating myself.\n\n" : "I understand you'd like to know the price first.\n\n") + "We offer direct cash purchase or free consignment. Both require a free inspection before we can confirm a final offer. Would you prefer to book an inspection or have our purchasing team call you?", "consult_choice", "collecting", "lead");
+  }
+  if (!wasBooked && customerFrustrated) return end("I'm sorry — I haven't been listening properly. I can arrange for our team to help you directly. Would you like a callback?", "callback", "collecting", "lead");
   // Buying enquiries override the seller questionnaire, including after an earlier car-model message.
   const buyingNow = /\b(?:looking\s+to\s+buy|want\s+to\s+buy|wish\s+to\s+buy|looking\s+for\s+(?:a|an|the)?\s*(?:car|vehicle|sonata|camry)|do\s+you\s+have\s+(?:a|an|the)?\s*[a-z0-9]|have\s+(?:a|an)\s+[a-z]+\s+for\s+sale|i\s+am\s+(?:buying|a\s+buyer)|buy\s+instead|looking\s+to\s+purchase)\b/i.test(text);
   const sellerNow = /\b(?:selling\s+my\s+car|sell\s+my\s+car|want\s+to\s+sell|i\s+am\s+selling)\b/i.test(text);
@@ -405,6 +422,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       return end(intro + missing.join(", ") + "?", "consult_details", "collecting", "lead");
     }
     const customerName = updates.name || c.name;
+    if (!customerName && (priceQuestion || state.question === "consult_choice")) return end("I understand you want the price first. We offer direct cash purchase and free consignment. Both require a free inspection before confirming an offer. Would you prefer an inspection or a purchasing-team callback?", "consult_choice", "collecting", "lead");
     if (!customerName) return end("Thank you, I have your car details. May I have your name, please?", "consult_name", "collecting", "lead");
     if (state.awaitingUaeCallbackNumber) {
       const number = numberFromMessage(text);
@@ -440,6 +458,8 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
       note("CALL BACK: Customer still requests valuation before inspection; vehicle " + carSummary);
       return end("I understand. I'll pass your details and price question to our purchasing team for a callback. No inspection has been booked.", "", "team_accepted", "lead");
     }
+    if (state.question === "consult_choice" && /\b(?:inspection|book|appointment|come in|visit)\b/i.test(text)) { state.consultAction = "booking"; return end("Of course. May I have your name to arrange the free inspection?", "consult_name", "collecting", "lead"); }
+    if (state.question === "consult_choice" && /\b(?:call|callback|phone|team)\b/i.test(text)) { state.consultAction = "callback"; return end("Of course. May I have your name so our purchasing team can contact you?", "consult_name", "collecting", "lead"); }
     if (state.question === "consult_choice") {
       if (/\b(?:call|team|phone|callback)\b/i.test(text)) {state.consultAction = "callback";return end("Understood. I'll arrange for our purchasing team to contact you. Please confirm your UAE mobile number.", "uae_callback", "collecting", "lead");}
       return end("Would you prefer the free inspection or a callback from our purchasing team?", "consult_choice", "collecting", "lead");
