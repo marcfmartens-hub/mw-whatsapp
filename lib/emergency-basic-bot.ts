@@ -5,7 +5,18 @@ import { createBiginContact, moveLeadToCallBack } from "./bigin";
 import { slotValid, LOCATION, dateFromText, timeFromText } from "./conversation-state";
 
 export const EMERGENCY_MODE = "Emergency Chat Bot V1";
-const HOURS = "Monday–Saturday, 10:00 AM–6:30 PM for inspections (Friday from 12:00 PM). Closed Sundays. All times are Dubai time.";
+const SCHEDULE_QUESTION = "Which day and time do you want for the inspection?";
+export function inspectionDay(date:string):string {
+ const d=new Date(date+"T12:00:00Z"), n=d.getUTCDate();
+ const suffix=n%100>=11&&n%100<=13?"th":({1:"st",2:"nd",3:"rd"} as Record<number,string>)[n%10]||"th";
+ return d.toLocaleDateString("en-GB",{weekday:"long",timeZone:"UTC"})+" "+n+suffix+" of "+d.toLocaleDateString("en-GB",{month:"long",timeZone:"UTC"});
+}
+export function inspectionTime(time:string):string {
+ const [h,m]=time.split(":").map(Number);
+ return (h%12||12)+(m?":"+String(m).padStart(2,"0"):"")+" "+(h>=12?"pm":"am");
+}
+// Keep location and contact information without appending the old opening-hours line.
+const BOOKING_LOCATION = LOCATION.split("\n").filter(line=>!/^Mon[–-]Sat/.test(line)).join("\n");
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
 type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string };
 const nameFrom = (text:string) => {
@@ -36,12 +47,19 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    if(missing.length) reply="No problem. I'll forward your request to the team so they can help you as best as possible. Please provide your "+missing.join(" and ")+".";
    else {b.basicStep="done";action="callback";reply="Thank you, "+value("name")+". I've recorded your callback request for the team.";}
  };
- const summary=()=>"Please confirm: "+value("name")+", "+phone()+", "+[value("make"),value("model"),value("year"),value("mileage")?value("mileage")+" km":null,value("specs")].filter(Boolean).join(", ")+", inspection on "+b.proposedDate+" at "+b.proposedTime+" (Dubai time). Is that correct?";
  const contact=()=>{
-   if(!value("name"))reply="May I have your name for the booking?";
+   if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime,now)){
+     b.basicStep="daytime";b.proposedDate=undefined;b.proposedTime=undefined;
+     reply="That time isn't available. "+SCHEDULE_QUESTION;
+   }
+   else if(!value("name"))reply="May I have your name for the booking?";
    else if(!phone())reply="What phone number should we use for your booking?";
    else if(missingVehicle().length)reply=askVehicle();
-   else {b.basicStep="confirm";reply=summary();}
+   else {
+     u.appointment_date=b.proposedDate;u.appointment_time=b.proposedTime;
+     u.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";action="booked";
+     reply="Your free inspection is confirmed for "+inspectionDay(b.proposedDate)+" at "+inspectionTime(b.proposedTime)+".\n\n"+BOOKING_LOCATION;
+   }
  };
  // Terminal acknowledgements must never restart booking or create another callback.
  if(b.basicStep==="done") {reply="Thank you.";}
@@ -71,16 +89,18 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    if(book||yes||date||time){
      b.basicStep="daytime";if(date)b.proposedDate=date;if(time)b.proposedTime=time;
      if(b.proposedDate&&b.proposedTime&&slotValid(b.proposedDate,b.proposedTime,now)){b.basicStep="contact";contact();}
-     else reply="Which day and time would suit you? "+HOURS;
+     else if(b.proposedDate&&!b.proposedTime)reply="What time do you want for the inspection?";
+     else if(b.proposedTime&&!b.proposedDate)reply="Which day do you want for the inspection?";
+     else reply=SCHEDULE_QUESTION;
    }
    else if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}
  }
  else if(b.basicStep==="daytime"){
    if(date)b.proposedDate=date;if(time)b.proposedTime=time;
    if(!date&&!time){if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}}
-   else if(!b.proposedDate)reply="Which day would suit you?";
-   else if(!b.proposedTime)reply="What time would suit you on "+b.proposedDate+"? "+HOURS;
-   else if(!slotValid(b.proposedDate,b.proposedTime,now)){b.proposedDate=undefined;b.proposedTime=undefined;reply="That slot is outside our available inspection times. "+HOURS+" Which day and time would suit you?";}
+   else if(!b.proposedDate)reply="Which day do you want for the inspection?";
+   else if(!b.proposedTime)reply="What time do you want for the inspection?";
+   else if(!slotValid(b.proposedDate,b.proposedTime,now)){b.proposedDate=undefined;b.proposedTime=undefined;reply="That time isn't available. "+SCHEDULE_QUESTION;}
    else {b.basicStep="contact";contact();}
  }
  else if(b.basicStep==="contact"){
@@ -89,12 +109,9 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    contact();
  }
  else if(b.basicStep==="confirm"){
-   if(date||time||Object.keys(u).length){if(date)b.proposedDate=date;if(time)b.proposedTime=time;reply=summary();}
-   else if(yes){
-     if(!b.proposedDate||!b.proposedTime||!slotValid(b.proposedDate,b.proposedTime,now)){b.basicStep="daytime";reply="Please choose another inspection day and time. "+HOURS;}
-     else if(!value("name")||!phone()||missingVehicle().length){b.basicStep="contact";contact();}
-     else {u.appointment_date=b.proposedDate;u.appointment_time=b.proposedTime;u.appointment=b.proposedDate+" "+b.proposedTime;b.basicStep="done";action="booked";reply="Your free inspection is confirmed for "+b.proposedDate+" at "+b.proposedTime+" (Dubai time).\n\n"+LOCATION;}
-   }else if(b.offscript)callback();else{b.offscript=true;reply=CHOICE;}
+   // Existing chats awaiting YES move directly into the new missing-data check.
+   if(date)b.proposedDate=date;if(time)b.proposedTime=time;
+   b.basicStep="contact";contact();
  }
  else {b.basicStep="choice";reply=CHOICE;}
  b.status=b.basicStep==="done" && action==="collecting" ? (old.status||"collecting") : action==="booked"?"booked":action==="callback"?"team_accepted":"collecting";
