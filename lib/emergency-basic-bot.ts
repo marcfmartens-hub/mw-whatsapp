@@ -70,6 +70,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  const value=(k:string)=>u[k]||c[k];
  const phone=()=>value("phone_number") || (/^\+?\d{9,15}$/.test(c.phone||"")?c.phone:null);
  const msg=text.trim();
+ const sellerIntent=/\b(sell|selling|car|vehicle)\b/i.test(msg) || !!supportedVehicle(msg,{},{}).make;
  const call=/\b(call\s*(me|back)|callback|phone me|human|speak to|contact me|team)\b/i.test(msg);
  const book=/\b(book|inspection|appointment|visit|bring|come)\b/i.test(msg);
  const refuse=/\b(no|not now|not interested|not ready|can't|cannot|don't(?! know)|do not(?! know)|refuse|stop|never)\b/i.test(msg);
@@ -88,6 +89,15 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    const k=vehicleKeys.find(k=>!value(k)&&!b.askedVehicle!.includes(k));
    if(k){b.askedVehicle!.push(k);b.basicStep="vehicle";reply=questions[k];}
    else {b.basicStep="timeline";reply="When are you planning to sell the car?";}
+ };
+ const continueSeller=()=>{
+   b.basicStep="vehicle";b.offscript=false;
+   if(value("make")&&!value("model")&&!value("year")&&!b.askedVehicle!.includes("model")&&!b.askedVehicle!.includes("year")){
+     b.askedVehicle!.push("model","year");reply="Which model and year is the car?";
+   }else if(!value("make")&&!b.askedVehicle!.includes("make")){
+     b.askedVehicle!.push("make");reply="Which car are you planning to sell?";
+   }else nextVehicle();
+   reply="No problem, we can help you with that. "+reply;
  };
  const callback=()=>{
    b.basicStep="callback";
@@ -116,6 +126,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    callback();
  }
  else if(call || refuse)callback();
+ else if(sellerIntent && ["name","choice"].includes(b.basicStep))continueSeller();
  else if(!(c.messages||[]).some((m:any)=>m.role==="assistant") && !old.basicMode){reply="Hi, I'm Kaya, Mister Wheelz's virtual assistant. What’s your name?";b.basicStep="name";}
  else if(objection && !date && !time && !book && !(vehicleStage && /\b(not sure|unsure|unknown|don'?t know|do not know)\b/i.test(msg))){if(b.offscript)callback();else{b.offscript=true;b.basicStep="choice";reply=CHOICE;}}
  else if(b.basicStep==="name"){

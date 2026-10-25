@@ -78,3 +78,21 @@ for(const [clock,expected,day] of [
  r=planEmergencyTurn(c,'Now',{},new Date(clock));assert.notEqual(r.reply,expected);assert.equal(r.action,'callback');
 }
 console.log('NOW opening-hours checks: today, closed Sunday, after closing, Friday, weekend and no repetition passed');
+
+// Ignoring the name to give selling intent is valid input, not an objection.
+c=base();turn(c,'Hi');r=turn(c,'I want to sell my bmw');assert.equal(c.make,'BMW');assert.equal(r.reply,'No problem, we can help you with that. Which model and year is the car?');assert.equal(c.flow_state.basicStep,'vehicle');assert.doesNotMatch(r.reply,/virtual assistant|callback/);
+r=turn(c,'X5 2020');assert.equal(c.model,'X5');assert.equal(c.year,'2020');assert.equal(r.reply,'What is the mileage?');turn(c,'125k km');turn(c,"I don't know");turn(c,'Now');turn(c,'tomorrow at 2 pm');r=turn(c,'Jace');assert.equal(r.action,'booked');
+for(const [input,data,question] of [
+ ['I want to sell my car',{},'Which car are you planning to sell?'],
+ ['I want to sell my BMW X5',{make:'BMW',model:'X5'},'What year is it?'],
+ ['Selling my BMW X5 2020',{make:'BMW',model:'X5',year:'2020'},'What is the mileage?'],
+]){c=base();turn(c,'Hi');r=turn(c,input);for(const [k,v]of Object.entries(data))assert.equal(c[k],v);assert.equal(r.reply,'No problem, we can help you with that. '+question);}
+// A seller who was already shown the fallback can return to collecting details.
+c={...base(),flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'choice',offscript:true}};r=turn(c,'I want to sell my BMW');assert.match(r.reply,/model and year/);assert.equal(r.state.offscript,false);
+console.log('Selling intent: missing-name bypass, known vehicle fields, fallback recovery and booking passed');
+
+for(const [input,make]of [['I want to sell my Toyota','Toyota'],['I want to sell my Nissan','Nissan'],['I want to sell my Ford','Ford'],['I want to sell my Audi','Audi'],['I want to sell my Porsche','Porsche'],['I want to sell my Honda','Honda']]){
+ c=base();turn(c,'Hi');r=turn(c,input);assert.equal(c.make,make);assert.match(r.reply,/model and year/);assert.doesNotMatch(r.reply,/virtual assistant|callback/);
+}
+for(const input of ['My car','Car','I want to sell a vehicle']){c=base();turn(c,'Hi');r=turn(c,input);assert.match(r.reply,/Which car are you planning to sell/);assert.equal(c.name,undefined);}
+console.log('Brand-independent selling intent and generic car/vehicle messages passed');
