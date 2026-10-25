@@ -38,6 +38,20 @@ for (let mask = 0; mask < 128; mask++) {
   }
   assert(bookingPrompt,"Never reached booking mask="+mask);
 }
+// External listing link and follow-up must not advance to mileage/specs/selling timeline.
+const linked = {messages:[]};
+turn(linked,"Hi");
+const listing=turn(linked,"https://carswitch.com/car/895725/ad");
+assert(/can't open external links/i.test(listing.reply),"Listing link not explained");
+assert(/make, model and year/i.test(listing.reply),"Listing link skipped vehicle details");
+const check=turn(linked,"Check this link for all info");
+assert(/can't open external links/i.test(check.reply),"Link follow-up not handled");
+assert(check.state.question==="vehicle","Link follow-up advanced questionnaire");
+const again=turn(linked,"Check this");
+assert(again.state.question==="vehicle","Check this advanced questionnaire");
+const picture=turn(linked,"[photo]");
+assert(/can't open external links/i.test(picture.reply),"Photo placeholder not handled");
+assert(picture.state.question==="vehicle","Photo advanced questionnaire");
 const mileage = {name:"Daniel",make:"Kia",model:"Seltos",year:"2023",messages:[]};
 turn(mileage,"Hi");
 const m=turn(mileage,"65k");
