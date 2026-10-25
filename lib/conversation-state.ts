@@ -145,6 +145,29 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const inferredQuestion = /your name/i.test(previous) ? "name" : /outstanding balance/i.test(previous) ? "balance" : /any.*loan|mortgage on/i.test(previous) ? "loan" : /mileage/i.test(previous) ? "mileage" : /gcc.*right|specs.*\?/i.test(previous) ? "specs" : /what exact time/i.test(previous) ? "exact_time" : /what time/i.test(previous) ? "time" : /personal call|team to contact/i.test(previous) ? "callback" : undefined;
   const question = state.question ?? inferredQuestion ?? "";
   const updates: Record<string, any> = {};
+  const previousAssistantReplies = (c.messages ?? []).filter(m => m.role === "assistant").map(m => m.content.trim()).filter(Boolean);
+  const repeatedRequest = /\b(?:repeat|again|remind me|explain again|say that again)\b/i.test(text);
+  const normalizeReply = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const deduplicateReply = (draft: string): string => {
+    if (repeatedRequest || !previousAssistantReplies.length) return draft;
+    let output = draft;
+    const prior = previousAssistantReplies.map(normalizeReply);
+    const blocks = output.split(String.fromCharCode(10,10));
+    const filtered = blocks.filter(block => {
+      const normalized = normalizeReply(block);
+      if (!normalized || normalized.length < 55) return true;
+      return !prior.some(p => p.includes(normalized));
+    });
+    output = filtered.join(String.fromCharCode(10,10)).trim();
+    if (output && !prior.includes(normalizeReply(output))) return output;
+    const last = previousAssistantReplies[previousAssistantReplies.length-1] || "";
+    if (/\b(?:name)\b/i.test(last) && !(updates.name || c.name)) return "May I have your name, please?";
+    if (!(updates.make || c.make) || !(updates.model || c.model) || !(updates.year || c.year)) return "Could you share your car make, model and year?";
+    if (!(updates.mileage || c.mileage)) return "What is your car mileage?";
+    if (!(updates.specs || c.specs)) return "Is your car GCC specifications?";
+    if (state.salesConsultation && !state.consultAction) return "Would you prefer a free inspection appointment or a call from our purchasing team?";
+    return "Would you like to continue with a free inspection appointment or speak with our team?";
+  };
   const end = (reply: string, q?: string, status?: Status, crm?: Turn["crm"]): Turn => {
     if (q !== undefined) state.question = q;
     if (status) state.status = status;
@@ -153,7 +176,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
     updates.step = booked || ["default_pending", "team_accepted", "customer_will_contact", "closed"].includes(state.status) ? 8 : ["visit_proposed", "awaiting_confirmation", "reconfirmation"].includes(state.status) ? 7 : q === "name" ? 1 : q === "vehicle" ? 2 : q === "mileage" || q === "specs" ? 4 : q === "loan" || q === "balance" ? 5 : 6;
     updates.appointment_date = booked ? state.proposedDate : null;
     updates.appointment_time = booked ? state.proposedTime : null;
-    return { updates, state, reply, crm: crm ?? (wasBooked && !booked ? "change" : undefined) };
+    return { updates, state, reply: deduplicateReply(reply), crm: crm ?? (wasBooked && !booked ? "change" : undefined) };
   };
   const note = (value: string) => { updates.car_conditions = [updates.car_conditions ?? c.car_conditions, value].filter(Boolean).join(" | "); };
   const wasBooked = ["booked", "default_pending", "reconfirmation"].includes(state.status);
