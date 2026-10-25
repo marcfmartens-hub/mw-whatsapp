@@ -187,6 +187,12 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   const contextualIntro = situation && !alreadyAcknowledged ? situation : "";
 
   const prefix: string[] = contextualIntro ? [contextualIntro] : [];
+  const deadlinePattern = /(?:sell|sale|sold).{0,60}(?:this wee[k|l]|before .*leave|asap)|this wee[k|l].{0,60}(?:sell|sale|sold)/i;
+  if (deadlinePattern.test(text)) updates.sell_timeline = text;
+  if (!updates.sell_timeline && !c.sell_timeline) {
+    const earlier = [...(c.messages ?? [])].reverse().find(m => m.role === "user" && deadlinePattern.test(m.content));
+    if (earlier) updates.sell_timeline = earlier.content;
+  }
   // When the seller answers a vehicle question with their situation instead,
   // explicitly return to the missing vehicle rather than jumping to mileage.
   if (contextualIntro && !vehicle.make && !wasBooked) {
@@ -247,8 +253,26 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (nextDay === 0) { nextDay = 1; daysAhead++; }
   const when = daysAhead === 0 ? "today" : daysAhead === 1 ? "tomorrow" : "Monday";
   const openAt = nextDay === 5 ? "12 PM" : "10 AM";
-  const arrival = () => open ? "What time can you bring your car today?" : `We're currently closed, but we open ${daysAhead ? "again " + when + " at" : "at"} ${openAt}. What time can you bring your car ${when}?`;
+  const arrival = () => {
+    const target=iso(new Date(+dubaiLocalTime+daysAhead*86400e3));
+    return (open?"":"We're currently closed. ")+inspectionExplanation+" What time can you bring your car "+(daysAhead?"on "+appointmentDay(target):"today")+"?";
+  };
+  const appointmentDay = (date: string) => {
+    const d = new Date(date + "T12:00:00Z");
+    const label = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()];
+    const currentWeek = Date.UTC(dubaiLocalTime.getUTCFullYear(),dubaiLocalTime.getUTCMonth(),dubaiLocalTime.getUTCDate()-((day+6)%7));
+    const targetWeek = Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()-((d.getUTCDay()+6)%7));
+    if (targetWeek <= currentWeek) return label;
+    const n=d.getUTCDate(), suffix=n%100>=11&&n%100<=13?"th":n%10===1?"st":n%10===2?"nd":n%10===3?"rd":"th";
+    return "next week "+label+" "+n+suffix+" of "+d.toLocaleString("en-GB",{month:"long",timeZone:"UTC"});
+  };
+  const inspectionExplanation = "Before buying your car, we need a quick free inspection to verify its condition. If everything is in order and we agree on a price, we can buy it and pay cash the same day.";
   const followUp = () => (updates.sell_timeline || c.sell_timeline || state.askedFields?.sell) ? arrival() : "When are you planning to sell your car?";
+  if (/tomorrow is sunday|tomorrow's sunday|sunday is closed|closed on sunday/i.test(text)) {
+    state.proposedDate=undefined;state.proposedTime=undefined;state.customerAgreedSlot=false;
+    const monday=iso(new Date(+dubaiLocalTime+(((8-day)%7)||7)*86400e3));
+    return end("You're right, sorry about that. We're closed on Sunday. "+inspectionExplanation+" What time can you bring your car on "+appointmentDay(monday)+"?","time","visit_proposed");
+  }
   if (/\b(?:not sure|don't know|cannot say|can't say) when i can (?:come|bring)/i.test(text)) return end(answer("No problem! Would you prefer that our team gives you a call tomorrow to arrange a convenient time?"), "callback", "collecting", "lead");
   if (/\b(home visit|visit my place|come to (?:me|my|sharjah)|inspection in sharjah|you can come|you come i bring)\b/i.test(text)) return end(answer("All our inspections take place at our branch in Al Quoz. It takes about 10–15 minutes, and if we agree on the price, we can buy your car and pay cash straight away. " + followUp()), "time", wasBooked ? "reconfirmation" : "collecting");
   if (/\b(?:call ?back|call me|arrange a call|call tomorrow|call on tomorrow|contact me tomorrow)\b/i.test(text)) {
@@ -288,7 +312,7 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (essential && financeReady && state.proposedDate && !state.proposedTime) {
     if (new Date(`${state.proposedDate}T12:00:00Z`).getUTCDay() === 0) { state.proposedDate = undefined; return end(answer("We're closed on Sundays. Which other day would suit you?"), "time", "visit_proposed"); }
     if (question === "exact_time" && !prefix.length && (dayPart || /\b(anytime|any time|you choose)\b/i.test(text))) { const result = end("", "exact_time", "visit_proposed"); result.defaultDate = state.proposedDate; return result; }
-    return end(answer(`What exact arrival time would you prefer on ${state.proposedDate}?${new Date(`${state.proposedDate}T12:00:00Z`).getUTCDay() === 5 ? " We open at noon on Friday." : ""}`), "exact_time", "visit_proposed");
+    return end(answer(`What exact arrival time would you prefer on ${appointmentDay(state.proposedDate)}?${new Date(`${state.proposedDate}T12:00:00Z`).getUTCDay() === 5 ? " We open at noon on Friday." : ""}`), "exact_time", "visit_proposed");
   }
   if (wasBooked && !date && !time) return end(answer(prefix.length ? "Let us know if you need to change the visit." : "You're welcome. Let us know if you need anything else about the inspection."), state.question);
   if (/\[(photo|file|sent photos\/files)\]/i.test(text)) { if (!state.mediaExplained) { prefix.push("I can't read photos or files, but I can use any details you type here."); state.mediaExplained = true; } }
@@ -325,5 +349,5 @@ export function planTurn(c: Chat, raw: string, extracted: Vehicle = {}, now = ne
   if (/^yes$/i.test(loan ?? "") && !(updates.mortgage_amount || c.mortgage_amount) && !asked.balance) return askOnce("balance", "How much is left on the loan?")!;
   if (!(updates.sell_timeline || c.sell_timeline) && !asked.sell) return askOnce("sell", "When are you planning to sell?")!;
   if (!state.proposedDate) return end(answer(arrival()), "time", "visit_proposed");
-  return end(answer(`What time would you like to come on ${state.proposedDate}?`), "exact_time", "visit_proposed");
+  return end(answer(`What time would you like to come on ${appointmentDay(state.proposedDate)}?`), "exact_time", "visit_proposed");
 }
