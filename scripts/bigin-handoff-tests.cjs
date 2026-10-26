@@ -13,6 +13,8 @@ Module._load=function(id,parent,...rest){
  }
  return original.call(this,id,parent,...rest);
 };
+const {plusPhone}=require('../lib/phone.ts');
+for(const [input,expected]of [['971 50 123 4567','+971501234567'],['+971501234567','+971501234567'],['44 7700 900123','+447700900123'],['+1 (202) 555-0123','+12025550123'],['','']])assert.equal(plusPhone(input),expected);
 const {ensureBiginPipeline}=require('../lib/bigin-pipeline.ts');
 const {syncBiginOutcome}=require('../lib/bigin-outcome.ts');
 const {dueBiginOutcome}=require('../lib/bigin-reconcile.ts');
@@ -31,7 +33,7 @@ global.fetch=async(url,opts={})=>{
  if(url.includes('/Contacts/c1/Pipelines')){assert.ok(url.includes('pipeline_id=team1'));return response({data:saved?[{...saved,Created_Time:'2026-10-25'}]:[]});}
  if(url.endsWith('/Pipelines')){
   if(failWrite)return response({data:[{status:'error'}]},403);
-  const p=JSON.parse(opts.body);assert.deepEqual(p.trigger,[]);assert.equal(p.data[0].Contact_Name.id,'c1');
+  const p=JSON.parse(opts.body);assert.deepEqual(p.trigger,[]);assert.equal(p.data[0].Contact_Name.id,'c1');assert.equal(p.data[0].Phone_Number,'+971501234567');assert.equal(p.data[0].Conversation_Phone_Number,'+971501234567');
   if(opts.method==='POST')posts++;else puts++;
   saved={...p.data[0],id:'p1'};return response({data:[{status:'success',details:{id:'p1'}}]});
  }

@@ -1,3 +1,4 @@
+import { plusPhone } from "./phone";
 // Contact success alone is insufficient: the team's pipeline card must exist too.
 const BASE = "https://www.zohoapis.com/bigin/v2";
 export type BiginOutcome = "booked" | "callback";
@@ -43,7 +44,7 @@ export async function ensureBiginPipeline(contactId:string,c:any,token:string):P
   Deal_Name:([c.name||c.make||"WhatsApp seller",c.make,c.model,c.year].filter(Boolean).join(" · ")+" · "+String(c.phone||c.phone_number||"").slice(-4)).slice(0,255),
   Pipeline:{id:target.id},Sub_Pipeline:target.sub,Stage:target.stage,Contact_Name:{id:contactId},
   Lead_Source:"WhatsApp Bot",Inspection_Booked:outcome==="booked"?"Yes":"No",
-  Conversation_Phone_Number:String(c.phone||c.phone_number||""),Phone_Number:String(c.phone_number||c.phone||""),
+  Conversation_Phone_Number:plusPhone(c.phone||c.phone_number),Phone_Number:plusPhone(c.phone_number||c.phone),
   Inquiry_Summary:c.inquiry_summary||"",Sell_Time:c.sell_timeline||"",
  };
  for(const [key,value]of Object.entries({Make:c.make,Model:c.model,Year:c.year,Mileage:c.mileage,Regional_Specs:c.specs}))if(value)data[key]=String(value);

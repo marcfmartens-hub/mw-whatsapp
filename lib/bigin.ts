@@ -1,3 +1,5 @@
+import { plusPhone } from "./phone";
+export { plusPhone } from "./phone";
 import { ensureBiginPipeline } from "./bigin-pipeline";
 import type { Conversation } from "./supabase";
 import { campaignOf, parseReferral } from "./campaigns";
@@ -83,10 +85,6 @@ const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // "Saturday", "tomorrow", "10 October", "2026-10-10" → "YYYY-MM-DD" (Dubai time)
 // Marc: always show numbers as +971… (also in Bigin)
-export function plusPhone(p: string | null | undefined): string {
-  const d = String(p ?? "").replace(/\D/g, "");
-  return d ? `+${d}` : "";
-}
 
 export function toIsoDate(raw: string): string | null {
   const v = raw.trim().toLowerCase();
