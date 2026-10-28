@@ -1,3 +1,4 @@
+import {syncConsoleLead} from "./console-crm";
 import { plusPhone } from "./phone";
 export { plusPhone } from "./phone";
 import { ensureBiginPipeline } from "./bigin-pipeline";
@@ -258,7 +259,7 @@ function resolveSalesInquiry(conversation: Conversation & { sales_inquiry?: stri
   return "No Communication yet";
 }
 
-export async function createBiginContact(
+async function createBiginContactOnly(
   conversation: Conversation & {
     sales_inquiry?: string;
     alternative_phone?: string;
@@ -444,7 +445,7 @@ export async function createBiginContact(
     if (attempt < 3) {
       console.warn(`[Bigin] attempt ${attempt} failed, retrying in 3s...`);
       await new Promise(r => setTimeout(r, 3000));
-      return createBiginContact(conversation, attempt + 1);
+      return createBiginContactOnly(conversation, attempt + 1);
     }
     console.error("Bigin contact creation error (all retries failed):", error);
     return false;
@@ -594,3 +595,10 @@ async function setFollowUpDate(contactId: string, date: string, headers: Record<
     await new Promise(res => setTimeout(res, 4000));
   }
 }
+
+export async function createBiginContact(conversation:Parameters<typeof createBiginContactOnly>[0],attempt=1):Promise<boolean>{
+  const c:any=conversation;
+  await syncConsoleLead({...c,appointment_date:toIsoDate(String(c.appointment_date||"")),appointment_time:toTime24(String(c.appointment_time||""))});
+  return createBiginContactOnly(conversation,attempt);
+}
+
