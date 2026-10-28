@@ -1,0 +1,30 @@
+// Kaya V3 isolated smoke tests. Run via: node scripts/test-kaya-v3.cjs
+const fs = require("node:fs");
+const ts = require("typescript");
+require.extensions[".ts"] = (mod, file) => {
+  const source = fs.readFileSync(file, "utf8");
+  mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, file);
+};
+const assert = require("node:assert/strict");
+const {v3Turn, classifyIntent, checkResponse} = require("../lib/kaya-v3/engine.ts");
+const blank = () => ({messages:[]});
+assert.equal(classifyIntent("I will call you tomorrow"), "self_contact");
+assert.equal(classifyIntent("Please call me tomorrow"), "callback");
+assert.equal(classifyIntent("Do you have Sonata 2017?"), "buyer");
+assert.equal(classifyIntent("How much will you pay?"), "price");
+assert.equal(classifyIntent("Stop messaging me"), "stop");
+const hello = v3Turn(blank(),"Hello");
+assert.match(hello.reply,/name/i);
+const seller = v3Turn(hello.memory,"I want to sell car");
+assert.doesNotMatch(seller.reply,/name/i);
+assert.equal(seller.violations.length,0);
+const price = v3Turn(seller.memory,"Price?");
+assert.match(price.reply,/inspection/i);
+assert.doesNotMatch(price.reply,/AED\\s*\\d/i);
+const pause = v3Turn(blank(),"I'm busy now, I'll get back to you");
+assert.equal(pause.action,"none");
+const stop = v3Turn(blank(),"Don't contact me");
+assert.equal(stop.memory.stopped,true);
+assert.equal(v3Turn(stop.memory,"Hello").reply,"");
+assert.deepEqual(checkResponse("Hello","We can come to your home",blank()),["HOME_VISIT"]);
+console.log("Kaya V3 isolated smoke tests passed");
