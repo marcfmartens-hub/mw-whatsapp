@@ -219,3 +219,20 @@ assert.equal(r.reply,"Your free inspection is confirmed for\n\nMonday 26th of Oc
 c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime',proposedDate:'2026-10-26'}};r=planEmergencyTurn(c,'After 6 pm',{},sundayEvening);assert.notEqual(r.action,'booked');assert.equal(r.state.proposedDate,'2026-10-26');assert.match(r.reply,/6:30 pm/);
 c={...base(),name:'Jace',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'}};r=planEmergencyTurn(c,'Day after tomorrow at 12 pm',{},sundayEvening);assert.equal(r.updates.appointment_time,'12:00');
 console.log('After-time scheduling: +1 hour, split day/time answers, hours limits and exact spaced confirmation passed');
+
+// Location requests take priority and preserve the pending conversation step.
+const {LOCATION_REPLY}=require('../lib/emergency-basic-bot.ts');
+for(const request of ['Please share your location with me','Location','Where are you located?','Can you send me your address?','Please send me the map pin','Where is your showroom?']){
+ c=base();r=turn(c,request);assert.ok(r.reply.startsWith(LOCATION_REPLY+'\n\nHi, I'));assert.match(r.reply,/Kaya from Mister Wheelz/);assert.match(r.reply,/your name/);assert.equal(r.state.basicStep,'name');assert.equal(r.action,'collecting');assert.equal(r.state.offscript,undefined);
+ r=turn(c,'Jace');assert.equal(r.reply,'Which car are you planning to sell?');
+}
+for(const stage of ['name','vehicle','timeline','daytime','contact','inspection_window','callback','done']){
+ c={...base(),name:stage==='name'||stage==='contact'?null:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:stage,status:stage==='done'||stage==='callback'?'team_accepted':'collecting',askedVehicle:['mileage'],proposedDate:'2026-10-27'},messages:[{role:'assistant',content:'What is the mileage?'}]};
+ r=turn(c,'Location');assert.ok(r.reply.startsWith(LOCATION_REPLY));assert.equal(r.state.basicStep,stage);assert.equal(r.action,'collecting');assert.equal(r.state.status,stage==='done'||stage==='callback'?'team_accepted':'collecting');assert.doesNotMatch(r.reply,/virtual assistant|recorded your callback/);
+ r=turn(c,'Please share your location with me');assert.ok(r.reply.startsWith(LOCATION_REPLY));assert.equal(r.state.basicStep,stage);assert.equal(r.action,'collecting');
+}
+c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'vehicle',askedVehicle:['mileage']},messages:[{role:'assistant',content:'What is the mileage?'}]};r=turn(c,'Location');assert.match(r.reply,/mileage/);r=turn(c,'125k km');assert.equal(c.mileage,'125000');assert.equal(r.reply,'Is it GCC or non-GCC?');
+c={...base(),name:'Jace',make:'BMW',model:'X5',year:'2020',mileage:'125000',specs:'GCC',flow_state:{basicMode:'Emergency Chat Bot V1',basicStep:'daytime'},messages:[{role:'assistant',content:'Which day and time do you want for the inspection?'}]};
+r=turn(c,'Tomorrow at 2 pm. Please share your location with me');assert.ok(r.reply.startsWith(LOCATION_REPLY));assert.equal(r.action,'booked');assert.equal(c.appointment_time,'14:00');assert.equal(c.appointment_date,'2026-10-27');assert.equal(r.reply.split('https://maps.app.goo.gl/').length-1,1);
+c=base();r=turn(c,'BMW X5 2020. Please share your location');assert.ok(r.reply.startsWith(LOCATION_REPLY));assert.equal(c.make,'BMW');assert.equal(c.model,'X5');assert.equal(c.year,'2020');r=turn(c,'Jace');assert.match(r.reply,/mileage/);assert.doesNotMatch(r.reply,/Which car/);
+console.log('Location-first checks passed: first message, wording variants, all pending stages, resends, mixed slot/car details and continuation');

@@ -18,7 +18,9 @@ export function inspectionTime(time:string):string {
  return (h%12||12)+(m?":"+String(m).padStart(2,"0"):"")+" "+(h>=12?"pm":"am");
 }
 // Keep location and contact information without appending the old opening-hours line.
-const BOOKING_LOCATION = "📍 Mister Wheelz Car Buyers\n\nUmm Suqeim Branch, Al Quoz 4, Dubai\n\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\n\nCall Center\n+971 58 582 5543\n\n*We will confirm the details and timing with you in the morning*";
+export const LOCATION_REPLY = "📍 Mister Wheelz Car Buyers\n\nUmm Suqeim Branch, Al Quoz 4, Dubai\n\nhttps://maps.app.goo.gl/nv6Yy7uKqVCnkcVx6\n\nCall Center\n+971 58 582 5543";
+const BOOKING_NOTE = "*We will confirm the details and timing with you in the morning*";
+const BOOKING_LOCATION = LOCATION_REPLY+"\n\n"+BOOKING_NOTE;
 const CHOICE = "I understand. I'm a virtual assistant. I can book a free inspection or arrange a callback from the team. Which would you prefer?";
 type State = { basicMode:string; basicStep:string; proposedDate?:string; proposedTime?:string; offscript?:boolean; status?:string; askedVehicle?:string[]; scheduleClarified?:boolean; sentReplies?:string[]; callbackAsked?:string[]; inspectionWindow?:string; resumeStep?:string; askingPriceAed?:string };
 const nameFrom = (text:string) => {
@@ -59,7 +61,27 @@ export function emergencyInput(text:string){
  const clean=text.replace(/\[(?:photo|image|file|document|video|audio|voice|voice note)\]/gi," ").replace(/(?:https?:\/\/|www\.)\S+/gi," ").trim();
  return {kinds,text:clean};
 }
-export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>={}, now=new Date()) {
+export function locationRequest(text:string){
+ const pattern=/\b(?:where\s+(?:are|r)\s+(?:you|u)(?:\s+(?:located|based))?|where(?:'s|\s+is)\s+(?:your|the)\s+(?:showroom|office|branch)|(?:please\s+|pls\s+)?(?:(?:can|could|would)\s+you\s+)?(?:send|share|give|drop)\s+(?:me\s+)?(?:(?:the|your)\s+)?(?:location|address|map(?:\s+pin)?|directions)(?:\s+(?:with|to)\s+me)?|(?:your\s+)?(?:location|address|directions|map\s+pin))\b/gi;
+ const requested=pattern.test(text);
+ pattern.lastIndex=0;
+ return {requested,remainder:text.replace(pattern," ").replace(/^[\s.,!?;:&-]+|[\s.,!?;:&-]+$/g,"").trim()};
+}
+export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>={}, now=new Date()):{reply:string;updates:Record<string,any>;action:string;state:State} {
+ const location=locationRequest(text);
+ const isFirstReply=!(c.messages||[]).some((m:any)=>m.role==="assistant");
+ const remainder=location.remainder;
+ // Mixed messages still supply car/slot details; remove the location request
+ // before interpreting them so it cannot be classified as an objection.
+ if(location.requested&&!isFirstReply&&!locationRequest(remainder).requested&&
+   (emergencyVehicle(remainder).make||dateFromText(remainder,now)||timeFromText(remainder,true)||/\b(sell|selling|book|callback|call back|my name is)\b/i.test(remainder))){
+   const turn=planEmergencyTurn(c,remainder,fields,now);
+   const continuation=turn.reply.replace("\n\n"+BOOKING_LOCATION,"\n\n"+BOOKING_NOTE);
+   turn.reply=LOCATION_REPLY+(continuation?"\n\n"+continuation:"");
+   turn.state.sentReplies=[...(turn.state.sentReplies||[]),turn.reply.toLowerCase().replace(/[’‘]/g,"'").replace(/[^a-z0-9]+/g," ").trim()];
+   turn.updates.flow_state={...turn.updates.flow_state,sentReplies:turn.state.sentReplies};
+   return turn;
+ }
  const media=emergencyInput(text);
  text=media.text;
  const old=c.flow_state||{};
@@ -225,7 +247,27 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    else reply=(open?"":"We're closed now, but we open again "+label+" at "+opens+". ")+question;
  };
  // Terminal acknowledgements must never restart booking or create another callback.
- if(media.kinds.length&&!msg){
+ if(location.requested){
+   // Location is an answerable service request, never a refusal or callback trigger.
+   if(isFirstReply){
+     b.basicStep="name";
+     reply="Hi, I'm Kaya from Mister Wheelz. May I know your name, please?";
+   }else if(b.basicStep==="name")reply="To continue, please share your name.";
+   else if(b.basicStep==="vehicle"){
+     const pending=[...(b.askedVehicle||[])].reverse().find(k=>!value(k));
+     const missing=pending||vehicleKeys.find(k=>!value(k));
+     const prompts:Record<string,string>={make:"Please share which car you are planning to sell.",model:"Please share the car model.",year:"Please share the car year.",mileage:"Please share the car's mileage.",specs:"Please let me know whether it is GCC, non-GCC, or you're not sure."};
+     if(missing){b.askedVehicle=[...new Set([...(b.askedVehicle||[]),missing])];reply=prompts[missing];}
+     else nextVehicle();
+   }else if(b.basicStep==="timeline")reply="To continue, please let me know when you plan to sell the car.";
+   else if(b.basicStep==="daytime")reply=b.proposedDate&&!b.proposedTime?"Please share the time you can come on "+inspectionDay(b.proposedDate)+".":!b.proposedDate&&b.proposedTime?"Please share the day you can come for the inspection.":"Please share your preferred inspection day and time.";
+   else if(b.basicStep==="inspection_window")reply=FUTURE_QUESTION;
+   else if(b.basicStep==="contact"||b.basicStep==="confirm")reply=!value("name")?"To continue your booking, please share your name.":!phone()?"To continue your booking, please share your phone number.":"We have your booking details.";
+   else if(b.basicStep==="callback")reply=!value("name")?"To complete your callback details, please share your name.":!phone()?"To complete your callback details, please share your phone number.":"Our team has your callback request.";
+   else if(b.basicStep==="done")reply=old.status==="booked"?"We look forward to seeing you.":"Our team has your callback request.";
+   else reply="Would you like to continue booking a free inspection or arrange a callback?";
+ }
+ else if(media.kinds.length&&!msg){
    // Attachments never answer a pending field and never advance the flow.
    const lastField=[...(b.askedVehicle||[])].reverse().find(k=>!value(k));
    const pending:Record<string,string>={make:"Please type the car make.",model:"Please type the model.",year:"Please type the year.",mileage:"Please type the mileage.",specs:"Please type GCC, non-GCC, or not sure."};
@@ -274,7 +316,7 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  }
  else if(b.basicStep==="name"){
    const n=nameFrom(msg);
-   if(n){u.name=n;b.basicStep="vehicle";reply="Which car are you planning to sell?";}
+   if(n){u.name=n;b.basicStep="vehicle";if(value("make")||value("model")||value("year"))nextVehicle();else reply="Which car are you planning to sell?";}
    else {b.offscript=true;b.basicStep="choice";reply=CHOICE;}
  }
  else if(b.basicStep==="vehicle"){
@@ -339,8 +381,8 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
    b.basicStep="contact";contact();
  }
  else {b.basicStep="choice";reply=CHOICE;}
- if(uncertain&&reply&&!/^No problem[,.]/i.test(reply))reply="No problem. "+reply;
- if(media.kinds.length){
+ if(!location.requested&&uncertain&&reply&&!/^No problem[,.]/i.test(reply))reply="No problem. "+reply;
+ if(!location.requested&&media.kinds.length){
    const kinds=media.kinds.join(", ").replace(/, ([^,]+)$/, " or $1");
    reply="Unfortunately, I'm not able to open "+kinds+"."+(reply?" "+reply:"");
  }
@@ -348,13 +390,15 @@ export function planEmergencyTurn(c:any, text:string, fields:Record<string,any>=
  // Keep sent text in state so trimming message history cannot re-enable repeats.
  const normalize=(s:string)=>s.toLowerCase().replace(/[’‘]/g,"'").replace(/[^a-z0-9]+/g," ").trim();
  const sent=new Set([...(old.sentReplies||[]),...history.filter(m=>m.role==="assistant").map(m=>normalize(m.content))]);
- if(reply&&sent.has(normalize(reply))){
+ if(!location.requested&&reply&&sent.has(normalize(reply))){
    if(b.basicStep!=="done")callback();
    if(sent.has(normalize(reply)))reply="";
  }
+ // Explicit location requests are always answered, including a requested resend.
+ if(location.requested)reply=LOCATION_REPLY+(reply?"\n\n"+reply:"");
  if(reply)sent.add(normalize(reply));
  b.sentReplies=[...sent];
- b.status=b.basicStep==="done" && action==="collecting" ? (old.status||"collecting") : action==="booked"?"booked":action==="callback"?"team_accepted":"collecting";
+ b.status=location.requested&&!isFirstReply?(old.status||b.status||"collecting"):b.basicStep==="done" && action==="collecting" ? (old.status||"collecting") : action==="booked"?"booked":action==="callback"?"team_accepted":"collecting";
  u.flow_state={...old,...b,version:1};
  return {reply,updates:u,action,state:b};
 }
