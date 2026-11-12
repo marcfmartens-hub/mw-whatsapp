@@ -9,7 +9,7 @@ export async function syncConsoleLead(conversation:any,retryPayload?:any):Promis
  try{
   let latest=await getConversation(phone);if(!latest)return false;
   const previous=(latest.flow_state as any)?.consoleSync||{};
-  if(previous.eventId===payload.eventId&&!previous.pending)return true;
+  if(previous.eventId===payload.eventId&&!previous.pending){await updateConversation(phone,{flow_state:{...(latest.flow_state||{}),consoleSync:{...previous,syncedAt:new Date().toISOString()}}} as any).catch(()=>{});return true;}
   await updateConversation(phone,{flow_state:{...(latest.flow_state||{}),consoleSync:{...previous,pending:true,payload,eventId:payload.eventId,attemptedAt:new Date().toISOString(),runningUntil:new Date(Date.now()+60000).toISOString()}}} as any);
   const secret=process.env.KAYA_CRM_SYNC_SECRET,url=process.env.CONSOLE_CRM_URL;
   if(!secret||secret.length<32||!url)throw Error("not_configured");
