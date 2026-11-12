@@ -9,7 +9,12 @@ export async function reconcileConsole(){
   if(!/^\d{8,16}$/.test(c.phone||"")||String(c.phone).startsWith("971599900"))return false;
   const sync=c.flow_state?.consoleSync;
   if(sync?.pending)return !(Date.parse(sync.runningUntil||"")>Date.now());
-  return !sync&&Boolean(c.bigin_pushed_at)&&(c.messages||[]).some((m:any)=>m.role==="user");
+  if(!c.bigin_pushed_at||!(c.messages||[]).some((m:any)=>m.role==="user"))return false;
+  if(!sync)return true;
+  // Safety net: a handoff went to Bigin after the last verified console delivery (state overwritten
+  // by a concurrent write, or the console was skipped) -> deliver it to the console again.
+  const lastConsole=Date.parse(sync.syncedAt||"")||0,lastHandoff=Math.max(Date.parse(c.flow_state?.biginSync?.syncedAt||"")||0,Date.parse(c.bigin_pushed_at)||0);
+  return lastHandoff-lastConsole>120000;
  }).slice(0,15);
  let synced=0,failed=0;
  for(const c of candidates){
