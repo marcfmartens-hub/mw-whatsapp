@@ -12,12 +12,15 @@ export function consolePayload(c:any){
  }
  const sender=phone(c.phone_number||c.phone),alternate=phone(c.alternative_phone),primary=alternate&&alternate!==sender?alternate:sender;
  const appointment=c.clear_appointment?{clear:true}:c.inspection_booked!==false&&c.appointment_date&&c.appointment_time?{date:text(c.appointment_date,10),time:text(c.appointment_time,5)}:{};
+ // Website WhatsApp buttons append "Ref: MWXXXXXX" so the console can link the chat to the Google ad click.
+ let adRef="";
+ if(Array.isArray(c.messages))for(const m of c.messages){if(m?.role!=="user")continue;const found=String(m.content||"").toUpperCase().match(/\bREF:?\s*(MW[A-HJ-NP-Z2-9]{6})\b/);if(found){adRef=found[1];break;}}
  const result:any={schemaVersion:1,sourceId:String(c.id||c.phone||c.phone_number||"").slice(0,160),observedAt:c.last_message_at||c.created_at||new Date().toISOString(),
   contact:{name,phone:primary,alternativePhone:primary!==sender?sender:"",email:text(c.email,160)},
   vehicle:{make:known(c.make),model:known(c.model),year:c.year||null,mileage:c.mileage??null,specs:known(c.specs),option:known(c.option)},
   appointment,summary:[text(c.inquiry_summary,3000),text(c.car_conditions,500),c.sell_timeline?"Selling timeline: "+text(c.sell_timeline,200):"",c.loan?"Loan: "+text(c.loan,100):"",c.mortgage_amount?"Outstanding balance: "+text(c.mortgage_amount,100):"",c.owner_status?"Ownership: "+text(c.owner_status,100):""].filter(Boolean).join("\n").slice(0,4000),askingPrice:text(c.estimated_price||String(c.flow_state?.askingPriceAed||""),160),
   milestone:text(c.milestone_tag,40),reason:c.bigin_outcome==="booked"||c.inspection_booked?"Booking requested":"Call Back",
-  marketing:{medium:c.source_url?"Meta ad (WhatsApp)":"WhatsApp",content:text(c.source_url,250)}};
+  marketing:{medium:c.source_url?"Meta ad (WhatsApp)":adRef?"Google ad (website WhatsApp)":"WhatsApp",content:text(c.source_url,250),...(adRef?{ref:adRef}:{})}};
  result.eventId=createHash("sha256").update(JSON.stringify(result)).digest("hex");
  return result;
 }
