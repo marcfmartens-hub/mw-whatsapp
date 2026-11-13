@@ -5,6 +5,7 @@ import { type Chat, type Vehicle } from "@/lib/conversation-state";
 import { extractVehicleInfo } from "@/lib/claude";
 import { detect, regression } from "@/lib/kaya-improve/detect";
 import { futureSellerRegression } from "@/lib/kaya-improve/future-seller-regression";
+import { planV2 } from "@/lib/kaya-v2/turn";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 export async function POST(req: NextRequest) {
@@ -21,6 +22,20 @@ export async function POST(req: NextRequest) {
   const chat: Chat = { messages, flow_state: previous.flow_state && typeof previous.flow_state === "object" ? previous.flow_state : undefined };
   for (const key of ["name", "make", "model", "year", "mileage", "specs", "loan", "appointment_date", "appointment_time", "car_conditions", "phone_number", "sell_timeline"]) {
     if (typeof previous[key] === "string" && previous[key].length < 300) chat[key] = previous[key];
+  }
+  if (body.engine === "v2") {
+    // Kaya v2 simulation: same reading + flow as live, nothing saved, sent or pushed to Bigin.
+    try {
+      const sim: any = { ...chat, phone: typeof body.phone === "string" && /^\d{8,15}$/.test(body.phone) ? body.phone : "971500000000" };
+      if (previous.flow_state && (previous.flow_state as any).engine === "v2") sim.flow_state = previous.flow_state;
+      for (const key of ["car_conditions"]) if (typeof previous[key] === "string") sim[key] = previous[key];
+      const { plan, understanding, aiOk } = await planV2(sim, message, new Date(), undefined, async () => null);
+      const next: Chat = { ...sim, ...plan.updates, messages: [...messages, { role: "user", content: message }, ...(plan.reply ? [{ role: "assistant", content: plan.reply }] : [])].slice(-30) };
+      return NextResponse.json({ reply: plan.reply, chat: next, state: { ...plan.state, outcome: plan.outcome, reason: plan.reason, read: understanding, aiOk }, source: "kaya-v2", isolated: true, note: "Kaya v2 simulation; no booking, callback or WhatsApp message is sent." }, { headers: { "Cache-Control": "no-store" } });
+    } catch (e) {
+      console.error("[test-chat v2]", e);
+      return NextResponse.json({ error: "Test engine failed" }, { status: 500 });
+    }
   }
   try {
     const interpreted = message;
