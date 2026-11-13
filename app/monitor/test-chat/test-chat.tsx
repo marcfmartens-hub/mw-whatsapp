@@ -14,13 +14,14 @@ export default function TestChat(){
  const [issue,setIssue]=useState("");
  const [review,setReview]=useState<any>(null);
  const [tab,setTab]=useState<"chat"|"analysis"|"tests">("chat");
+ const [engine,setEngine]=useState<"v2"|"emergency">("v2");
  const bottom=useRef<HTMLDivElement>(null);
  useEffect(()=>{bottom.current?.scrollIntoView({behavior:"smooth",block:"nearest"});},[messages]);
  function reset(){setMessages([]);setChat({messages:[]});setValue("");setBusy(false);setError("");setState(null);setIntel(null);setIssue("");setReview(null);setTab("chat");}
  async function send(e:React.FormEvent){e.preventDefault();const message=value.trim();if(!message||busy)return;setBusy(true);setValue("");setError("");
   try{
-   const res=await fetch("/api/test-chat",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,chat})});
-   const data=await res.json();if(!res.ok||data.source!=="production-conversation-engine")throw Error(data.error||"Unexpected test response");
+   const res=await fetch("/api/test-chat",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,chat,engine})});
+   const data=await res.json();if(!res.ok||!["production-conversation-engine","emergency-chat-bot-v1","kaya-v2"].includes(data.source))throw Error(data.error||"Unexpected test response");
    setChat(data.chat);setState(data.state);setIntel(data.intelligence||null);setMessages(data.chat.messages||[]);setReview(null);
   }catch(e:any){setError(e.message||"Connection failed");setValue(message);}
   finally{setBusy(false);}
@@ -39,7 +40,8 @@ export default function TestChat(){
    <button style={{...button,background:tab==="chat"?"#fd9800":"white"}} onClick={()=>setTab("chat")}>Conversation</button>
    <button style={{...button,background:tab==="analysis"?"#fd9800":"white"}} onClick={()=>setTab("analysis")}>Anomalies ({intel?.findings.length||0})</button>
    <button style={{...button,background:tab==="tests"?"#fd9800":"white"}} onClick={()=>setTab("tests")}>Tests &amp; rollout</button>
-   <button style={{...button,marginLeft:"auto"}} disabled={busy} onClick={reset}>↺ Reset all fields</button>
+   <select aria-label="Engine" value={engine} disabled={busy||messages.length>0} onChange={e=>{setEngine(e.target.value as any);reset();}} style={{...button,marginLeft:"auto"}}><option value="v2">Kaya v2 (new flow)</option><option value="emergency">Emergency bot (live now)</option></select>
+   <button style={button} disabled={busy} onClick={reset}>↺ Reset all fields</button>
   </div>
   <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>{(intel?.stages||["Detect","Flag","Analyze","Solution","Test","Deploy"].map(name=>({name,status:"waiting"}))).map((stage,i)=><div key={i} style={{padding:"8px 10px",background:stage.status==="complete"||stage.status==="clear"?"#d8f6e3":stage.status==="flagged"?"#ffe0b2":"#edf0f4",borderRadius:8,fontSize:12}}><b>{i+1}. {stage.name}</b><div>{stage.status}</div></div>)}</div>
   {tab==="chat"&&<div style={card}>
