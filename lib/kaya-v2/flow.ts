@@ -95,6 +95,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   let outcome: Plan["outcome"] = "none";
   let reason: string | undefined;
   const answers: string[] = [];
+  let warm = "";
   const isFirst = !s.greeted && !(c.messages || []).some((m: any) => m.role === "assistant");
 
   // ── Store everything the customer told us, whatever question it answers ──
@@ -307,6 +308,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   }
   function book(lead: string[], entering = false): Plan {
     s.stage = "book";
+    // A warm opener when the customer just told us when they'll sell (e.g. "when I get a good price" → "Of course, …")
+    warm = entering && u.sell_timing.stated && !lead.length ? (u.sell_timing.conditional ? "Of course" : "Great") : "";
     const v = { ...(entering && s.pendingVisit ? s.pendingVisit : {}), ...pick(u.visit) } as Understanding["visit"];
     s.pendingVisit = null;
     // Answer to "Shall I book you on …?"
@@ -350,7 +353,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     return askDay(lead);
   }
   function askDay(lead: string[]): Plan {
-    const q = ask("day_time");
+    let q = ask("day_time");
+    if (q && warm) q = `${warm}, ${q[0].toLowerCase()}${q.slice(1)}`;
     if (!q) return offer(lead, nextBookableDay(now), "");
     return finish(join(...lead, q));
   }
@@ -361,7 +365,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     if (!opts.length) return toCallback("stuck");
     s.offered = { date: day, times: opts };
     const label = day === today ? "today" : day === addDays(today, 1) ? "tomorrow" : "on " + R.inspectionDay(day);
-    return finish(join(...lead, note, opts.length === 2 ? R.offerTwo(label, opts[0], opts[1]) : `Would ${R.inspectionTime(opts[0])} ${label} suit you?`));
+    const line = opts.length === 2 ? R.offerTwo(label, opts[0], opts[1]) : `Would ${R.inspectionTime(opts[0])} ${label} suit you?`;
+    return finish(join(...lead, note, warm && !note ? `${warm}! ${line}` : line));
   }
   function confirm(date: string, time: string, lead: string[]): Plan {
     s.stage = "booked"; s.status = "booked"; s.offered = null; s.tentative = null;

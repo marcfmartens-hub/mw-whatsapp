@@ -65,7 +65,7 @@ t('1 Collect: loan only asked for 2020 or newer', () => {
 t('1→2: selling now / any time → two time options', () => {
   const c = chat({ name: 'Ali' }); say(c, {}); say(c, { car });
   const r = say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } });
-  assert.match(r.reply, /Would 12:15 pm or 3:15 pm today suit you\?/);
+  assert.match(r.reply, /^Great! Would 12:15 pm or 3:15 pm today suit you\?/);
 });
 t('2 Book: picking an offered time books it, then asks the name', () => {
   const c = chat(); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } });
@@ -142,6 +142,11 @@ t('4 Questions: price once → answer, then back to the same step', () => {
 t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
   const c = chat({ name: 'K' }); say(c, {}); say(c, { car: { make: 'MG', model: '5', year: '2023' } });
   const r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
+});
+t('Empathy: "when I get a good price" → "Of course, which day…"', () => {
+  const c = chat({ name: 'Mar' }); say(c, {}); say(c, { car });
+  const r = say(c, { sell_timing: { stated: true, days_until: 0, conditional: true } });
+  assert.match(r.reply, /^Of course, which day and time suits you/);
 });
 t('4 Questions: price pushed again → no repeat, offers book or team (role-play 17 Nov)', () => {
   const c = chat(); say(c, {}); say(c, { name: 'Mar' }); say(c, { car: { make: 'BMW', model: 'X5', year: '2020' } });

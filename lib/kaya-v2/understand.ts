@@ -17,7 +17,7 @@ export type Understanding = {
   wants_to_sell: boolean;
   buyer_only: boolean;               // wants to BUY a car, nothing to sell
   not_a_lead: boolean;               // service offers, ads, job seekers, asking for the owner/staff
-  sell_timing: { stated: boolean; days_until: number | null; undecided: boolean };
+  sell_timing: { stated: boolean; days_until: number | null; undecided: boolean; conditional: boolean };
   visit: {
     date: string | null;             // YYYY-MM-DD in Dubai
     time: string | null;             // HH:MM 24h
@@ -39,7 +39,7 @@ export const EMPTY: Understanding = {
   ack_only: false, name: null,
   car: { make: null, model: null, year: null, mileage_km: null, specs: null, loan: null },
   more_cars: false, vehicle_kind: null, hiyaza: false, wants_to_sell: false, buyer_only: false, not_a_lead: false,
-  sell_timing: { stated: false, days_until: null, undecided: false },
+  sell_timing: { stated: false, days_until: null, undecided: false, conditional: false },
   visit: { date: null, time: null, part_of_day: null, flexible: false, tentative: false },
   yes_no: null, wants_booking: false, wants_person: false, backs_out: false, questions: [], hard_requirement: false,
   change_request: null, phone_number: null,
@@ -69,7 +69,8 @@ Return ONLY this JSON object:
  "sell_timing": {
    "stated": bool,          // they said when they want to sell
    "days_until": number|null,   // days from today until they want to sell. now/today/immediately/asap/any time/"if the price is right" = 0, tomorrow = 1, this week = 3, next week = 7, this month = days left in the month, "end of month"/"25th Nov" = exact days, next month = 30
-   "undecided": bool        // "not sure yet", "I'll let you know", "just checking"
+   "undecided": bool,       // "not sure yet", "I'll let you know", "just checking"
+   "conditional": bool      // sells on a condition: "when I get a good price", "if the price is right", "depends on the offer"
  },
  "visit": {                 // when they can COME to the branch for the inspection (not when they sell)
    "date": "YYYY-MM-DD"|null,   // resolve today/tomorrow/weekday names against TODAY below. If Kaya just offered a day and they only give a time, use Kaya's day.
@@ -123,6 +124,7 @@ export function normalize(raw: any): Understanding {
       stated: bool(st.stated),
       days_until: typeof st.days_until === "number" && st.days_until >= 0 ? Math.round(st.days_until) : null,
       undecided: bool(st.undecided),
+      conditional: bool(st.conditional),
     },
     visit: {
       date: /^\d{4}-\d{2}-\d{2}$/.test(String(v.date)) ? v.date : null,
