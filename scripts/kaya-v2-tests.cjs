@@ -36,27 +36,27 @@ t('1 Collect: ad text gets the agreed greeting', () => {
 });
 t('1 Collect: name in any wording, then asks for the car', () => {
   const c = chat(); say(c, {}); const r = say(c, { name: 'asif' });
-  assert.equal(c.name, 'Asif'); assert.match(r.reply, /Which car are you planning to sell/);
+  assert.equal(c.name, 'Asif'); assert.match(r.reply, /Which car are you planning to sell/i);
 });
 t('1 Collect: a time is never stored as a name', () => {
   const c = chat(); say(c, {}); say(c, { name: 'As soon as possible' }); assert.equal(c.name, undefined);
 });
 t('1 Collect: name in the first message → greeting with name + next question', () => {
   const c = chat(); const r = say(c, { name: 'Champa', wants_to_sell: true });
-  assert.match(r.reply, /Nice to meet you, Champa\./); assert.match(r.reply, /Which car/);
+  assert.match(r.reply, /Nice to meet you, Champa\./); assert.match(r.reply, /Which car/i);
 });
 t('1 Collect: everything in one message → only the missing question (timing)', () => {
   const c = chat(); say(c, {}); const r = say(c, { name: 'Ajit', car });
-  assert.match(r.reply, /When are you planning to sell/); assert.doesNotMatch(r.reply, /model|mileage|GCC/i);
+  assert.match(r.reply, /When are you planning to sell/i); assert.doesNotMatch(r.reply, /model|mileage|GCC/i);
 });
 t('1 Collect: car without name skips the name until booking', () => {
   const c = chat(); say(c, {}); const r = say(c, { car: { make: 'Nissan', model: 'Sunny' } });
-  assert.match(r.reply, /What year/); assert.doesNotMatch(r.reply, /name/);
+  assert.match(r.reply, /What year/i); assert.doesNotMatch(r.reply, /name/);
 });
 t('1 Collect: answer to a different question lands in the right field', () => {
   const c = chat({ name: 'Ershad' }); say(c, {}); say(c, { car: { make: 'Nissan', model: 'X-Trail', year: '2016' } });
   const r = say(c, { car: { mileage_km: 152000, specs: 'GCC' } });
-  assert.equal(c.mileage, '152000'); assert.equal(c.specs, 'GCC'); assert.match(r.reply, /When are you planning/);
+  assert.equal(c.mileage, '152000'); assert.equal(c.specs, 'GCC'); assert.match(r.reply, /When are you planning/i);
 });
 t('1 Collect: loan only asked for 2020 or newer', () => {
   let c = chat({ name: 'A' }); say(c, {}); let r = say(c, { car: { ...car, year: '2024' } }); assert.match(r.reply, /loan/);
@@ -143,6 +143,12 @@ t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
   const c = chat({ name: 'K' }); say(c, {}); say(c, { car: { make: 'MG', model: '5', year: '2023' } });
   const r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
 });
+t('Openers match what was given: car → "Nice, what\'s the mileage?"', () => {
+  const c = chat({ name: 'Mar' }); say(c, {});
+  let r = say(c, { car: { make: 'BMW', model: 'X5', year: '2020' } }); assert.equal(r.reply, "Nice, what's the mileage?");
+  r = say(c, { car: { mileage_km: 25000 } }); assert.equal(r.reply, 'Great, is it GCC specs?');
+  r = say(c, { car: { specs: 'GCC' } }); assert.equal(r.reply, 'Alright, is there a car loan on it?');
+});
 t('Empathy: "when I get a good price" → "Of course, which day…"', () => {
   const c = chat({ name: 'Mar' }); say(c, {}); say(c, { car });
   const r = say(c, { sell_timing: { stated: true, days_until: 0, conditional: true } });
@@ -183,7 +189,7 @@ t('"Never mind": during booking → team follows up; after callback → one poli
 });
 t('4 Questions: home visit once → branch answer + continue; pushed → choice; "I will not come" → callback', () => {
   const c = chat({ name: 'Faraz' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 3 } });
-  let r = say(c, { questions: ['home_visit'] }); assert.match(r.reply, /done at our branch/); assert.match(r.reply, /Which day/); assert.equal(r.outcome, 'none');
+  let r = say(c, { questions: ['home_visit'] }); assert.match(r.reply, /done at our branch/); assert.match(r.reply, /Which day/i); assert.equal(r.outcome, 'none');
   r = say(c, { questions: ['home_visit'] }); assert.equal(r.reply, R.CHOICE);
   r = say(c, { questions: ['home_visit'], hard_requirement: true }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /done at our branch/);
 });

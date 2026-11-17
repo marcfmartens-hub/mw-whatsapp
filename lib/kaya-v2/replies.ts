@@ -37,7 +37,14 @@ export const ASK: Record<string, [string, string]> = {
   ],
 };
 
-export const FILLERS = ["Great.", "Alright.", "Thanks.", "Perfect."];
+/** Short natural opener, matched to what the customer just told us ("bmw x5 2020" → "Nice, what's the mileage?"). */
+export function filler(fields: string[]): string {
+  if (fields.some((f) => f === "make" || f === "model" || f === "year")) return "Nice";
+  if (fields.includes("mileage")) return "Great";
+  if (fields.includes("name")) return "Thanks";
+  if (fields.some((f) => f === "specs" || f === "loan" || f === "sell_timeline")) return "Alright";
+  return "";
+}
 
 export function inspectionDay(date: string): string {
   const d = new Date(date + "T12:00:00Z"), n = d.getUTCDate();

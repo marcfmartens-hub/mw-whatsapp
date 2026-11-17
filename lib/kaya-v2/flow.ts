@@ -239,9 +239,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     const next = nextCollect();
     if (next === "STUCK") return toCallback("stuck");
     if (next !== "BOOK") {
-      const gotSomething = Object.keys(updates).some((f) => ["make", "model", "year", "mileage", "specs", "loan", "name", "sell_timeline"].includes(f));
-      const filler = gotSomething && !answers.length ? R.FILLERS[s.turns % R.FILLERS.length] : "";
-      return finish(join(mediaNote, ...answers, [filler, next].filter(Boolean).join(" ")));
+      const filler = answers.length ? "" : R.filler(Object.keys(updates));
+      return finish(join(mediaNote, ...answers, filler ? `${filler}, ${next[0].toLowerCase()}${next.slice(1)}` : next));
     }
     s.stage = "book";
     return book(mediaNote ? [mediaNote, ...answers] : answers, true);
