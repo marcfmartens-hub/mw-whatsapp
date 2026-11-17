@@ -18,6 +18,7 @@ export type V2State = {
   awaitingChoice?: boolean;
   backoutSent?: boolean;
   openers?: string[];
+  lastAsk?: string | null;               // the car question Kaya asked last
   confirmGcc?: boolean;
   earlyPrice?: number;
   pendingQ?: string[];                   // price / home visit asked early, answered once the car is complete                   // price asked before the car details were complete                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
@@ -38,6 +39,7 @@ export type Ctx = {
   phone: string;                         // WhatsApp sender, digits only
   media: string[];                       // "photos" | "files" | "voice notes" | "links" in this burst
   textEmpty: boolean;                    // the burst had no typed text
+  text?: string;                         // the customer's typed text (for short answers like "E280")
   defaultTime?: (date: string, part?: string | null) => string | null;
 };
 export type Plan = {
@@ -103,7 +105,15 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   const isFirst = !s.greeted && !(c.messages || []).some((m: any) => m.role === "assistant");
 
   // ── Store everything the customer told us, whatever question it answers ──
-  const car = u.car;
+  const car = { ...u.car };
+  const raw = (ctx.text || "").trim();
+  if (!car.model && (s.lastAsk === "model" || s.lastAsk === "model_year") && raw.length <= 20 && /^[a-z0-9][a-z0-9 .\-]*$/i.test(raw)
+      && !/^(19|20)\d\d$/.test(raw) && !/^(ok|okay|yes|no|hi|hello|thanks?|sure|not sure|dont know|don't know|i don't know)$/i.test(raw)) {
+    const yr = raw.match(/\b(19[89]\d|20[0-3]\d)\b/)?.[1];
+    car.model = raw.replace(/\b(19[89]\d|20[0-3]\d)\b/, "").trim() || null;
+    if (yr && !car.year) car.year = yr;
+  }
+  s.lastAsk = null;
   if (car.make && car.make !== c.make) updates.make = car.make;
   if (car.model && car.model !== c.model) updates.model = car.model;
   if (car.year && car.year !== c.year) updates.year = car.year;
@@ -326,17 +336,19 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   function touchedContact() { return ["name", "phone_number", "make", "model", "year", "mileage"].some((f) => f in updates); }
   function ask(key: string): string | null {
     const n = s.asked[key] || 0;
-    if (n >= R.ASK[key].length) return null;
+    if (n >= Math.min(2, R.ASK[key].length)) return null;   // never ask the same thing a 3rd time — just continue
     s.asked[key] = n + 1;
+    s.lastAsk = key;
     // Second try for the model: help with examples that fit the brand (e.g. Toyota → Land Cruiser, Prado, Corolla)
     if (n === 1 && (key === "model" || key === "model_year")) return R.askModelAgain(k("make"), key === "model_year");
     return R.ASK[key][n];
   }
   function nextCollect(): string {
-    if (!k("make")) return ask("make") ?? "STUCK";
-    if (!k("model") && !k("year")) { const q = ask("model_year"); if (q) return q; }
-    else if (!k("model")) { const q = ask("model"); if (q) return q; }
-    else if (!k("year")) { const q = ask("year"); if (q) return q; }
+    if (!k("make")) { const q = ask("make"); if (q) return q; }
+    if (!k("make")) { /* brand unknown after two asks → skip model/year, continue */ }
+    else if (!k("model") && !k("year")) { const q = ask("model_year"); if (q) return q; }
+    else if (!k("model") && (s.asked.model_year || 0) + (s.asked.model || 0) < 2) { const q = ask("model"); if (q) return q; }
+    else if (!k("year") && (s.asked.model_year || 0) + (s.asked.year || 0) < 2) { const q = ask("year"); if (q) return q; }
     if (!k("mileage")) { const q = ask("mileage"); if (q) return q; }
     if (!k("specs")) { const q = ask("specs"); if (q) return q; }
     if ((Number(k("year")) || 0) >= 2020 && !k("loan")) { const q = ask("loan"); if (q) return q; }

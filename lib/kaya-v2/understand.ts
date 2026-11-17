@@ -57,7 +57,7 @@ Return ONLY this JSON object:
  "ack_only": bool,          // the message is only "ok", "thanks", "welcome", an emoji, or similar, with no new information
  "name": string|null,       // the customer's OWN first name or full name, only if they state it ("I'm Asif", "this is Asif", "Hi, Evgeniy") or answer Kaya's name question with a name. Never a car, a place, a time ("as soon as possible", "this week"), a greeting or a friend's name.
  "car": {
-   "make": string|null, "model": string|null, "year": string|null,   // canonical spelling ("Toyata"→"Toyota", "Hundyi Toucan"→Hyundai Tucson, "Changing alsvin"→Changan Alsvin). If the customer writes "2015 model", that is the YEAR.
+   "make": string|null, "model": string|null, "year": string|null,   // canonical spelling ("Toyata"→"Toyota", "Hundyi Toucan"→Hyundai Tucson, "Changing alsvin"→Changan Alsvin). If the customer writes "2015 model", that is the YEAR. Model codes are models too: "E280" (Mercedes E-Class), "LX570", "X5", "Q7", "GLE 450", "Patrol V8". A short reply to Kaya's model question is the model.
    "mileage_km": number|null,   // odometer in km. "130k"=130000. UAE customers often drop the thousands: "200" or "145" for a car older than 2 years means 200000/145000. Never a price or a year.
    "specs": "GCC"|"Non-GCC"|"Unknown"|null,   // "American", "USA", "Japan origin", "Indian spec", "non GCC" → Non-GCC. "I don't know" → Unknown. Only if stated.
    "loan": "yes"|"no"|null,     // car loan / mortgage / finance on the car

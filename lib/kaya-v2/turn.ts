@@ -48,7 +48,7 @@ export async function planV2(
   const times = new Map<string, string | null>();
   await Promise.all(days.map(async (d) => times.set(d + "|" + (u.visit.part_of_day ?? ""), await slotLookup(d, u.visit.part_of_day).catch(() => null))));
   const p = plan(c, u, {
-    now, phone: String(c.phone || ""), media, textEmpty: !text,
+    now, phone: String(c.phone || ""), media, textEmpty: !text, text,
     defaultTime: (d, part) => times.get(d + "|" + (part ?? "")) ?? times.get(d + "|") ?? null,
   });
   return { plan: p, understanding: u, aiOk: ok };
