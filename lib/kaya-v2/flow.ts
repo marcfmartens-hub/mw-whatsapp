@@ -18,7 +18,8 @@ export type V2State = {
   awaitingChoice?: boolean;
   backoutSent?: boolean;
   openers?: string[];
-  confirmGcc?: boolean;                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
+  confirmGcc?: boolean;
+  earlyPrice?: number;                   // price asked before the car details were complete                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
   mediaNoted: string[];
   greeted?: boolean;
   timingDone?: boolean;
@@ -149,10 +150,11 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   s.answered = s.answered || [];
   let priceNoCar = false;
   for (const q of u.questions) {
-    // Price asked before we know the car: ask for the car first (not counted as an objection yet)
-    if (q === "price" && !k("make") && s.stage !== "booked") {
-      if (!s.answered.includes("price_no_car")) { s.answered.push("price_no_car"); priceNoCar = true; }
-      continue;
+    // Price asked before the car details are complete: show understanding, collect the car first.
+    // Not counted as a price objection (twice at most; a 3rd early push is treated as a normal price objection).
+    if (q === "price" && !carComplete() && s.stage === "collect") {
+      s.earlyPrice = (s.earlyPrice || 0) + 1;
+      if (s.earlyPrice <= 2) { priceNoCar = true; continue; }
     }
     if (q === "price" || q === "home_visit") {
       s.objections[q] = (s.objections[q] || 0) + 1;
@@ -163,6 +165,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     if (q !== "other") s.answered.push(q);
     answers.push(R.answer(q, { year }));
   }
+  if (priceNoCar && !u.questions.includes("home_visit")) hard = false;   // car details first, then talk about price
   // Price AND home visit with all car details given → the team calls straight away (Marc's rule)
   const forceTeam = u.questions.includes("price") && u.questions.includes("home_visit") && carComplete();
 
@@ -232,9 +235,14 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   }
 
   // ── 1 · Collect ──
-  if (s.stage === "collect" && priceNoCar && !hard && !forceTeam) {
-    s.greeted = true; s.asked.make = Math.max(s.asked.make || 0, 1);
-    return finish(join(isFirst ? `${R.salutation(now)}! I'm Kaya from Mister Wheelz 😊` : "", mediaNote, ...answers, R.PRICE_NO_CAR));
+  if (s.stage === "collect" && priceNoCar && !forceTeam) {
+    s.greeted = true;
+    const intro = s.earlyPrice === 1 ? R.PRICE_NEED_INFO : R.PRICE_NEED_INFO_AGAIN;
+    let next: string;
+    if (!k("make")) { s.asked.make = Math.max(s.asked.make || 0, 1); next = R.SHARE_CAR; }
+    else next = nextCollect();
+    if (next === "STUCK" || next === "BOOK") next = "";
+    return finish(join(isFirst ? `${R.salutation(now)}! I'm Kaya from Mister Wheelz 😊` : "", mediaNote, ...answers, intro, next));
   }
   if (s.stage === "collect") {
     if (isFirst) {

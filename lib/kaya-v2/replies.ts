@@ -125,8 +125,9 @@ export function lowMileage(km: number, year: number, now: Date): boolean {
   const age = Math.max(1, new Date(+now + 4 * 3600e3).getUTCFullYear() - year);
   return km / age <= 10000;
 }
-export const PRICE_NO_CAR =
-  "I can help you with that, but I'm going to need some information about the car first.\n\nPlease share the make, model and year of the car.";
+export const PRICE_NEED_INFO = "I understand, and I can help you with that, but I'm going to need some information about the car first.";
+export const PRICE_NEED_INFO_AGAIN = "Sure, I just need a few more details about the car first.";
+export const SHARE_CAR = "Please share the make, model and year of the car.";
 export const CHOICE =
   "I understand. I can help you book an appointment for a car inspection, which takes only 10–15 minutes, or I can forward your details to our team so you can discuss your car directly with them.\n\nWould you like me to continue with the booking, or forward your details to the team?";
 export const BACKOUT_AFTER_CALLBACK = "No problem. Our team will still give you a quick call, and if you change your mind you can book an inspection here anytime.";
