@@ -22,12 +22,18 @@ export const greetingWithName = (now: Date, name: string) =>
   `${salutation(now)}! I'm Kaya from Mister Wheelz 😊 Nice to meet you, ${name}.`;
 
 // ── Car details, timing, booking ──────────────────────────────────────────
-export const ASK: Record<string, [string, string]> = {
-  make: ["Which car are you planning to sell? Please share the make, model and year.", "Could you type the make and model of the car?"],
-  model_year: ["Which model and year is it?", "Could you share the model and the year?"],
-  model: ["Which model is it?", "Could you type the model?"],
-  year: ["What year is it?", "Which year is the car?"],
-  mileage: ["What's the mileage?", "Roughly how many kilometres has it done?"],
+// Several wordings per question: Kaya keeps collecting the car details (never the same sentence twice).
+export const ASK: Record<string, string[]> = {
+  make: [
+    "Which car are you planning to sell? Please share the make, model and year.",
+    "Could you type the make and model of the car?",
+    "Which brand is your car? (e.g. Toyota, Nissan, Mercedes)",
+    "To help you further, I just need the make, model and year of your car.",
+  ],
+  model_year: ["Which model and year is it?", "Could you share the model and the year?", "To help you further, I just need the model and year of your car."],
+  model: ["Which model is it?", "Could you type the model?", "To help you further, I just need the model of your car."],
+  year: ["What year is it?", "Which year is the car?", "Roughly which year is it? An estimate is fine."],
+  mileage: ["What's the mileage?", "Roughly how many kilometres has it done?", "An estimate of the mileage is fine, roughly how many km?"],
   specs: ["Is it GCC specs?", "Is it GCC, or another spec (for example American)?"],
   loan: ["Is there a car loan on it?", "Is the car still under a bank loan?"],
   timing: ["When are you planning to sell it?", "Are you looking to sell it this week?"],
