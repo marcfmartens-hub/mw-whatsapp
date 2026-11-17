@@ -128,7 +128,7 @@ t('2 Book: non-UAE number is asked after booking', () => {
 t('3 Callback: selling in 1+ week → follow-up date', () => {
   const c = chat({ name: 'F' }); say(c, {}); say(c, { car });
   const r = say(c, { sell_timing: { stated: true, days_until: 14 } });
-  assert.equal(r.outcome, 'callback'); assert.match(c.car_conditions, /Follow-up: 2026-11-25/); assert.match(r.reply, /closer to the time/);
+  assert.equal(r.outcome, 'callback'); assert.match(c.car_conditions, /Follow-up: 2026-11-25/); assert.match(r.reply, /to arrange an inspection day and time/);
 });
 t('3 Callback: undecided', () => {
   const c = chat({ name: 'G' }); say(c, {}); say(c, { car });
