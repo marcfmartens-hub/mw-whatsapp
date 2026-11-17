@@ -81,7 +81,7 @@ Return ONLY this JSON object:
    "time": "HH:MM"|null,        // 24h. "first one"/"the earlier one" = the first time Kaya offered. "after 5 pm" = "18:00".
    "part_of_day": "morning"|"afternoon"|"evening"|null,
    "flexible": bool,        // "any time", "whenever", "as soon as possible", "you tell me", "let me know whenever you think is appropriate"
-   "tentative": bool        // unsure: "Saturday maybe", "probably Monday"
+   "tentative": bool        // unsure: "Saturday maybe", "probably Monday". A proposed time as a question ("Today 3 pm?", "Can I come at 4?") is NOT tentative: it is a booking request (wants_booking=true)
  },
  "yes_no": "yes"|"no"|null, // only when Kaya's last message asked a yes/no question
  "wants_booking": bool,     // asks to book / come / arrange the inspection, or picks "continue the booking" when Kaya offered booking or the team

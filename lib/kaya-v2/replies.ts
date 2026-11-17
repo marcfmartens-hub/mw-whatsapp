@@ -86,7 +86,14 @@ export function inspectionTime(time: string): string {
 export const dayLabel = (date: string, today: string, tomorrow: string) =>
   date === today ? "today" : date === tomorrow ? "tomorrow (" + inspectionDay(date) + ")" : inspectionDay(date);
 
-export const openTime = (when: string) => `No problem, what time can you bring the car ${when} for a quick inspection?`;
+/** Customer proposed the time themselves: "Yes, that's fine. I will book you for today at 3 pm." + location. */
+export function bookedTheirTime(date: string, time: string, now: Date): string {
+  const today = new Date(+now + 4 * 3600e3).toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.parse(today + "T12:00:00Z") + 86400e3).toISOString().slice(0, 10);
+  const label = date === today ? "today" : date === tomorrow ? "tomorrow" : "on " + inspectionDay(date);
+  return `Yes, that's fine. I will book you for ${label} at ${inspectionTime(time)}.\n\nHere's our location:\n\n${LOCATION}`;
+}
+export const openTime = (when: string) => `What time can you bring the car ${when} for a quick inspection?`;
 export const offerTwo = (label: string, a: string, b: string) =>
   `Would ${inspectionTime(a)} or ${inspectionTime(b)} ${label} suit you?`;
 export const confirmTentative = (date: string, time: string) =>
