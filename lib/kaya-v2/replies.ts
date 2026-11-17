@@ -112,8 +112,16 @@ export const CALLBACK: Record<string, string> = {
   buyer: "We mainly buy cars, but I'll pass your request to our sales team and they'll contact you.",
   change: "No problem, I'll let our team know and they'll contact you to arrange it.",
   stuck: "No problem. I'll ask our team to call you so they can help you best.",
+  forward: "Sure, I'll forward your details to our team and they'll call you shortly.",
   backout: "No problem. Our team will give you a quick call, and if you change your mind you can book an inspection here anytime.",
 };
+export const SPECS_UNKNOWN = "No problem, our team will check that at the inspection.";
+/** Very low mileage: at most half of normal (normal is 15–20k km a year). */
+export function lowMileage(km: number, year: number, now: Date): boolean {
+  if (!km || !year) return false;
+  const age = Math.max(1, new Date(+now + 4 * 3600e3).getUTCFullYear() - year);
+  return km / age <= 10000;
+}
 export const PRICE_NO_CAR =
   "I can help you with that, but I'm going to need some information about the car first.\n\nPlease share the make, model and year of the car.";
 export const CHOICE =

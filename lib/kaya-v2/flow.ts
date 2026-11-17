@@ -17,6 +17,7 @@ export type V2State = {
   choiceOffered?: boolean;               // "book or forward to the team?" already asked
   awaitingChoice?: boolean;
   backoutSent?: boolean;
+  openers?: string[];                    // openers already used ("Nice", "Ok"…) — each once per chat
   mediaNoted: string[];
   greeted?: boolean;
   timingDone?: boolean;
@@ -187,6 +188,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   if (s.awaitingChoice && s.stage !== "callback") {
     s.awaitingChoice = false;
     const wantsBook = u.wants_booking || visitGiven || u.yes_no === "yes" && !u.wants_person;
+    if (u.wants_person && !hard) return toCallback("forward", true);
     if (!wantsBook || hard || u.wants_person) return toCallback("requirement", true);
     hard = false;
   }
@@ -249,8 +251,15 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     const next = nextCollect();
     if (next === "STUCK") return toCallback("stuck");
     if (next !== "BOOK") {
-      const filler = answers.length ? "" : R.filler(Object.keys(updates));
-      return finish(join(mediaNote, ...answers, filler ? `${filler}, ${next[0].toLowerCase()}${next.slice(1)}` : next));
+      const lower = (q: string) => q[0].toLowerCase() + q.slice(1);
+      // Specs unknown → reassure instead of a flat "Alright"
+      if (!answers.length && updates.specs === "Unknown") return finish(join(mediaNote, R.SPECS_UNKNOWN, next));
+      // Very low mileage for its age → say so (normal is 15–20k km a year)
+      const low = !answers.length && updates.mileage && R.lowMileage(Number(updates.mileage), Number(k("year")), now);
+      if (low) return finish(join(mediaNote, `${opener("Great")}, that's very low mileage for a ${k("year")}! ${next}`.replace(/^, /, "")));
+      const preferred = answers.length ? "" : R.filler(Object.keys(updates));
+      const filler = preferred ? opener(preferred) : "";
+      return finish(join(mediaNote, ...answers, filler ? `${filler}, ${lower(next)}` : next));
     }
     s.stage = "book";
     return book(mediaNote ? [mediaNote, ...answers] : answers, true);
@@ -260,6 +269,13 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   return book(mediaNote ? [mediaNote, ...answers] : answers);
 
   // ───────────────────────── helpers ─────────────────────────
+  /** Each opener once per chat: the second time "Nice" becomes "Ok", then "Got it", "Thanks". */
+  function opener(preferred: string): string {
+    s.openers = s.openers || [];
+    const pick = [preferred, "Ok", "Got it", "Thanks"].find((o) => !s.openers!.includes(o)) ?? "";
+    if (pick) s.openers.push(pick);
+    return pick;
+  }
   function carComplete() { return !!(k("make") && k("model") && k("year") && k("mileage")); }
   function dateChanged() {
     const d = u.visit.date ?? c.appointment_date, t = u.visit.time ?? c.appointment_time;
@@ -310,7 +326,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     if (skipAnswers) answers.length = 0;
     s.stage = "callback"; s.status = "team_accepted"; s.reason = r; s.greeted = true;
     outcome = "callback";
-    reason = { requirement: "Price / estimate / home visit is a must", person: "Customer asked for the team", non_gcc: "Non-GCC car", later: `Sells later — follow up ${s.followUpDate ?? ""}`, undecided: "Undecided seller", more_cars: "Several cars", truck_bus: "Truck / bus", hiyaza: "Hiyaza", buyer: "Buyer only", change: "Booking change", stuck: "Conversation stuck", backout: "Customer backed out" }[r];
+    reason = { requirement: "Price / estimate / home visit is a must", person: "Customer asked for the team", non_gcc: "Non-GCC car", later: `Sells later — follow up ${s.followUpDate ?? ""}`, undecided: "Undecided seller", more_cars: "Several cars", truck_bus: "Truck / bus", hiyaza: "Hiyaza", buyer: "Buyer only", change: "Booking change", stuck: "Conversation stuck", backout: "Customer backed out", forward: "Price / estimate / home visit is a must — chose the team" }[r];
     if (r === "later" && s.followUpDate) updates.car_conditions = [c.car_conditions, `Follow-up: ${s.followUpDate}`].filter(Boolean).join(" | ");
     const intro = isFirst ? `${R.salutation(now)}! I'm Kaya from Mister Wheelz 😊` : "";
     const askNext = callbackAsk();
