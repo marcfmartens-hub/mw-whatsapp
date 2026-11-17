@@ -146,6 +146,12 @@ t('4 Questions: price before any car details → ask the car first', () => {
   c = chat(); r = say(c, { questions: ['price'] });
   assert.equal(r.reply, "Good morning! I'm Kaya from Mister Wheelz 😊\n\n" + R.PRICE_NO_CAR);
 });
+t('Model not understood → examples that fit the brand', () => {
+  const c = chat({ name: 'A' }); say(c, {}); say(c, { car: { make: 'Toyota', year: '2025' } });
+  const r = say(c, { car: { year: '2025' } }); assert.equal(r.reply, 'Could you tell me the model? (e.g. Land Cruiser, Prado, Corolla)');
+  const d = chat({ name: 'B' }); say(d, {}); say(d, { car: { make: 'Nissan' } });
+  assert.match(say(d, {}).reply, /\(e\.g\. Patrol, Altima, Sunny\)/);
+});
 t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
   const c = chat({ name: 'K' }); say(c, {}); say(c, { car: { make: 'MG', model: '5', year: '2023' } });
   const r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);

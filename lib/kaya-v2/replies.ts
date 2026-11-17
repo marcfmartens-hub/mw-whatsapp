@@ -46,6 +46,27 @@ export function filler(fields: string[]): string {
   return "";
 }
 
+// Popular UAE models per brand, used as examples when the customer doesn't give the model.
+const MODEL_EXAMPLES: Record<string, string[]> = {
+  toyota: ["Land Cruiser", "Prado", "Corolla"], lexus: ["LX", "RX", "ES"], nissan: ["Patrol", "Altima", "Sunny"],
+  infiniti: ["QX80", "QX60", "Q50"], mitsubishi: ["Pajero", "Outlander", "Lancer"], honda: ["Accord", "Civic", "CR-V"],
+  hyundai: ["Tucson", "Elantra", "Santa Fe"], kia: ["Sportage", "Sorento", "Cerato"], mazda: ["CX-5", "CX-9", "Mazda 6"],
+  ford: ["Explorer", "Mustang", "Edge"], chevrolet: ["Tahoe", "Camaro", "Captiva"], gmc: ["Yukon", "Sierra", "Acadia"],
+  dodge: ["Charger", "Durango", "Challenger"], jeep: ["Wrangler", "Grand Cherokee", "Compass"], cadillac: ["Escalade", "CT5", "XT5"],
+  "land rover": ["Range Rover", "Defender", "Discovery"], "range rover": ["Sport", "Velar", "Evoque"],
+  bmw: ["X5", "5 Series", "3 Series"], mercedes: ["G-Class", "E-Class", "C-Class"], "mercedes-benz": ["G-Class", "E-Class", "C-Class"],
+  audi: ["Q7", "A6", "Q5"], volkswagen: ["Golf", "Tiguan", "Teramont"], porsche: ["Cayenne", "Macan", "911"],
+  mg: ["ZS", "MG5", "RX5"], changan: ["CS75", "Alsvin", "CS35"], geely: ["Coolray", "Emgrand", "Tugella"],
+  chery: ["Tiggo 8", "Tiggo 7", "Arrizo 6"], haval: ["H6", "Jolion", "H9"], jetour: ["X70", "Dashing", "T2"],
+  suzuki: ["Swift", "Dzire", "Jimny"], renault: ["Duster", "Koleos", "Megane"], peugeot: ["3008", "5008", "208"],
+  tesla: ["Model Y", "Model 3", "Model S"], volvo: ["XC90", "XC60", "S90"], subaru: ["Forester", "Outback", "XV"],
+};
+export function askModelAgain(make: string | null, withYear: boolean): string {
+  const ex = make ? MODEL_EXAMPLES[make.trim().toLowerCase()] : undefined;
+  const base = withYear ? "Could you tell me the model and the year?" : "Could you tell me the model?";
+  return ex ? `${base} (e.g. ${ex.join(", ")})` : base;
+}
+
 export function inspectionDay(date: string): string {
   const d = new Date(date + "T12:00:00Z"), n = d.getUTCDate();
   const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] || "th";

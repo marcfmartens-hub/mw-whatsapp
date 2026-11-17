@@ -270,6 +270,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     const n = s.asked[key] || 0;
     if (n >= 2) return null;
     s.asked[key] = n + 1;
+    // Second try for the model: help with examples that fit the brand (e.g. Toyota → Land Cruiser, Prado, Corolla)
+    if (n === 1 && (key === "model" || key === "model_year")) return R.askModelAgain(k("make"), key === "model_year");
     return R.ASK[key][n];
   }
   function nextCollect(): string {
