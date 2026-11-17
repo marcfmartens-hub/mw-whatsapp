@@ -172,6 +172,18 @@ t('Live test 17 Nov: BMW 2020 → price early → X5 → 25k → no price text, 
   r = say(c, { car: { mileage_km: 25000 } }); assert.equal(r.reply, "Great, that's very low mileage for a 2020! Is it GCC specs?");
   r = say(c, { questions: ['price'] }); assert.match(r.reply, /^I understand\. For your car we offer two options/);
 });
+t('Live test 17 Nov: question while collecting never leads to a callback; callback still collects the full car', () => {
+  const c = chat(); say(c, {}); say(c, {}); say(c, { wants_to_sell: true });
+  let r = say(c, { questions: ['location'] }); assert.equal(r.outcome, 'none'); assert.ok(r.reply.includes(R.LOCATION)); assert.match(r.reply, /Which brand is your car\?/);
+  r = say(c, { car: { make: 'Mercedes' } }); assert.match(r.reply, /model and year/i);
+  r = say(c, { car: { condition_note: 'Old car but in very good condition', condition_tone: 'positive' } });
+  assert.match(r.reply, /^That's good to hear\./); assert.match(c.car_conditions, /very good condition/);
+  const d = chat(); say(d, {}); say(d, { wants_person: true });
+  r = say(d, { car: { make: 'Mercedes' } }); assert.match(r.reply, /model and year/i); assert.doesNotMatch(r.reply, /name/);
+  r = say(d, { car: { model: 'E-Class', year: '2012' } }); assert.match(r.reply, /mileage/i);
+  r = say(d, { car: { mileage_km: 210000 } }); assert.equal(r.reply, R.CALLBACK_NAME);
+  r = say(d, { name: 'Sam' }); assert.equal(r.reply, R.CALLBACK_DONE);
+});
 t('Price with only the make known → understanding + collect the rest first (role-play 17 Nov)', () => {
   const c = chat(); say(c, {}); say(c, { car: { make: 'Toyota' }, wants_to_sell: true });
   let r = say(c, { questions: ['price'], hard_requirement: true });

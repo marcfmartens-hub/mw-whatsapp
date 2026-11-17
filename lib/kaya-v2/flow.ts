@@ -242,7 +242,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     }
     if (touchedContact()) outcome = "callback", reason = "Customer added details";
     const ask = callbackAsk();
-    if (ask) return finish(join(mediaNote, ...answers, ask));
+    const ack = car.condition_note && !answers.length ? (car.condition_tone === "negative" ? R.CONDITION_NEGATIVE : R.CONDITION_POSITIVE) : "";
+    if (ask) return finish(join(mediaNote, ...answers, ack ? `${ack} ${ask}` : ask));
     if (!s.callbackDone && (touchedContact() || !answers.length)) { s.callbackDone = true; return finish(join(mediaNote, ...answers, R.CALLBACK_DONE)); }
     if (answers.length) return finish(join(mediaNote, ...answers));
     if (u.ack_only && !s.ackSent) { s.ackSent = true; return finish(R.ACK_DEFAULT); }
@@ -325,7 +326,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   function touchedContact() { return ["name", "phone_number", "make", "model", "year", "mileage"].some((f) => f in updates); }
   function ask(key: string): string | null {
     const n = s.asked[key] || 0;
-    if (n >= 2) return null;
+    if (n >= R.ASK[key].length) return null;
     s.asked[key] = n + 1;
     // Second try for the model: help with examples that fit the brand (e.g. Toyota → Land Cruiser, Prado, Corolla)
     if (n === 1 && (key === "model" || key === "model_year")) return R.askModelAgain(k("make"), key === "model_year");
@@ -348,16 +349,18 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       if (!isUae(ctx.phone) && !k("phone_number") && !s.asked.cb_phone) { s.asked.cb_phone = 1; return R.CALLBACK_PHONE; }
       return null;
     }
+    // Always collect the full car details for the team too (same questions, next wording each time)
     const carAsks: [string, () => boolean][] = [
       ["make", () => !k("make")],
       ["model_year", () => !k("model") && !k("year")],
-      ["model", () => !k("model")],
-      ["year", () => !k("year")],
+      ["model", () => !k("model") && !!k("year")],
+      ["year", () => !k("year") && !!k("model")],
       ["mileage", () => !k("mileage")],
     ];
     for (const [key, missing] of carAsks) {
-      if (missing() && !s.asked["cb_" + key] && !(s.asked[key] >= 2)) { s.asked["cb_" + key] = 1; return R.ASK[key][0]; }
-      if (missing() && key === "model_year") break;
+      if (!missing()) continue;
+      const q = ask(key);
+      if (q) return q;
     }
     if (!k("name") && !s.asked.cb_name) { s.asked.cb_name = 1; return R.CALLBACK_NAME; }
     if (!isUae(ctx.phone) && !k("phone_number") && !s.asked.cb_phone) { s.asked.cb_phone = 1; return R.CALLBACK_PHONE; }
