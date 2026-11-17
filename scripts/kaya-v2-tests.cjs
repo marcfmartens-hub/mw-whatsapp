@@ -168,6 +168,15 @@ t('"I want to sell my car" → "No problem, we can help you with that." + car qu
   const c = chat(); say(c, {});
   const r = say(c, { wants_to_sell: true }); assert.equal(r.reply, 'No problem, we can help you with that.\n\nWhich car are you planning to sell? Please share the make, model and year.');
 });
+t('Car condition is never ignored: acknowledged, saved, GCC confirmed (role-play 17 Nov)', () => {
+  const c = chat({ name: 'R' }); say(c, {}); say(c, { car: { make: 'Toyota', model: 'RAV4', year: '2020' } }); say(c, { car: { mileage_km: 13000 } });
+  let r = say(c, { car: { condition_note: 'Full agency service history, under warranty', condition_tone: 'positive' } });
+  assert.equal(r.reply, "That's good to hear. So the car is GCC, right?");
+  assert.match(c.car_conditions, /agency service/);
+  r = say(c, { yes_no: 'yes' }); assert.equal(c.specs, 'GCC'); assert.match(r.reply, /loan/);
+  r = say(c, { car: { condition_note: 'Minor accident in 2023', condition_tone: 'negative' } });
+  assert.match(r.reply, /^Thanks for letting me know, our team will take it into account\. /); assert.match(c.car_conditions, /accident/);
+});
 t('Very low mileage is mentioned; unknown specs get reassurance', () => {
   const c = chat({ name: 'Mar' }); say(c, {}); say(c, { car: { make: 'BMW', model: 'X6', year: '2020' } });
   let r = say(c, { car: { mileage_km: 20000 } }); assert.equal(r.reply, "Great, that's very low mileage for a 2020! Is it GCC specs?");

@@ -1,7 +1,7 @@
 // Kaya v2 — one customer turn: read the message, run the flow, save, send, push to Bigin.
 import { type Conversation, updateConversation, getConversation } from "../supabase";
 import { sendWhatsAppMessage } from "../meta";
-import { syncBiginOutcome } from "../bigin-outcome";
+import { syncConsoleLead } from "../console-crm";
 import { pickDefaultTime } from "../slots";
 import { understand, haikuCall, type Understanding } from "./understand";
 import { plan, nextBookableDay, type Plan } from "./flow";
@@ -68,6 +68,22 @@ export async function kayaV2Turn(c: Conversation, text: string): Promise<string>
   await updateConversation(c.phone, { ...p.updates, flow_state, messages, step: p.outcome === "booked" ? 8 : Math.max(c.step || 0, 1) } as any);
   const saved = await getConversation(c.phone);
   try { if (p.reply) await sendWhatsAppMessage(c.phone, p.reply); }
-  finally { if (saved && p.outcome !== "none") await syncBiginOutcome(saved, p.outcome, p.reason); }
+  finally { if (saved && p.outcome !== "none") await sendToConsole(saved, p.outcome, p.reason); }
   return p.outcome === "none" ? "collecting" : p.outcome;
+}
+
+/** Kaya v2 hands leads to the MW console only (not Bigin). Failed sends are retried by the console reconcile cron. */
+export async function sendToConsole(c: any, outcome: "booked" | "callback", reason?: string): Promise<boolean> {
+  const summary = [
+    `Kaya — ${outcome === "booked" ? "Inspection booked" : "CALL BACK"}`,
+    reason || "",
+    (c.messages || []).slice(-14).map((m: any) => `${m.role === "user" ? "Customer" : "Kaya"}: ${m.content}`).join("\n"),
+  ].filter(Boolean).join("\n\n");
+  return syncConsoleLead({
+    ...c,
+    bigin_outcome: outcome,
+    inspection_booked: outcome === "booked",
+    clear_appointment: outcome !== "booked",
+    inquiry_summary: summary,
+  });
 }

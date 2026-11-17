@@ -115,6 +115,8 @@ export const CALLBACK: Record<string, string> = {
   forward: "Sure, I'll forward your details to our team and they'll call you shortly.",
   backout: "No problem. Our team will give you a quick call, and if you change your mind you can book an inspection here anytime.",
 };
+export const CONDITION_POSITIVE = "That's good to hear.";
+export const CONDITION_NEGATIVE = "Thanks for letting me know, our team will take it into account.";
 export const SELL_ACK = "No problem, we can help you with that.";
 export const SPECS_UNKNOWN = "No problem, our team will check that at the inspection.";
 /** Very low mileage: at most half of normal (normal is 15–20k km a year). */

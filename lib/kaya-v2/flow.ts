@@ -17,7 +17,8 @@ export type V2State = {
   choiceOffered?: boolean;               // "book or forward to the team?" already asked
   awaitingChoice?: boolean;
   backoutSent?: boolean;
-  openers?: string[];                    // openers already used ("Nice", "Ok"…) — each once per chat
+  openers?: string[];
+  confirmGcc?: boolean;                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
   mediaNoted: string[];
   greeted?: boolean;
   timingDone?: boolean;
@@ -108,6 +109,12 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   if (car.specs && (car.specs !== "Unknown" || !c.specs)) updates.specs = car.specs;
   if (car.loan) updates.loan = car.loan === "yes" ? "Yes" : "No";
   if (u.name && validName(u.name) && !c.name) updates.name = title(u.name);
+  // Condition remarks are kept for the team (console summary)
+  if (car.condition_note && !String(c.car_conditions || "").includes(car.condition_note))
+    updates.car_conditions = [c.car_conditions, car.condition_note].filter(Boolean).join(" | ");
+  // "So the car is GCC, right?" → yes / no
+  if (s.confirmGcc && !car.specs && u.yes_no) updates.specs = u.yes_no === "yes" ? "GCC" : "Unknown";
+  s.confirmGcc = false;
   if (u.phone_number && /\d{9,15}/.test(u.phone_number.replace(/\D/g, ""))) updates.phone_number = u.phone_number;
   if (u.sell_timing.stated) {
     updates.sell_timeline = u.sell_timing.undecided ? "Undecided"
@@ -256,6 +263,12 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       if (!answers.length && u.wants_to_sell && !k("make") && !(s.answered || []).includes("sell_ack")) {
         s.answered = [...(s.answered || []), "sell_ack"];
         return finish(join(mediaNote, R.SELL_ACK, next));
+      }
+      // Condition remark → acknowledge it, never ignore it
+      if (!answers.length && car.condition_note && car.condition_tone !== "neutral") {
+        const ack = car.condition_tone === "negative" ? R.CONDITION_NEGATIVE : R.CONDITION_POSITIVE;
+        if (car.condition_tone !== "negative" && R.ASK.specs.includes(next)) { s.confirmGcc = true; return finish(join(mediaNote, `${ack} So the car is GCC, right?`)); }
+        return finish(join(mediaNote, `${ack} ${next}`));
       }
       // Specs unknown → reassure instead of a flat "Alright"
       if (!answers.length && updates.specs === "Unknown") return finish(join(mediaNote, R.SPECS_UNKNOWN, next));

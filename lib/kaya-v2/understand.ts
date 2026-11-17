@@ -10,6 +10,8 @@ export type Understanding = {
     mileage_km: number | null;
     specs: "GCC" | "Non-GCC" | "Unknown" | null;
     loan: "yes" | "no" | null;
+    condition_note: string | null;         // service history, warranty, accidents, damage, modifications…
+    condition_tone: "positive" | "negative" | "neutral" | null;
   };
   more_cars: boolean;                // more than one car to sell
   vehicle_kind: "car" | "truck_bus" | "other_vehicle" | null;
@@ -37,7 +39,7 @@ export type Understanding = {
 
 export const EMPTY: Understanding = {
   ack_only: false, name: null,
-  car: { make: null, model: null, year: null, mileage_km: null, specs: null, loan: null },
+  car: { make: null, model: null, year: null, mileage_km: null, specs: null, loan: null, condition_note: null, condition_tone: null },
   more_cars: false, vehicle_kind: null, hiyaza: false, wants_to_sell: false, buyer_only: false, not_a_lead: false,
   sell_timing: { stated: false, days_until: null, undecided: false, conditional: false },
   visit: { date: null, time: null, part_of_day: null, flexible: false, tentative: false },
@@ -58,7 +60,9 @@ Return ONLY this JSON object:
    "make": string|null, "model": string|null, "year": string|null,   // canonical spelling ("Toyata"→"Toyota", "Hundyi Toucan"→Hyundai Tucson, "Changing alsvin"→Changan Alsvin). If the customer writes "2015 model", that is the YEAR.
    "mileage_km": number|null,   // odometer in km. "130k"=130000. UAE customers often drop the thousands: "200" or "145" for a car older than 2 years means 200000/145000. Never a price or a year.
    "specs": "GCC"|"Non-GCC"|"Unknown"|null,   // "American", "USA", "Japan origin", "Indian spec", "non GCC" → Non-GCC. "I don't know" → Unknown. Only if stated.
-   "loan": "yes"|"no"|null      // car loan / mortgage / finance on the car
+   "loan": "yes"|"no"|null,     // car loan / mortgage / finance on the car
+   "condition_note": string|null,   // anything about the car's condition or history, short, in English: "Full agency service history, under warranty", "Minor accident 2023", "New tyres". Not specs/mileage/loan.
+   "condition_tone": "positive"|"negative"|"neutral"|null   // positive = agency serviced, warranty, accident-free; negative = accident, damage, problems
  },
  "more_cars": bool,         // customer wants to sell more than one car
  "vehicle_kind": "car"|"truck_bus"|"other_vehicle"|null,  // other_vehicle = motorbike, boat, jet ski, trailer, equipment
@@ -113,6 +117,8 @@ export function normalize(raw: any): Understanding {
       mileage_km: km && km > 0 && km < 2_000_000 && !(km >= 1990 && km <= 2035 && !/k|km/i.test(String(car.mileage_km))) ? Math.round(km) : null,
       specs: ["GCC", "Non-GCC", "Unknown"].includes(car.specs) ? car.specs : null,
       loan: car.loan === "yes" || car.loan === "no" ? car.loan : null,
+      condition_note: str(car.condition_note)?.slice(0, 200) ?? null,
+      condition_tone: ["positive", "negative", "neutral"].includes(car.condition_tone) ? car.condition_tone : null,
     },
     more_cars: bool(r.more_cars),
     vehicle_kind: ["car", "truck_bus", "other_vehicle"].includes(r.vehicle_kind) ? r.vehicle_kind : null,
