@@ -78,8 +78,19 @@ t('Open time question: after 3 pm → today or tomorrow; a time books it', () =>
 t('2 Book: picking an offered time books it, then asks the name', () => {
   const c = chat(); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } });
   const r = say(c, { visit: { time: '12:15' } });
-  assert.equal(r.outcome, 'booked'); assert.equal(c.appointment_date, '2026-11-11'); assert.match(r.reply, /confirmed for\n\nWednesday 11th of November at 12:15 pm/);
+  assert.equal(r.outcome, 'booked'); assert.equal(c.appointment_date, '2026-11-11'); assert.match(r.reply, /confirmed for\n\ntoday, Wednesday 11th of November at 12:15 pm\./); assert.match(r.reply, /contact you shortly to guide you/);
   assert.match(r.reply, /maps\.app/); assert.match(r.reply, /May I have your name for the booking\?$/);
+});
+t('Booking message: location always included (also after it was sent before); outside hours → morning', () => {
+  const c = chat({ name: 'Mar' }); say(c, {}); say(c, { car }); say(c, { questions: ['location'] });
+  say(c, { sell_timing: { stated: true, days_until: 0 } });
+  let r = say(c, { visit: { date: '2026-11-11', time: '15:00' } });
+  assert.equal(r.reply.split('\n\n').slice(0, 2).join('|'), 'Your free inspection is confirmed for|today, Wednesday 11th of November at 3 pm.');
+  assert.ok(r.reply.includes(R.LOCATION)); assert.match(r.reply, /Our team will contact you shortly to guide you\.$/);
+  const night = new Date('2026-11-11T17:30:00Z');
+  const d = chat({ name: 'N' }); say(d, {}, { now: night }); say(d, { car }, { now: night }); say(d, { sell_timing: { stated: true, days_until: 1 } }, { now: night });
+  r = say(d, { visit: { date: '2026-11-12', time: '11:00' } }, { now: night });
+  assert.match(r.reply, /tomorrow, Thursday 12th of November at 11 am/); assert.match(r.reply, /in the morning to guide you/); assert.ok(r.reply.includes(R.LOCATION));
 });
 t('2 Book: a day without a time books 12:15 (or the next free :15)', () => {
   const c = chat({ name: 'B' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 1 } });
