@@ -1,4 +1,7 @@
 import { emergencyBasicTurn } from "@/lib/emergency-basic-bot";
+import { kayaV2Turn, v2Enabled, V2_MODE } from "@/lib/kaya-v2/turn";
+import { greeting } from "@/lib/kaya-v2/replies";
+import { initialState } from "@/lib/kaya-v2/flow";
 import { saveInbound } from "@/lib/inbound";
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateConversation, updateConversation, resetConversation, getConversation } from "@/lib/supabase";
@@ -109,8 +112,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── English only ───────────────────────────────────────────────
+    // (Kaya v2 reads any language — e.g. ad texts in Arabic/Russian — and always replies in English.)
+    const useV2 = v2Enabled(phone);
     // Arabic, Cyrillic, Indian scripts, CJK, Korean → never reply in that language, ask for English
-    if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0400-\u04FF\u0900-\u0DFF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(messageText)) {
+    if (!useV2 && /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0400-\u04FF\u0900-\u0DFF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(messageText)) {
       await sendWhatsAppMessage(phone, "Sorry, I can only assist in English. Could you please continue in English?");
       return NextResponse.json({ status: "non_english" }, { status: 200 });
     }
@@ -119,14 +124,14 @@ export async function POST(req: NextRequest) {
     if (messageText.toLowerCase() === RESET_KEYWORD) {
       try {
         await resetConversation(phone);
-        const reply = "Hi, I'm Kaya, Mister Wheelz's virtual assistant. What's your name?";
+        const reply = useV2 ? greeting(new Date()) : "Hi, I'm Kaya, Mister Wheelz's virtual assistant. What's your name?";
         await sendWhatsAppMessage(phone, reply);
         // Greeting sent → next message is the name (step 1)
         await getOrCreateConversation(phone);
         await updateConversation(phone, {
           step: 1,
           phone_number: phone,
-          flow_state: { basicMode: "Emergency Chat Bot V1", basicStep: "name" },
+          flow_state: useV2 ? { ...initialState(), greeted: true, asked: { name: 1 } } : { basicMode: "Emergency Chat Bot V1", basicStep: "name" },
           last_message_at: new Date().toISOString(),
           messages: [{ role: "assistant", content: reply }],
         } as any);
@@ -189,6 +194,10 @@ export async function POST(req: NextRequest) {
       if (mediaInBurst) messageText = burst.join("\n");
     }
 
+    if (useV2) {
+      const status = await kayaV2Turn(conversation, messageText || (mediaInBurst ? "[photo]" : message.type === "location" ? "Where is your location?" : "[unsupported]"));
+      return NextResponse.json({ status, mode: V2_MODE }, { status: 200 });
+    }
     const status = await emergencyBasicTurn(conversation,
       messageText || (mediaInBurst ? "[photo]" : message.type === "location" ? "Where is your location?" : "[unsupported]"));
     return NextResponse.json({ status, mode: "Emergency Basic Bot V1" }, { status: 200 });

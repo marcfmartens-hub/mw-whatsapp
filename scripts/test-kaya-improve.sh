@@ -3,6 +3,7 @@ set -eu
 node scripts/kaya-integrity-tests.cjs
 node scripts/kaya-turn-tests.cjs
 node scripts/kaya-inbound-tests.cjs
+node scripts/kaya-v2-tests.cjs
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 ./node_modules/.bin/tsc lib/kaya-improve/config.ts lib/kaya-improve/detect.ts lib/kaya-improve/zip.ts lib/kaya-improve/events.ts lib/kaya-improve/approve.ts lib/kaya-improve/pending.ts lib/kaya-improve/all-proposals.ts --outDir "$out" --rootDir lib --module commonjs --target es2020 --esModuleInterop --resolveJsonModule --skipLibCheck
