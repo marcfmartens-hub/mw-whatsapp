@@ -151,13 +151,12 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   s.answered = s.answered || [];
   let priceNoCar = false;
   for (const q of u.questions) {
-    // Price or home visit before the car details are complete: show understanding, collect the car first,
-    // and answer it once the car is complete. Twice at most; a 3rd early push is handled as a normal objection.
+    // Price or home visit before the car details are complete: show understanding and collect the car first.
+    // Not answered later by itself: only when the customer asks again. Twice at most; a 3rd early push is a normal objection.
     if ((q === "price" || q === "home_visit") && !carComplete() && s.stage === "collect") {
       s.earlyPrice = (s.earlyPrice || 0) + 1;
       if (s.earlyPrice <= 2) {
         priceNoCar = true;
-        s.pendingQ = [...new Set([...(s.pendingQ || []), q])];
         continue;
       }
     }
@@ -171,16 +170,6 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     answers.push(R.answer(q, { year }));
   }
   if (priceNoCar) hard = false;   // car details first, then the objection
-  // Car just became complete → now answer the objection the customer raised earlier (never ignore it)
-  if (!priceNoCar && s.pendingQ?.length && carComplete() && (s.stage === "collect" || s.stage === "book")) {
-    const pend = s.pendingQ.filter((q) => !s.answered!.includes(q));
-    s.pendingQ = [];
-    for (const q of pend) {
-      s.objections[q] = Math.max(s.objections[q] || 0, 1);
-      s.answered!.push(q);
-      answers.unshift(R.answer(q as any, { year }));
-    }
-  }
   // Price AND home visit with all car details given → the team calls straight away (Marc's rule)
   const forceTeam = !priceNoCar && u.questions.includes("price") && u.questions.includes("home_visit") && carComplete();
 
