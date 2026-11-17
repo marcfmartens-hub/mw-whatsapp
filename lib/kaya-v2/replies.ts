@@ -119,7 +119,7 @@ export const CALLBACK: Record<string, string> = {
   requirement: "I understand. I'll ask our team to call you to discuss it.",
   person: "No problem, I'll ask our team to call you.",
   non_gcc: "Thanks. We don't buy every non-GCC car, so our team will check the details and contact you.",
-  later: "No problem. Our team will get in touch with you closer to the time.",
+  later: "No problem. Our team will get in touch with you to arrange an inspection day and time.",
   undecided: "No problem. Our team will follow up with you.",
   more_cars: "No problem. Please share the make, model, year and mileage of each car, and whether they're registered in your personal or company name. Our team will get back to you.",
   truck_bus: "Thanks. For trucks and buses, our team will contact you directly.",
