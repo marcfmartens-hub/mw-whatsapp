@@ -137,6 +137,13 @@ export function lowMileage(km: number, year: number, now: Date): boolean {
 export const PRICE_NEED_INFO = "I understand, and I can help you with that, but I'm going to need some information about the car first.";
 export const PRICE_NEED_INFO_AGAIN = "Sure, I just need a few more details about the car first.";
 export const SHARE_CAR = "Please share the make, model and year of the car.";
+export const CHOICE_QUESTION = "Would you like me to continue with the booking, or forward your details to the team?";
+/** First price question once the car is known: no price talk, just the options (2020+) or the book-or-team choice. */
+export const priceChoice = (year: number | null) => year && year >= 2020
+  ? `I understand. For your car we offer two options: cash on the spot, or consignment, where we sell it for you through our showroom directly to an end user. Both options can be discussed with our team after the inspection.\n\n${CHOICE_QUESTION}`
+  : CHOICE;
+export const PRICE_REPEAT =
+  "We give the final price after the inspection, once we have the complete details of the car. Any price is discussed with our team after the inspection.\n\nPlease let me know if you want to proceed with the inspection booking, or want me to forward your details for discussion with the team?";
 export const CHOICE =
   "I understand. I can help you book an appointment for a car inspection, which takes only 10–15 minutes, or I can forward your details to our team so you can discuss your car directly with them.\n\nWould you like me to continue with the booking, or forward your details to the team?";
 export const BACKOUT_AFTER_CALLBACK = "No problem. Our team will still give you a quick call, and if you change your mind you can book an inspection here anytime.";

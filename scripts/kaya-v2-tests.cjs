@@ -153,10 +153,10 @@ t('3 Callback: a later booking wish goes back to the booking track', () => {
   const c = chat({ name: 'Isaac' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, undecided: true } });
   const r = say(c, { visit: { date: '2026-11-11', time: '13:00' }, wants_booking: true }); assert.equal(r.outcome, 'booked');
 });
-t('4 Questions: price once → answer, then back to the same step', () => {
+t('Price 1st time, car 2019 or older → book-or-team choice, no price text', () => {
   const c = chat({ name: 'J' }); say(c, {}); say(c, { car: { make: 'VW', model: 'Golf', year: '2018', mileage_km: 90000 } });
   const r = say(c, { questions: ['price'] });
-  assert.match(r.reply, /final price after the inspection/); assert.match(r.reply, /GCC/); assert.notEqual(r.outcome, 'callback');
+  assert.equal(r.reply, R.CHOICE); assert.notEqual(r.outcome, 'callback');
 });
 t('4 Questions: price before any car details → ask the car first', () => {
   let c = chat(); say(c, {}); let r = say(c, { questions: ['price'] });
@@ -170,7 +170,7 @@ t('Live test 17 Nov: BMW 2020 → price early → X5 → 25k → no price text, 
   let r = say(c, { questions: ['price'] }); assert.match(r.reply, /^I understand, and I can help you with that/);
   r = say(c, { car: { model: 'X5' } }); assert.equal(r.reply, "Ok, what's the mileage?");
   r = say(c, { car: { mileage_km: 25000 } }); assert.equal(r.reply, "Great, that's very low mileage for a 2020! Is it GCC specs?");
-  r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
+  r = say(c, { questions: ['price'] }); assert.match(r.reply, /^I understand\. For your car we offer two options/);
 });
 t('Price with only the make known → understanding + collect the rest first (role-play 17 Nov)', () => {
   const c = chat(); say(c, {}); say(c, { car: { make: 'Toyota' }, wants_to_sell: true });
@@ -180,8 +180,8 @@ t('Price with only the make known → understanding + collect the rest first (ro
   r = say(c, { questions: ['price'] }); assert.match(r.reply, /^Sure, I just need a few more details/);
   r = say(c, { car: { model: 'Prado', year: '2019', mileage_km: 140000 } });
   assert.doesNotMatch(r.reply, /final price/); assert.match(r.reply, /GCC/);
-  r = say(c, { questions: ['price'] }); assert.match(r.reply, /^We give the final price after the inspection/);
   r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.CHOICE);
+  r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.PRICE_REPEAT);
 });
 t('Model not understood → examples that fit the brand', () => {
   const c = chat({ name: 'A' }); say(c, {}); say(c, { car: { make: 'Toyota', year: '2025' } });
@@ -207,7 +207,7 @@ t('Choice → booking path asks the name after booking', () => {
 });
 t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
   const c = chat({ name: 'K' }); say(c, {}); say(c, { car: { make: 'MG', model: '5', year: '2023', mileage_km: 40000 } });
-  const r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
+  const r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.priceChoice(2023)); assert.doesNotMatch(r.reply, /final price/);
 });
 t('Openers match what was given, never twice (role-play 17 Nov)', () => {
   const c = chat({ name: 'Mar' }); say(c, {});
@@ -244,16 +244,16 @@ t('4 Questions: price pushed again → no repeat, offers book or team (role-play
   const c = chat(); say(c, {}); say(c, { name: 'Mar' }); say(c, { car: { make: 'BMW', model: 'X5', year: '2020' } });
   say(c, { car: { mileage_km: 25000 } }); say(c, { car: { specs: 'GCC' } }); say(c, { car: { loan: 'no' } });
   say(c, { sell_timing: { stated: true, days_until: 0 } });
-  let r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
-  r = say(c, { questions: ['price'], hard_requirement: true });
-  assert.equal(r.reply, R.CHOICE); assert.equal(r.outcome, 'none');
+  let r = say(c, { questions: ['price'], hard_requirement: true }); assert.equal(r.reply, R.priceChoice(2020)); assert.equal(r.outcome, 'none');
+  r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.PRICE_REPEAT);
   r = say(c, { wants_person: true }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /final price|I understand/);
   assert.match(r.reply, /^Sure, I'll forward your details to our team/);
 });
 t('4 Questions: after the choice, "continue booking" goes back to the booking', () => {
-  const c = chat({ name: 'L' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 } }); say(c, { questions: ['price'] });
+  const c = chat({ name: 'L' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 } });
   let r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.CHOICE);
   r = say(c, { wants_booking: true }); assert.equal(r.outcome, 'none'); assert.match(r.reply, /Would .* suit you\?|what time can you bring the car/);
+  r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.PRICE_REPEAT);
   r = say(c, { questions: ['price'] }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /final price|book an appointment/);
 });
 t('4 Questions: an answer is never given twice', () => {
