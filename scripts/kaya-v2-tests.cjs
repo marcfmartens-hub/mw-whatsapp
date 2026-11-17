@@ -139,6 +139,13 @@ t('4 Questions: price once → answer, then back to the same step', () => {
   const r = say(c, { questions: ['price'] });
   assert.match(r.reply, /final price after the inspection/); assert.match(r.reply, /kilometres|mileage/); assert.notEqual(r.outcome, 'callback');
 });
+t('4 Questions: price before any car details → ask the car first', () => {
+  let c = chat(); say(c, {}); let r = say(c, { questions: ['price'] });
+  assert.equal(r.reply, R.PRICE_NO_CAR); assert.equal(c.flow_state.objections.price, undefined);
+  r = say(c, { car: { make: 'BMW', model: 'X5', year: '2020' } }); assert.equal(r.reply, "Nice, what's the mileage?");
+  c = chat(); r = say(c, { questions: ['price'] });
+  assert.equal(r.reply, "Good morning! I'm Kaya from Mister Wheelz 😊\n\n" + R.PRICE_NO_CAR);
+});
 t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
   const c = chat({ name: 'K' }); say(c, {}); say(c, { car: { make: 'MG', model: '5', year: '2023' } });
   const r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);

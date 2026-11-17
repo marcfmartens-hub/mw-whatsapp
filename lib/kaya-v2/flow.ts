@@ -139,7 +139,13 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   // ── 4 · Objections & questions: answer first — each answer only once ──
   let hard = u.hard_requirement;
   s.answered = s.answered || [];
+  let priceNoCar = false;
   for (const q of u.questions) {
+    // Price asked before we know the car: ask for the car first (not counted as an objection yet)
+    if (q === "price" && !k("make") && s.stage !== "booked") {
+      if (!s.answered.includes("price_no_car")) { s.answered.push("price_no_car"); priceNoCar = true; }
+      continue;
+    }
     if (q === "price" || q === "home_visit") {
       s.objections[q] = (s.objections[q] || 0) + 1;
       if (s.objections[q] >= 2) hard = true;
@@ -217,6 +223,10 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   }
 
   // ── 1 · Collect ──
+  if (s.stage === "collect" && priceNoCar && !hard && !forceTeam) {
+    s.greeted = true; s.asked.make = Math.max(s.asked.make || 0, 1);
+    return finish(join(isFirst ? `${R.salutation(now)}! I'm Kaya from Mister Wheelz 😊` : "", mediaNote, ...answers, R.PRICE_NO_CAR));
+  }
   if (s.stage === "collect") {
     if (isFirst) {
       s.greeted = true;

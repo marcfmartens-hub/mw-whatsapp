@@ -93,6 +93,8 @@ export const CALLBACK: Record<string, string> = {
   stuck: "No problem. I'll ask our team to call you so they can help you best.",
   backout: "No problem. Our team will give you a quick call, and if you change your mind you can book an inspection here anytime.",
 };
+export const PRICE_NO_CAR =
+  "I can help you with that, but I'm going to need some information about the car first.\n\nPlease share the make, model and year of the car.";
 export const CHOICE =
   "I understand. I can help you book an appointment for a car inspection, which takes only 10–15 minutes, or I can forward your details to our team so you can discuss your car directly with them.\n\nWould you like me to continue with the booking, or forward your details to the team?";
 export const BACKOUT_AFTER_CALLBACK = "No problem. Our team will still give you a quick call, and if you change your mind you can book an inspection here anytime.";
