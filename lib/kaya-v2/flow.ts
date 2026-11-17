@@ -411,6 +411,13 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       const day = nextBookableDay(now);
       const l = local(now), m = l.getUTCHours() * 60 + l.getUTCMinutes();
       const closedNote = day !== today && (dow(today) === 0 || m >= 19 * 60 || m < opensAt(today)) ? R.closedNow(day === addDays(today, 1) ? "tomorrow" : "on " + R.inspectionDay(day), opensAt(day) === 720 ? "12 pm" : "10 am") : "";
+      // First time: ask an open question ("what time can you bring the car this afternoon?"); after that, two times
+      if (!s.asked.openTime) {
+        s.asked.openTime = 1;
+        const when = day !== today ? (day === addDays(today, 1) ? "tomorrow" : "on " + R.inspectionDay(day))
+          : m < 15 * 60 ? "this afternoon" : "today or tomorrow";
+        return finish(join(...lead, closedNote, R.openTime(when)));
+      }
       return offer(lead, day, closedNote);
     }
     return askDay(lead);
