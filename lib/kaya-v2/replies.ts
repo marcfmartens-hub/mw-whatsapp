@@ -85,8 +85,16 @@ export const offerTwo = (label: string, a: string, b: string) =>
   `Would ${inspectionTime(a)} or ${inspectionTime(b)} ${label} suit you?`;
 export const confirmTentative = (date: string, time: string) =>
   `Shall I book you on ${inspectionDay(date)} at ${inspectionTime(time)}?`;
-export const booked = (date: string, time: string) =>
-  `Your free inspection is confirmed for\n\n${inspectionDay(date)} at ${inspectionTime(time)}.\n\n${LOCATION}\n\n${BOOKING_NOTE}`;
+export function booked(date: string, time: string, now: Date): string {
+  const l = new Date(+now + 4 * 3600e3), today = l.toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.parse(today + "T12:00:00Z") + 86400e3).toISOString().slice(0, 10);
+  const m = l.getUTCHours() * 60 + l.getUTCMinutes(), dow = l.getUTCDay();
+  const open = dow !== 0 && m >= (dow === 5 ? 720 : 600) && m < 1140;
+  const label = (date === today ? "today, " : date === tomorrow ? "tomorrow, " : "") + inspectionDay(date);
+  const note = !open ? "Our team will contact you in the morning to guide you."
+    : date === today ? "Our team will contact you shortly to guide you." : BOOKING_NOTE;
+  return `Your free inspection is confirmed for\n\n${label} at ${inspectionTime(time)}.\n\n${LOCATION}\n\n${note}`;
+}
 export const AFTER_BOOKING_NAME = "May I have your name for the booking?";
 export const AFTER_BOOKING_NAME_PHONE = "May I have your name and a UAE contact number for the booking?";
 export const AFTER_BOOKING_PHONE = "May I have a UAE contact number for the booking?";

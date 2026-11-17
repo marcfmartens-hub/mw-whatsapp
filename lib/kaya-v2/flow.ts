@@ -444,7 +444,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     outcome = "booked";
     const needName = !k("name"), needPhone = !isUae(ctx.phone) && !k("phone_number");
     const after = needName && needPhone ? R.AFTER_BOOKING_NAME_PHONE : needName ? R.AFTER_BOOKING_NAME : needPhone ? R.AFTER_BOOKING_PHONE : "";
-    return finish(join(...lead, R.booked(date, time), after));
+    return finish(join(...lead, R.booked(date, time, now), after));
   }
   function pick(v: Understanding["visit"]) {
     const o: any = {};
@@ -455,9 +455,13 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   function finish(reply: string): Plan {
     // Never repeat: drop any paragraph Kaya already sent in this chat (the location pin may be re-sent on request).
     const sent = new Set<string>();
-    for (const m of c.messages || []) if (m.role === "assistant") for (const para of String(m.content).split(/\n\n+/)) sent.add(para.trim());
+    // The location card has blank lines inside it, so it is kept as one block when splitting.
+    const PIN = "\u0000LOCATION\u0000";
+    const parts = (t: string) => t.split(R.LOCATION).join(PIN).split(/\n\n+/).map((p) => p.trim());
+    for (const m of c.messages || []) if (m.role === "assistant") for (const para of parts(String(m.content))) sent.add(para);
     if (reply) {
-      const kept = reply.split(/\n\n+/).map((p) => p.trim()).filter((p) => p && (!sent.has(p) || (p === R.LOCATION && (u.questions.includes("location") || outcome === "booked"))));
+      const kept = parts(reply).filter((p) => p && (!sent.has(p) || (p === PIN && (u.questions.includes("location") || outcome === "booked"))))
+        .map((p) => (p === PIN ? R.LOCATION : p));
       if (!kept.length) {
         if (s.stage !== "callback" && s.stage !== "booked") { s.stage = "collect"; return toCallback("stuck"); }
         reply = "";
