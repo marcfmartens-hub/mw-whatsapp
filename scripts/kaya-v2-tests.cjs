@@ -21,7 +21,7 @@ const U = (p = {}) => {
 };
 const chat = (extra = {}) => ({ phone: '971501234567', messages: [], ...extra });
 function say(c, u, opts = {}) {
-  const r = plan(c, U(u), { now: opts.now || WED_10AM, phone: c.phone, media: opts.media || [], textEmpty: !!opts.textEmpty, defaultTime: opts.defaultTime || (() => '12:15') });
+  const r = plan(c, U(u), { now: opts.now || WED_10AM, phone: c.phone, media: opts.media || [], textEmpty: !!opts.textEmpty, text: opts.text, defaultTime: opts.defaultTime || (() => '12:15') });
   Object.assign(c, r.updates);
   c.messages.push({ role: 'user', content: opts.text || JSON.stringify(u) });
   if (r.reply) c.messages.push({ role: 'assistant', content: r.reply });
@@ -174,8 +174,8 @@ t('Live test 17 Nov: BMW 2020 → price early → X5 → 25k → no price text, 
 });
 t('Live test 17 Nov: question while collecting never leads to a callback; callback still collects the full car', () => {
   const c = chat(); say(c, {}); say(c, {}); say(c, { wants_to_sell: true });
-  let r = say(c, { questions: ['location'] }); assert.equal(r.outcome, 'none'); assert.ok(r.reply.includes(R.LOCATION)); assert.match(r.reply, /Which brand is your car\?/);
-  r = say(c, { car: { make: 'Mercedes' } }); assert.match(r.reply, /model and year/i);
+  let r = say(c, { questions: ['location'] }); assert.equal(r.outcome, 'none'); assert.ok(r.reply.includes(R.LOCATION)); assert.doesNotMatch(r.reply, /make|brand/i);
+  r = say(c, { car: { make: 'Mercedes' } }); assert.match(r.reply, /^Nice, which model and year is it\?$/);
   r = say(c, { car: { condition_note: 'Old car but in very good condition', condition_tone: 'positive' } });
   assert.match(r.reply, /^That's good to hear\./); assert.match(c.car_conditions, /very good condition/);
   const d = chat(); say(d, {}); say(d, { wants_person: true });
@@ -183,6 +183,13 @@ t('Live test 17 Nov: question while collecting never leads to a callback; callba
   r = say(d, { car: { model: 'E-Class', year: '2012' } }); assert.match(r.reply, /mileage/i);
   r = say(d, { car: { mileage_km: 210000 } }); assert.equal(r.reply, R.CALLBACK_NAME);
   r = say(d, { name: 'Sam' }); assert.equal(r.reply, R.CALLBACK_DONE);
+});
+t('Live test 17 Nov: never ask the model a 3rd time; "E280" is the model', () => {
+  const c = chat(); say(c, {}); say(c, { car: { make: 'Mercedes', condition_note: 'Old, good condition', condition_tone: 'positive' } });
+  let r = say(c, { car: { year: '1996' } }); assert.match(r.reply, /model/i);
+  r = say(c, {}, { text: 'E280' }); assert.equal(c.model, 'E280'); assert.match(r.reply, /mileage/i);
+  const d = chat(); say(d, {}); say(d, { car: { make: 'Mercedes' } }); say(d, {}, { text: 'not sure' });
+  r = say(d, {}, { text: 'hmm' }); assert.doesNotMatch(r.reply, /model/i);
 });
 t('Price with only the make known → understanding + collect the rest first (role-play 17 Nov)', () => {
   const c = chat(); say(c, {}); say(c, { car: { make: 'Toyota' }, wants_to_sell: true });
