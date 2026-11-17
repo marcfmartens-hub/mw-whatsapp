@@ -80,6 +80,7 @@ export function inspectionTime(time: string): string {
 export const dayLabel = (date: string, today: string, tomorrow: string) =>
   date === today ? "today" : date === tomorrow ? "tomorrow (" + inspectionDay(date) + ")" : inspectionDay(date);
 
+export const openTime = (when: string) => `No problem, what time can you bring the car ${when} for a quick inspection?`;
 export const offerTwo = (label: string, a: string, b: string) =>
   `Would ${inspectionTime(a)} or ${inspectionTime(b)} ${label} suit you?`;
 export const confirmTentative = (date: string, time: string) =>

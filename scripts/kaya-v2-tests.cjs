@@ -64,8 +64,16 @@ t('1 Collect: loan only asked for 2020 or newer', () => {
 });
 t('1→2: selling now / any time → two time options', () => {
   const c = chat({ name: 'Ali' }); say(c, {}); say(c, { car });
-  const r = say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } });
-  assert.match(r.reply, /^Great! Would 12:15 pm or 3:15 pm today suit you\?/);
+  let r = say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } });
+  assert.equal(r.reply, 'No problem, what time can you bring the car this afternoon for a quick inspection?');
+  r = say(c, { visit: { flexible: true } }); assert.match(r.reply, /Would 12:15 pm or 3:15 pm today suit you\?/);
+});
+t('Open time question: after 3 pm → today or tomorrow; a time books it', () => {
+  const at4 = new Date('2026-11-11T12:00:00Z');
+  const c = chat({ name: 'Mar' }); say(c, {}, { now: at4 }); say(c, { car }, { now: at4 });
+  let r = say(c, { sell_timing: { stated: true, days_until: 0, conditional: true }, visit: { flexible: true } }, { now: at4 });
+  assert.equal(r.reply, 'No problem, what time can you bring the car today or tomorrow for a quick inspection?');
+  r = say(c, { visit: { time: '17:30' } }, { now: at4 }); assert.equal(r.outcome, 'booked'); assert.equal(c.appointment_date, '2026-11-11');
 });
 t('2 Book: picking an offered time books it, then asks the name', () => {
   const c = chat(); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } });
@@ -95,7 +103,7 @@ t('2 Book: outside opening hours → two valid times that day', () => {
 t('2 Book: closed right now → next opening day', () => {
   const c = chat({ name: 'D' }); say(c, {}, { now: FRI_9PM }); say(c, { car }, { now: FRI_9PM });
   const r = say(c, { sell_timing: { stated: true, days_until: 0 }, visit: { flexible: true } }, { now: FRI_9PM });
-  assert.match(r.reply, /closed right now, but we open again tomorrow at 10 am/); assert.match(r.reply, /tomorrow suit you/);
+  assert.match(r.reply, /closed right now, but we open again tomorrow at 10 am/); assert.match(r.reply, /what time can you bring the car tomorrow for a quick inspection\?/);
 });
 t('2 Book: "Saturday maybe" asks before booking', () => {
   const c = chat({ name: 'E' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 3 } });
@@ -183,7 +191,7 @@ t('Marc flow: objection → understanding + full car → answer → book → res
 });
 t('Choice → booking path asks the name after booking', () => {
   const c = chat(); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 } });
-  say(c, { yes_no: 'no' }); let r = say(c, { wants_booking: true }); assert.match(r.reply, /Would .* suit you\?/);
+  say(c, { yes_no: 'no' }); let r = say(c, { wants_booking: true }); assert.match(r.reply, /Would .* suit you\?|what time can you bring the car/);
   r = say(c, { visit: { time: '12:15' } }); assert.equal(r.outcome, 'booked'); assert.match(r.reply, /your name/);
 });
 t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
@@ -234,7 +242,7 @@ t('4 Questions: price pushed again → no repeat, offers book or team (role-play
 t('4 Questions: after the choice, "continue booking" goes back to the booking', () => {
   const c = chat({ name: 'L' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 } }); say(c, { questions: ['price'] });
   let r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.CHOICE);
-  r = say(c, { wants_booking: true }); assert.equal(r.outcome, 'none'); assert.match(r.reply, /Would .* suit you\?/);
+  r = say(c, { wants_booking: true }); assert.equal(r.outcome, 'none'); assert.match(r.reply, /Would .* suit you\?|what time can you bring the car/);
   r = say(c, { questions: ['price'] }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /final price|book an appointment/);
 });
 t('4 Questions: an answer is never given twice', () => {
