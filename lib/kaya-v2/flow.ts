@@ -19,7 +19,8 @@ export type V2State = {
   backoutSent?: boolean;
   openers?: string[];
   confirmGcc?: boolean;
-  earlyPrice?: number;                   // price asked before the car details were complete                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
+  earlyPrice?: number;
+  pendingQ?: string[];                   // price / home visit asked early, answered once the car is complete                   // price asked before the car details were complete                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
   mediaNoted: string[];
   greeted?: boolean;
   timingDone?: boolean;
@@ -150,11 +151,15 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   s.answered = s.answered || [];
   let priceNoCar = false;
   for (const q of u.questions) {
-    // Price asked before the car details are complete: show understanding, collect the car first.
-    // Not counted as a price objection (twice at most; a 3rd early push is treated as a normal price objection).
-    if (q === "price" && !carComplete() && s.stage === "collect") {
+    // Price or home visit before the car details are complete: show understanding, collect the car first,
+    // and answer it once the car is complete. Twice at most; a 3rd early push is handled as a normal objection.
+    if ((q === "price" || q === "home_visit") && !carComplete() && s.stage === "collect") {
       s.earlyPrice = (s.earlyPrice || 0) + 1;
-      if (s.earlyPrice <= 2) { priceNoCar = true; continue; }
+      if (s.earlyPrice <= 2) {
+        priceNoCar = true;
+        s.pendingQ = [...new Set([...(s.pendingQ || []), q])];
+        continue;
+      }
     }
     if (q === "price" || q === "home_visit") {
       s.objections[q] = (s.objections[q] || 0) + 1;
@@ -165,9 +170,19 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     if (q !== "other") s.answered.push(q);
     answers.push(R.answer(q, { year }));
   }
-  if (priceNoCar && !u.questions.includes("home_visit")) hard = false;   // car details first, then talk about price
+  if (priceNoCar) hard = false;   // car details first, then the objection
+  // Car just became complete → now answer the objection the customer raised earlier (never ignore it)
+  if (!priceNoCar && s.pendingQ?.length && carComplete() && (s.stage === "collect" || s.stage === "book")) {
+    const pend = s.pendingQ.filter((q) => !s.answered!.includes(q));
+    s.pendingQ = [];
+    for (const q of pend) {
+      s.objections[q] = Math.max(s.objections[q] || 0, 1);
+      s.answered!.push(q);
+      answers.unshift(R.answer(q as any, { year }));
+    }
+  }
   // Price AND home visit with all car details given → the team calls straight away (Marc's rule)
-  const forceTeam = u.questions.includes("price") && u.questions.includes("home_visit") && carComplete();
+  const forceTeam = !priceNoCar && u.questions.includes("price") && u.questions.includes("home_visit") && carComplete();
 
   // ── Booked: answer, handle changes, stay polite ──
   if (s.stage === "booked") {
@@ -365,6 +380,12 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     warm = entering && u.sell_timing.stated && !lead.length ? (u.sell_timing.conditional ? "Of course" : "Great") : "";
     const v = { ...(entering && s.pendingVisit ? s.pendingVisit : {}), ...pick(u.visit) } as Understanding["visit"];
     s.pendingVisit = null;
+    // Resisting the booking (a plain "no" to the day question) → offer: book, or the team
+    if (!entering && u.yes_no === "no" && !s.tentative && !v.date && !v.time && !v.flexible) {
+      if (s.choiceOffered) return toCallback("requirement", true);
+      s.choiceOffered = true; s.awaitingChoice = true;
+      return finish(join(...lead, R.CHOICE));
+    }
     // Answer to "Shall I book you on …?"
     if (s.tentative && !v.date && !v.time) {
       if (u.yes_no === "yes" || u.wants_booking) return confirm(s.tentative.date, s.tentative.time, lead);
