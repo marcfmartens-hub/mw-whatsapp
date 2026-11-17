@@ -442,10 +442,11 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
         const opens = opensAt(v.date) === 720 ? "12 pm" : "10 am";
         return finish(join(...lead, R.closedThen(label, opens), opts.length === 2 ? R.offerTwo("on " + label, opts[0], opts[1]) : `Would ${R.inspectionTime(opts[0])} suit you?`));
       }
-      if (v.tentative) { s.tentative = { date: v.date, time }; return finish(join(...lead, R.confirmTentative(v.date, time))); }
-      return confirm(v.date, time, lead);
+      if (v.tentative && !u.visit.time) { s.tentative = { date: v.date, time }; return finish(join(...lead, R.confirmTentative(v.date, time))); }
+      return confirm(v.date, time, lead, !!u.visit.time);
     }
-    if (v.flexible || u.wants_booking || (s.asked.day_time || 0) >= 1 && !u.questions.length) {
+    const immediate = u.sell_timing.stated && (u.sell_timing.days_until === 0 || u.sell_timing.conditional);
+    if (v.flexible || u.wants_booking || immediate || (s.asked.day_time || 0) >= 1 && !u.questions.length) {
       if (s.offered && (s.asked.offer || 0) >= 2) return toCallback("stuck");
       const day = nextBookableDay(now);
       const l = local(now), m = l.getUTCHours() * 60 + l.getUTCMinutes();
@@ -454,8 +455,10 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       if (!s.asked.openTime) {
         s.asked.openTime = 1;
         const when = day !== today ? (day === addDays(today, 1) ? "tomorrow" : "on " + R.inspectionDay(day))
-          : m < 15 * 60 ? "this afternoon" : "today or tomorrow";
-        return finish(join(...lead, closedNote, R.openTime(when)));
+          : m < 15 * 60 ? "today" : "today or tomorrow";
+        const q = R.openTime(when);
+        const pre = closedNote ? "" : warm || "No problem";
+        return finish(join(...lead, closedNote, pre ? `${pre}, ${q[0].toLowerCase()}${q.slice(1)}` : q));
       }
       return offer(lead, day, closedNote);
     }
@@ -477,12 +480,13 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     const line = opts.length === 2 ? R.offerTwo(label, opts[0], opts[1]) : `Would ${R.inspectionTime(opts[0])} ${label} suit you?`;
     return finish(join(...lead, note, warm && !note ? `${warm}! ${line}` : line));
   }
-  function confirm(date: string, time: string, lead: string[]): Plan {
+  function confirm(date: string, time: string, lead: string[], theirTime = false): Plan {
     s.stage = "booked"; s.status = "booked"; s.offered = null; s.tentative = null;
     updates.appointment_date = date; updates.appointment_time = time; updates.appointment = `${date} ${time}`;
     outcome = "booked";
     const needName = !k("name"), needPhone = !isUae(ctx.phone) && !k("phone_number");
     const after = needName && needPhone ? R.AFTER_BOOKING_NAME_PHONE : needName ? R.AFTER_BOOKING_NAME : needPhone ? R.AFTER_BOOKING_PHONE : "";
+    if (theirTime) return finish(join(...lead, R.bookedTheirTime(date, time, now), needName ? (needPhone ? R.AFTER_BOOKING_NAME_PHONE : "May I know your name for the booking?") : after));
     return finish(join(...lead, R.booked(date, time, now), after));
   }
   function pick(v: Understanding["visit"]) {
