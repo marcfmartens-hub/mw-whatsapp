@@ -164,6 +164,10 @@ t('Openers match what was given, never twice (role-play 17 Nov)', () => {
   r = say(c, { car: { specs: 'GCC' } }); assert.equal(r.reply, 'Alright, is there a car loan on it?');
   r = say(c, { car: { loan: 'no' } }); assert.equal(r.reply, 'Got it, when are you planning to sell it?');
 });
+t('"I want to sell my car" → "No problem, we can help you with that." + car question', () => {
+  const c = chat(); say(c, {});
+  const r = say(c, { wants_to_sell: true }); assert.equal(r.reply, 'No problem, we can help you with that.\n\nWhich car are you planning to sell? Please share the make, model and year.');
+});
 t('Very low mileage is mentioned; unknown specs get reassurance', () => {
   const c = chat({ name: 'Mar' }); say(c, {}); say(c, { car: { make: 'BMW', model: 'X6', year: '2020' } });
   let r = say(c, { car: { mileage_km: 20000 } }); assert.equal(r.reply, "Great, that's very low mileage for a 2020! Is it GCC specs?");

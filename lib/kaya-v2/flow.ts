@@ -252,6 +252,11 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     if (next === "STUCK") return toCallback("stuck");
     if (next !== "BOOK") {
       const lower = (q: string) => q[0].toLowerCase() + q.slice(1);
+      // "I want to sell my car" with no details yet → reassure once, then ask the car
+      if (!answers.length && u.wants_to_sell && !k("make") && !(s.answered || []).includes("sell_ack")) {
+        s.answered = [...(s.answered || []), "sell_ack"];
+        return finish(join(mediaNote, R.SELL_ACK, next));
+      }
       // Specs unknown → reassure instead of a flat "Alright"
       if (!answers.length && updates.specs === "Unknown") return finish(join(mediaNote, R.SPECS_UNKNOWN, next));
       // Very low mileage for its age → say so (normal is 15–20k km a year)
