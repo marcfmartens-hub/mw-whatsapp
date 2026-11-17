@@ -28,6 +28,7 @@ export type Understanding = {
   yes_no: "yes" | "no" | null;       // answer to a yes/no question Kaya just asked
   wants_booking: boolean;
   wants_person: boolean;
+  backs_out: boolean;                // "never mind", "forget it", "not interested anymore"
   questions: QuestionKey[];
   hard_requirement: boolean;         // refuses to continue without price/estimate or home visit
   change_request: "reschedule" | "cancel" | null;
@@ -40,7 +41,7 @@ export const EMPTY: Understanding = {
   more_cars: false, vehicle_kind: null, hiyaza: false, wants_to_sell: false, buyer_only: false, not_a_lead: false,
   sell_timing: { stated: false, days_until: null, undecided: false },
   visit: { date: null, time: null, part_of_day: null, flexible: false, tentative: false },
-  yes_no: null, wants_booking: false, wants_person: false, questions: [], hard_requirement: false,
+  yes_no: null, wants_booking: false, wants_person: false, backs_out: false, questions: [], hard_requirement: false,
   change_request: null, phone_number: null,
 };
 
@@ -78,8 +79,9 @@ Return ONLY this JSON object:
    "tentative": bool        // unsure: "Saturday maybe", "probably Monday"
  },
  "yes_no": "yes"|"no"|null, // only when Kaya's last message asked a yes/no question
- "wants_booking": bool,     // asks to book / come / arrange the inspection
- "wants_person": bool,      // wants a call, a human, the team, not a bot
+ "wants_booking": bool,     // asks to book / come / arrange the inspection, or picks "continue the booking" when Kaya offered booking or the team
+ "wants_person": bool,      // wants a call, a human, the team, not a bot. Also true when Kaya offered "continue the booking or forward to the team" and they pick the team ("forward it", "team", "call me")
+ "backs_out": bool,         // gives up: "never mind", "forget it", "not interested anymore", "leave it"
  "questions": [..],         // every question or objection in the message, from: ${QUESTION_KEYS.join(", ")}
                             // price = asks price, offer, estimate, valuation, "how much", or states an asking price as a demand. home_visit = asks us to come to them, home inspection, "will they come to my location", "I will not come". location = where are you / send location. hours = opening/working hours. free = "is the inspection free". how_it_works = "how does it work", "guide me through the process". other = any other question.
  "hard_requirement": bool,  // they make price/estimate or a home visit a CONDITION: "first tell me the price, otherwise no", "I will not come", "only if you come to me", or they repeat the same demand after Kaya already answered it
@@ -131,6 +133,7 @@ export function normalize(raw: any): Understanding {
     yes_no: r.yes_no === "yes" || r.yes_no === "no" ? r.yes_no : null,
     wants_booking: bool(r.wants_booking),
     wants_person: bool(r.wants_person),
+    backs_out: bool(r.backs_out),
     questions: Array.isArray(r.questions) ? [...new Set(r.questions.filter((q: any) => QUESTION_KEYS.includes(q)))] as QuestionKey[] : [],
     hard_requirement: bool(r.hard_requirement),
     change_request: r.change_request === "reschedule" || r.change_request === "cancel" ? r.change_request : null,
@@ -185,7 +188,9 @@ async function fallback(text: string, now: Date, known: Record<string, any>): Pr
   if (/how much|price|offer|estimate|valuation/i.test(text)) u.questions.push("price");
   if (/home (visit|inspection)|come to (me|my)|my location/i.test(text)) u.questions.push("home_visit");
   if (/where are you|location|address/i.test(text)) u.questions.push("location");
-  u.wants_person = /\b(call ?back|call me|human|person|agent)\b/i.test(text);
+  u.wants_person = /\b(call ?back|call me|human|person|agent|team|forward)\b/i.test(text);
+  u.wants_booking = /\b(book|booking|continue)\b/i.test(text);
+  u.backs_out = /\b(never ?mind|forget it|not interested)\b/i.test(text);
   u.wants_to_sell = /\bsell|sale\b/i.test(text) || !!u.car.make;
   return u;
 }

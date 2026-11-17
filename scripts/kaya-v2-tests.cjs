@@ -143,14 +143,44 @@ t('4 Questions: price on a 2020+ car offers cash or consignment', () => {
   const c = chat({ name: 'K' }); say(c, {}); say(c, { car: { make: 'MG', model: '5', year: '2023' } });
   const r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
 });
-t('4 Questions: price asked again → hard requirement → callback', () => {
-  const c = chat({ name: 'L' }); say(c, {}); say(c, { car }); say(c, { questions: ['price'] });
-  const r = say(c, { questions: ['price'] }); assert.equal(r.outcome, 'callback'); assert.match(r.reply, /ask our team to call you/);
+t('4 Questions: price pushed again → no repeat, offers book or team (role-play 17 Nov)', () => {
+  const c = chat(); say(c, {}); say(c, { name: 'Mar' }); say(c, { car: { make: 'BMW', model: 'X5', year: '2020' } });
+  say(c, { car: { mileage_km: 25000 } }); say(c, { car: { specs: 'GCC' } }); say(c, { car: { loan: 'no' } });
+  say(c, { sell_timing: { stated: true, days_until: 0 } });
+  let r = say(c, { questions: ['price'] }); assert.match(r.reply, /cash on the spot, or consignment/);
+  r = say(c, { questions: ['price'], hard_requirement: true });
+  assert.equal(r.reply, R.CHOICE); assert.equal(r.outcome, 'none');
+  r = say(c, { wants_person: true }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /final price/);
 });
-t('4 Questions: home visit once → branch answer + continue; "I will not come" → callback', () => {
+t('4 Questions: after the choice, "continue booking" goes back to the booking', () => {
+  const c = chat({ name: 'L' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 } }); say(c, { questions: ['price'] });
+  let r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.CHOICE);
+  r = say(c, { wants_booking: true }); assert.equal(r.outcome, 'none'); assert.match(r.reply, /Would .* suit you\?/);
+  r = say(c, { questions: ['price'] }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /final price|book an appointment/);
+});
+t('4 Questions: an answer is never given twice', () => {
+  const c = chat({ name: 'P' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 3 } });
+  say(c, { questions: ['documents'] }); const r = say(c, { questions: ['documents'] });
+  assert.doesNotMatch(r.reply, /Emirates ID/);
+});
+t('No paragraph is ever sent twice in one chat', () => {
+  const c = chat({ name: 'Q' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 0 } });
+  for (const u of [{ questions: ['free'] }, { questions: ['hours'] }, { questions: ['free', 'hours'] }, {}, { questions: ['price'] }, {}]) say(c, u);
+  const paras = c.messages.filter((m) => m.role === 'assistant').flatMap((m) => m.content.split(/\n\n+/));
+  assert.equal(paras.length, new Set(paras).size, 'repeated: ' + paras.filter((p, i) => paras.indexOf(p) !== i).join(' | '));
+});
+t('"Never mind": during booking → team follows up; after callback → one polite line', () => {
+  let c = chat({ name: 'S' }); say(c, {}); say(c, { car });
+  let r = say(c, { backs_out: true }); assert.equal(r.outcome, 'callback'); assert.match(r.reply, /change your mind/);
+  r = say(c, { backs_out: true }); assert.equal(r.reply, '');
+  c = chat({ name: 'T' }); say(c, {}); say(c, { wants_person: true });
+  r = say(c, { backs_out: true, ack_only: true }); assert.equal(r.reply, R.BACKOUT_AFTER_CALLBACK);
+});
+t('4 Questions: home visit once → branch answer + continue; pushed → choice; "I will not come" → callback', () => {
   const c = chat({ name: 'Faraz' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 3 } });
   let r = say(c, { questions: ['home_visit'] }); assert.match(r.reply, /done at our branch/); assert.match(r.reply, /Which day/); assert.equal(r.outcome, 'none');
-  r = say(c, { questions: ['home_visit'], hard_requirement: true }); assert.equal(r.outcome, 'callback');
+  r = say(c, { questions: ['home_visit'] }); assert.equal(r.reply, R.CHOICE);
+  r = say(c, { questions: ['home_visit'], hard_requirement: true }); assert.equal(r.outcome, 'callback'); assert.doesNotMatch(r.reply, /done at our branch/);
 });
 t('4 Questions: free inspection / hours / location answered, not handed off', () => {
   const c = chat({ name: 'Carla' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 5 } });

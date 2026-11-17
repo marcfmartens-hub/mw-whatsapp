@@ -13,6 +13,10 @@ export type V2State = {
   status: "collecting" | "booked" | "team_accepted" | "closed";
   asked: Record<string, number>;
   objections: Record<string, number>;
+  answered?: string[];                   // questions already answered — never answered twice
+  choiceOffered?: boolean;               // "book or forward to the team?" already asked
+  awaitingChoice?: boolean;
+  backoutSent?: boolean;
   mediaNoted: string[];
   greeted?: boolean;
   timingDone?: boolean;
@@ -131,18 +135,21 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     return finish(R.ONLY_CARS);
   }
 
-  // ── 4 · Objections & questions: answer first ──
+  // ── 4 · Objections & questions: answer first — each answer only once ──
   let hard = u.hard_requirement;
+  s.answered = s.answered || [];
   for (const q of u.questions) {
     if (q === "price" || q === "home_visit") {
       s.objections[q] = (s.objections[q] || 0) + 1;
       if (s.objections[q] >= 2) hard = true;
     }
+    if (s.answered.includes(q) && q !== "location") continue;   // already answered: never repeat (location pin may be re-sent)
     if (q === "location" && answers.includes(R.LOCATION)) continue;
+    if (q !== "other") s.answered.push(q);
     answers.push(R.answer(q, { year }));
   }
-  // Price AND home visit with all car details given → the team calls (Marc's rule)
-  if (u.questions.includes("price") && u.questions.includes("home_visit") && carComplete()) hard = true;
+  // Price AND home visit with all car details given → the team calls straight away (Marc's rule)
+  const forceTeam = u.questions.includes("price") && u.questions.includes("home_visit") && carComplete();
 
   // ── Booked: answer, handle changes, stay polite ──
   if (s.stage === "booked") {
@@ -158,9 +165,32 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     return finish(mediaNote);
   }
 
+  // ── Customer backs out ("never mind", "forget it") ──
+  if (u.backs_out && !u.wants_booking && !visitGiven) {
+    if (s.stage === "callback") {
+      if (s.backoutSent) return finish("");
+      s.backoutSent = true;
+      return finish(R.BACKOUT_AFTER_CALLBACK);
+    }
+    s.backoutSent = true;
+    return toCallback("backout");
+  }
+
+  // ── Pushed objection: offer the choice once (book, or the team) ──
+  if (s.awaitingChoice && s.stage !== "callback") {
+    s.awaitingChoice = false;
+    const wantsBook = u.wants_booking || visitGiven || u.yes_no === "yes" && !u.wants_person;
+    if (!wantsBook || hard || u.wants_person) return toCallback("requirement", true);
+    hard = false;
+  }
+  if (s.stage !== "callback" && (hard || forceTeam)) {
+    if (forceTeam || s.choiceOffered) return toCallback("requirement", true);
+    s.choiceOffered = true; s.awaitingChoice = true;
+    return finish(join(mediaNote, ...answers, R.CHOICE));
+  }
+
   // ── Triggers for 3 · Team callback ──
   if (s.stage !== "callback") {
-    if (hard) return toCallback("requirement");
     if (u.wants_person) return toCallback("person");
     if (k("specs") === "Non-GCC") return toCallback("non_gcc");
     if (u.vehicle_kind === "truck_bus") return toCallback("truck_bus");
@@ -171,7 +201,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
 
   // ── Callback stage: collect what the team needs; go back to booking if they now want to come ──
   if (s.stage === "callback") {
-    const canRebook = ["later", "undecided", "stuck", "person"].includes(String(s.reason));
+    const canRebook = ["later", "undecided", "stuck", "person", "backout"].includes(String(s.reason));
     if (canRebook && (u.wants_booking || u.visit.date || u.visit.flexible || u.visit.time) && !hard) {
       s.stage = "book"; s.status = "collecting"; s.reason = null;
       return book(answers);
@@ -264,10 +294,11 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     if (!isUae(ctx.phone) && !k("phone_number") && !s.asked.cb_phone) { s.asked.cb_phone = 1; return R.CALLBACK_PHONE; }
     return null;
   }
-  function toCallback(r: CallbackReason): Plan {
+  function toCallback(r: CallbackReason, skipAnswers = false): Plan {
+    if (skipAnswers) answers.length = 0;
     s.stage = "callback"; s.status = "team_accepted"; s.reason = r; s.greeted = true;
     outcome = "callback";
-    reason = { requirement: "Price / estimate / home visit is a must", person: "Customer asked for the team", non_gcc: "Non-GCC car", later: `Sells later — follow up ${s.followUpDate ?? ""}`, undecided: "Undecided seller", more_cars: "Several cars", truck_bus: "Truck / bus", hiyaza: "Hiyaza", buyer: "Buyer only", change: "Booking change", stuck: "Conversation stuck" }[r];
+    reason = { requirement: "Price / estimate / home visit is a must", person: "Customer asked for the team", non_gcc: "Non-GCC car", later: `Sells later — follow up ${s.followUpDate ?? ""}`, undecided: "Undecided seller", more_cars: "Several cars", truck_bus: "Truck / bus", hiyaza: "Hiyaza", buyer: "Buyer only", change: "Booking change", stuck: "Conversation stuck", backout: "Customer backed out" }[r];
     if (r === "later" && s.followUpDate) updates.car_conditions = [c.car_conditions, `Follow-up: ${s.followUpDate}`].filter(Boolean).join(" | ");
     const intro = isFirst ? `${R.salutation(now)}! I'm Kaya from Mister Wheelz 😊` : "";
     const askNext = callbackAsk();
@@ -347,11 +378,15 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   }
   function join(...parts: string[]) { return parts.filter((p) => p && p.trim()).join("\n\n"); }
   function finish(reply: string): Plan {
-    // Never send exactly the same message twice in a row: hand over instead of looping.
-    const last = [...(c.messages || [])].reverse().find((m: any) => m.role === "assistant")?.content;
-    if (reply && last && reply === last && s.stage !== "callback" && s.stage !== "booked") {
-      s.stage = "collect"; // reset so toCallback works
-      return toCallback("stuck");
+    // Never repeat: drop any paragraph Kaya already sent in this chat (the location pin may be re-sent on request).
+    const sent = new Set<string>();
+    for (const m of c.messages || []) if (m.role === "assistant") for (const para of String(m.content).split(/\n\n+/)) sent.add(para.trim());
+    if (reply) {
+      const kept = reply.split(/\n\n+/).map((p) => p.trim()).filter((p) => p && (!sent.has(p) || (p === R.LOCATION && (u.questions.includes("location") || outcome === "booked"))));
+      if (!kept.length) {
+        if (s.stage !== "callback" && s.stage !== "booked") { s.stage = "collect"; return toCallback("stuck"); }
+        reply = "";
+      } else reply = kept.join("\n\n");
     }
     updates.flow_state = { ...s, version: 1 }; // version 1 → crons (nudge, Bigin reconcile) read status
     return { reply, updates, outcome, reason, state: s };

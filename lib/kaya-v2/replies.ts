@@ -84,7 +84,11 @@ export const CALLBACK: Record<string, string> = {
   buyer: "We mainly buy cars, but I'll pass your request to our sales team and they'll contact you.",
   change: "No problem, I'll let our team know and they'll contact you to arrange it.",
   stuck: "No problem. I'll ask our team to call you so they can help you best.",
+  backout: "No problem. Our team will give you a quick call, and if you change your mind you can book an inspection here anytime.",
 };
+export const CHOICE =
+  "I understand. I can help you book an appointment for a car inspection, which takes only 10–15 minutes, or I can forward your details to our team so you can discuss your car directly with them.\n\nWould you like me to continue with the booking, or forward your details to the team?";
+export const BACKOUT_AFTER_CALLBACK = "No problem. Our team will still give you a quick call, and if you change your mind you can book an inspection here anytime.";
 export const CALLBACK_DONE = "Thank you. Our team will contact you shortly.";
 export const CALLBACK_NAME = "May I have your name for the team?";
 export const CALLBACK_PHONE = "May I have a UAE contact number for the team?";
