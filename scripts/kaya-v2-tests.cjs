@@ -92,9 +92,11 @@ t('Booking message: location always included (also after it was sent before); ou
   r = say(d, { visit: { date: '2026-11-12', time: '11:00' } }, { now: night });
   assert.match(r.reply, /tomorrow, Thursday 12th of November at 11 am/); assert.match(r.reply, /in the morning to guide you/); assert.ok(r.reply.includes(R.LOCATION));
 });
-t('2 Book: a day without a time books 12:15 (or the next free :15)', () => {
+t('2 Book: a day without a time → asks the time once; still no time → 12:15 (or the next free :15)', () => {
   const c = chat({ name: 'B' }); say(c, {}); say(c, { car }); say(c, { sell_timing: { stated: true, days_until: 1 } });
-  const r = say(c, { visit: { date: '2026-11-12' } }, { defaultTime: () => '13:15' });
+  let r = say(c, { visit: { date: '2026-11-12' } }, { defaultTime: () => '13:15' });
+  assert.equal(r.reply, 'Of course! What time can you bring the car tomorrow for a quick inspection?');
+  r = say(c, { visit: { date: '2026-11-12', flexible: true } }, { defaultTime: () => '13:15' });
   assert.equal(r.outcome, 'booked'); assert.equal(c.appointment_time, '13:15');
 });
 t('2 Book: Sunday is closed, Saturday is open', () => {
@@ -190,6 +192,14 @@ t('Live test 17 Nov: never ask the model a 3rd time; "E280" is the model', () =>
   r = say(c, {}, { text: 'E280' }); assert.equal(c.model, 'E280'); assert.match(r.reply, /mileage/i);
   const d = chat(); say(d, {}); say(d, { car: { make: 'Mercedes' } }); say(d, {}, { text: 'not sure' });
   r = say(d, {}, { text: 'hmm' }); assert.doesNotMatch(r.reply, /model/i);
+});
+t('Live test 17 Nov: "Can I come today?" → straight to booking, ask time, book with location, ask name', () => {
+  const c = chat(); say(c, {}); say(c, { car: { make: 'BMW', model: 'X5', year: '2020', mileage_km: 25000 } });
+  let r = say(c, { questions: ['price'] }); assert.equal(r.reply, R.priceChoice(2020));
+  r = say(c, { visit: { date: '2026-11-11' }, wants_booking: true });
+  assert.equal(r.reply, 'Of course! What time can you bring the car this afternoon for a quick inspection?');
+  r = say(c, { visit: { time: '14:00' } }); assert.equal(r.outcome, 'booked'); assert.equal(c.appointment_time, '14:00');
+  assert.ok(r.reply.includes(R.LOCATION)); assert.match(r.reply, /your name/); assert.doesNotMatch(r.reply, /GCC|loan/);
 });
 t('Price with only the make known → understanding + collect the rest first (role-play 17 Nov)', () => {
   const c = chat(); say(c, {}); say(c, { car: { make: 'Toyota' }, wants_to_sell: true });

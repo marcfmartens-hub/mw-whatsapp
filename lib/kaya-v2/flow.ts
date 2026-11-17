@@ -18,7 +18,8 @@ export type V2State = {
   awaitingChoice?: boolean;
   backoutSent?: boolean;
   openers?: string[];
-  lastAsk?: string | null;               // the car question Kaya asked last
+  lastAsk?: string | null;
+  askedTimeFor?: string[];               // days we already asked "what time…" for               // the car question Kaya asked last
   confirmGcc?: boolean;
   earlyPrice?: number;
   pendingQ?: string[];                   // price / home visit asked early, answered once the car is complete                   // price asked before the car details were complete                  // asked "so the car is GCC, right?"                    // openers already used ("Nice", "Ok"…) — each once per chat
@@ -289,6 +290,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       if (d != null && d > 7 && !u.visit.date) { s.followUpDate = addDays(today, d); return toCallback("later"); }
       s.timingDone = true;
     }
+    // Customer wants to come ("Can I come today?") → straight to booking; the team checks the rest at the inspection
+    if (u.wants_booking || u.visit.date || u.visit.time) { s.stage = "book"; return book(mediaNote ? [mediaNote, ...answers] : answers, true); }
     const next = nextCollect();
     if (next === "STUCK") return toCallback("stuck");
     if (next !== "BOOK") {
@@ -407,7 +410,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       if (u.yes_no === "no") { s.tentative = null; return askDay(lead); }
     }
     // Picking one of the two offered times
-    if (s.offered && !v.date && (v.time || u.yes_no === "yes")) {
+    if (s.offered && !v.date && (v.time || (u.yes_no === "yes" && s.offered.times.length))) {
       v.date = s.offered.date;
       if (!v.time) v.time = s.offered.times[0];
     }
@@ -416,6 +419,16 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
       if (dow(v.date) === 0) { s.offered = null; return finish(join(...lead, R.sundayClosed(now), R.ASK.day_time[1])); }
       if (v.date < today) v.date = nextBookableDay(now);
       let time = v.time;
+      // A day without a time → ask the time once ("What time can you bring the car this afternoon?")
+      s.askedTimeFor = s.askedTimeFor || [];
+      if (!time && !v.tentative && !s.askedTimeFor.includes(v.date) && CANDIDATES.some((t) => slotOk(v.date!, t, new Date(+now + 30 * 60e3)))) {
+        s.askedTimeFor.push(v.date);
+        s.offered = { date: v.date, times: [] };
+        const l = local(now), m = l.getUTCHours() * 60 + l.getUTCMinutes();
+        const when = v.date === today ? (m < 15 * 60 ? "this afternoon" : "today")
+          : v.date === addDays(today, 1) ? "tomorrow" : "on " + R.inspectionDay(v.date);
+        return finish(join(...lead, `Of course! What time can you bring the car ${when} for a quick inspection?`));
+      }
       if (!time) {
         const d = ctx.defaultTime?.(v.date, v.part_of_day) ?? null;
         time = d && slotOk(v.date, d, now) ? d : twoOptions(v.date, now)[0] ?? null;
