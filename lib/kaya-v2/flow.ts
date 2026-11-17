@@ -150,6 +150,7 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
   let hard = u.hard_requirement;
   s.answered = s.answered || [];
   let priceNoCar = false;
+  let priceTurn = 0;
   for (const q of u.questions) {
     // Price or home visit before the car details are complete: show understanding and collect the car first.
     // Not answered later by itself: only when the customer asks again. Twice at most; a 3rd early push is a normal objection.
@@ -160,6 +161,8 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
         continue;
       }
     }
+    // Price once the car is complete (not booked yet): handled as the book-or-team choice below, no price text
+    if (q === "price" && s.stage !== "booked") { s.objections.price = (s.objections.price || 0) + 1; priceTurn = s.objections.price; continue; }
     if (q === "price" || q === "home_visit") {
       s.objections[q] = (s.objections[q] || 0) + 1;
       if (s.objections[q] >= 2) hard = true;
@@ -196,6 +199,14 @@ export function plan(c: any, u: Understanding, ctx: Ctx): Plan {
     }
     s.backoutSent = true;
     return toCallback("backout");
+  }
+
+  // ── Price (car complete): 1st → options + book-or-team; asked again → final-price line + book-or-team; 3rd → team ──
+  if (priceTurn && s.stage !== "callback" && !forceTeam && !u.questions.includes("home_visit")) {
+    if (priceTurn >= 3) return toCallback("requirement", true);
+    s.choiceOffered = true; s.awaitingChoice = true;
+    const msg = priceTurn === 1 ? R.priceChoice(year) : R.PRICE_REPEAT;
+    return finish(join(mediaNote, ...answers, msg));
   }
 
   // ── Pushed objection: offer the choice once (book, or the team) ──
